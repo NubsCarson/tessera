@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+.DS_Store
+
+# Cargo.lock IS committed: this workspace will host binaries (origin, client),
+# and pinning the full dependency graph is the right call for reproducible,
+# auditable security tooling.
+
