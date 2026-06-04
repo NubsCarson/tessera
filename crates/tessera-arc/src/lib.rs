@@ -13,6 +13,33 @@
 //! anonymous / Tor traffic carry a cryptographic proof of good standing,
 //! instead of being judged on IP reputation.
 //!
+//! ## Example: issue once, present, verify
+//!
+//! ```
+//! use rand_core::OsRng;
+//! use tessera_arc::arc::{
+//!     create_credential_request, create_credential_response, finalize_credential,
+//!     verify_presentation, PresentationState,
+//! };
+//! use tessera_arc::keys::ServerPrivateKey;
+//!
+//! let mut rng = OsRng;
+//! let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+//! let (request_ctx, present_ctx, limit) = (b"issue/v1".as_slice(), b"origin/v1".as_slice(), 4);
+//!
+//! // Issuance: client requests, server responds, client finalizes.
+//! let (secrets, request) = create_credential_request(request_ctx, &mut rng);
+//! let response = create_credential_response(&sk, &pk, &request, &mut rng).unwrap();
+//! let credential = finalize_credential(&secrets, &pk, &request, &response).unwrap();
+//!
+//! // Presentation: each call yields a fresh, unlinkable token; the verifier
+//! // returns the rate-limiting tag iff it checks out — the source IP is never
+//! // an input.
+//! let mut state = PresentationState::new(credential, present_ctx, limit);
+//! let presentation = state.present(&mut rng).unwrap();
+//! assert!(verify_presentation(&sk, &pk, request_ctx, present_ctx, &presentation, limit).is_some());
+//! ```
+//!
 //! ## Correctness posture
 //!
 //! Everything in this crate is validated against the official test vectors in

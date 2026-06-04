@@ -15,6 +15,8 @@ rust-version = "1.74"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/NubsCarson/tessera"
 authors = ["Tessera contributors"]
+keywords = ["anonymous", "credentials", "privacy", "cryptography", "tor"]
+categories = ["cryptography", "authentication"]
 
 [workspace.dependencies]
 p256 = { version = "0.13", default-features = false, features = ["arithmetic", "hash2curve"] }
