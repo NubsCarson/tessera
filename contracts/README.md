@@ -79,7 +79,7 @@ itself is fetched, which Foundry caches).
 ```sh
 cd contracts
 forge build
-forge test          # 23 tests across 3 suites
+forge test          # 61 tests across 6 suites
 forge test -vvv     # verbose traces
 ```
 

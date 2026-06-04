@@ -28,23 +28,24 @@
 //!
 //! # Two payment modes
 //!
-//! There are **two** ways the loop gates a request, and the
-//! [`channel`]-payment one is the **real, tested default**:
+//! There are **two** ways the loop gates a request. Per
+//! [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) the **recommended
+//! default is the token (ARC) mode**; the channel mode is the optional-advanced
+//! tier (kept + tested) for when pay-as-you-go-with-refund is genuinely needed:
 //!
-//!   * **Channel mode (real, default — `DESIGN.md` §1/§2).** The **relay** is the
-//!     [`tessera_channel`] counterparty + per-request payment gate. The client
-//!     opens a channel with the relay ([`RelayGate::open`]); for **each** request
-//!     it does a real channel `spend`, sends it on the outer `CONNECT` headers,
-//!     and the relay [`verify_and_cosign`](tessera_channel::RelayerChannel::verify_and_cosign)s
-//!     it **before** forwarding a single byte (*sign-then-serve*). A bad /
-//!     replayed / over-budget spend → `402 Payment Required`, and the request
-//!     **never reaches the destination**. See the [`channel`] module for the full
-//!     protocol (how the spend rides the nested-CONNECT tunnel + the exit's role).
-//!   * **ARC-v0 mode (legacy stand-in).** [`serve`] keeps the original
-//!     credential-*blind* relay where the ARC presentation gated at the **exit**
-//!     ([`tessera_proxy`]). It is retained behind its own entry point so the
-//!     existing Phase-1 loop still works and is still tested, but the channel mode
-//!     is what the loop does for real pay-per-request.
+//!   * **Token / ARC mode (recommended default).** [`serve`] is the
+//!     credential-*blind* relay: the request carries an unlinkable, rate-limited
+//!     ARC token that is checked at the credential-gated **exit**
+//!     ([`tessera_proxy`]) — no channel, no on-chain settlement. This is the
+//!     leaner path the project recommends, proven end-to-end (`tests/loop.rs`).
+//!   * **Channel mode (optional-advanced — `DESIGN.md` §1/§2).** [`serve_channel`]
+//!     makes the **relay** the [`tessera_channel`] counterparty + per-request
+//!     payment gate: the client opens a channel ([`RelayGate::open`]) and each
+//!     request is a real channel `spend` the relay
+//!     [`verify_and_cosign`](tessera_channel::RelayerChannel::verify_and_cosign)s
+//!     **before** forwarding a byte (*sign-then-serve*); a bad / replayed /
+//!     over-budget spend → `402` and never reaches the destination. Use it only
+//!     when the heavier channel/refund/dispute machinery is actually required.
 //!
 //! Like [`tessera_proxy`], this is std-only (blocking sockets + one thread per
 //! direction), demo/example tooling — not a hardened production relay.

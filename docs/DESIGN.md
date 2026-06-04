@@ -172,7 +172,7 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
   `RefundUser`), with chain-facing sigs now **EVM-native secp256k1/`ecrecover`** (keccak digest;
   identity = the 20-byte ETH address). `contracts/ChannelRegistry.sol` (Foundry) mirrors it:
   open/cooperative-close/unilateral+challenge/slash-equivocation/refund-on-timeout, all verified by
-  `ecrecover`, **with a Rust↔Solidity cross-language vector proven on-chain** (41 forge tests; a real
+  `ecrecover`, **with a Rust↔Solidity cross-language vector proven on-chain** (61 forge tests; a real
   Rust-signed state closes a channel). **✅ M1 (relayer on-chain bond) done:** the relayer now funds
   separate slashable collateral (`fundRelayerBond`), returned on every honest close and forfeited to
   the user — together with the escrow — on provable relayer equivocation (`slashRelayerEquivocation`,
@@ -186,7 +186,7 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
   in-circuit ECDSA** (attribution stays the out-of-band secp256k1 sig). **Commitment
   reconciliation:** `tessera-channel` gains a **Poseidon(BN254)** commitment — one commitment,
   proven in `R_dec` AND bound by the court's `ecrecover` over `keccak256(zk-domain ‖ poseidon-C)`,
-  scoped to the ZK path so the cleartext 2c court stays SHA-256 + dependency-free (all 23 forge
+  scoped to the ZK path so the cleartext 2c court stays SHA-256 + dependency-free (all pre-existing forge
   tests stay green, zero regeneration; `circuits/README.md` argues why this beats putting Poseidon
   on-chain). `ChannelRegistry.cooperativeCloseZK` verifies a Groth16 proof via the generated
   `RDecVerifier.sol` and settles **without a cleartext balance in calldata**. A **pinned proof
