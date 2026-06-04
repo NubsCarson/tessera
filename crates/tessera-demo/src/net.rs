@@ -65,8 +65,8 @@ fn handle_connection(mut stream: TcpStream, guard: &OriginGuard) {
 
     // Read the request line + headers (we ignore the body; this is a GET demo).
     let mut presentation: Option<String> = None;
-    let mut line = String::new();
-    if reader.read_line(&mut line).is_err() {
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
         return;
     }
     loop {
@@ -83,6 +83,12 @@ fn handle_connection(mut stream: TcpStream, guard: &OriginGuard) {
                 presentation = Some(value.trim().to_string());
             }
         }
+    }
+
+    // Browser convenience (demo only): also accept the presentation as a `?t=`
+    // query parameter, since browsers can't easily set a custom request header.
+    if presentation.is_none() {
+        presentation = query_param(&request_line, "t");
     }
 
     let decision = guard.check(presentation.as_deref());
@@ -105,6 +111,17 @@ fn handle_connection(mut stream: TcpStream, guard: &OriginGuard) {
     );
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
+}
+
+/// Extract `?<key>=<value>` from an HTTP request line like
+/// `GET /path?t=deadbeef HTTP/1.1`. Returns the (un-decoded) value if present.
+fn query_param(request_line: &str, key: &str) -> Option<String> {
+    let target = request_line.split_whitespace().nth(1)?; // the path
+    let query = target.split_once('?')?.1;
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then(|| v.to_string())
+    })
 }
 
 /// Perform a GET over an established stream, optionally attaching a
