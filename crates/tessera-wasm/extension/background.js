@@ -34,14 +34,17 @@
 
 const RULE_ID = 1;
 // The issuer/origin that issues credentials AND that you carry them to. Must
-// also be in `host_permissions` in manifest.json. (tessera-tower-demo exposes
-// the matching `/pubkey` + `/issue` routes used below.)
-const ISSUER_BASE = "https://example.com";
-const TARGET_URL_FILTER = "||example.com/";
-// Must match the issuer/origin's configured contexts + limit.
-const REQUEST_CTX = "tessera-extension/issue/v1";
-const PRESENT_CTX = "tessera-extension/origin/v1";
-const LIMIT = 16n; // presentation budget per credential; re-issue when spent
+// also be in `host_permissions` in manifest.json. Defaults wire this to the
+// local `tessera-tower-demo` origin for the walkthrough in README.md; change
+// ISSUER_BASE / TARGET_URL_FILTER / the contexts / LIMIT to target your origin.
+const ISSUER_BASE = "http://127.0.0.1:8090";
+const TARGET_URL_FILTER = "||127.0.0.1";
+// These MUST match the origin's configured contexts + limit exactly (LIMIT
+// shapes the range proof, so a mismatch won't even verify) — here, the values
+// baked into tessera-tower-demo.
+const REQUEST_CTX = "tessera-tower-demo/issue/v1";
+const PRESENT_CTX = "tessera-tower-demo/origin/v1";
+const LIMIT = 5n; // presentation budget per credential; re-issue when spent
 
 let wasm = null;
 let credential = null; // current TesseraCredential (re-issued when budget runs out)

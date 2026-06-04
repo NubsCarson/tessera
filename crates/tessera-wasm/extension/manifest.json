@@ -10,11 +10,14 @@
     "alarms"
   ],
   "host_permissions": [
-    "https://example.com/*"
+    "http://127.0.0.1:8090/*"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "minimum_chrome_version": "121"
 }

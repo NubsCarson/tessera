@@ -4,15 +4,36 @@ A minimal MV3 extension that mints a Tessera ARC presentation in-browser (via
 the `tessera-wasm` wasm-bindgen glue) and attaches it as a `Tessera-Presentation`
 request header to outgoing requests.
 
-> **This is a scaffold.** It builds and the wasm core is tested headlessly
-> (`cargo test` over `wasm-bindgen-test-runner` + node — see the crate README),
-> but **loading it in a real browser against a live origin is the human final
-> mile** and is *not* exercised here. Two things are explicitly demo-only:
-> 1. issuance uses an **ephemeral** server key (`mint_local`), so the header
->    verifies against nothing real — wire it to a live issuer for actual use; and
-> 2. header attachment uses `declarativeNetRequest`, which cannot mint a fresh
->    presentation *per request* (see "Header attachment" below), so it is **not
->    unlinkable** as written.
+> **This is a scaffold**, but a working one: it does **real issuance** against a
+> live origin (`prepare_issuance` → POST `/issue` → `finalize`, the same flow
+> proven headlessly in `examples/node-real-issuance.cjs`), and the defaults are
+> wired to the local [`tessera-tower-demo`](../../tessera-tower-demo) origin so
+> you can see it admit you in a real browser (walkthrough below). The one honest
+> caveat that remains: header attachment uses `declarativeNetRequest`, whose rule
+> value is static, so it reuses one presentation across requests until it rotates
+> — i.e. **not unlinkable per-request** (see "Header attachment").
+
+## Local walkthrough — see it work in your browser
+
+The `pkg/` glue is already built and the defaults target `http://127.0.0.1:8090`.
+
+1. **Run the origin** (issuer + guarded `/`), in a terminal:
+   ```sh
+   cargo run --manifest-path crates/tessera-tower-demo/Cargo.toml
+   ```
+2. **Confirm raw access is blocked:** open `http://127.0.0.1:8090/` in the browser
+   → **403 Forbidden** (this is what every Tor user gets today).
+3. **Load the extension:** `chrome://extensions` → toggle **Developer mode** →
+   **Load unpacked** → select this `extension/` directory. Give it a second; open
+   the card's **"service worker"** console to watch `[tessera]` mint a credential.
+4. **Reload** `http://127.0.0.1:8090/` → **200**, body `admitted ✓ …`. Same IP,
+   same browser — admitted purely on the credential the extension attached.
+5. **Refresh again** → **403**. That's the double-spend protection working: DNR
+   replays the *same* presentation (the documented limit below); the extension
+   rotates to a fresh one on its timer (~60s), after which a load is 200 again.
+
+If step 4 stays 403: make sure the origin is running, that you reloaded after the
+service worker logged a mint, and (Chrome) that the extension shows no errors.
 
 ## Build the wasm glue
 
