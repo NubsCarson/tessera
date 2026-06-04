@@ -89,8 +89,9 @@ of the anonymity-set dynamics when ARC rides over Tor.
 - A third-party reproduces our test-vector results from the spec alone.
 - The Tor E2E demo shows a site that *blocks raw Tor* admitting a
   Tessera-credentialed request from the same exit IP.
-- A written security argument mapping our code to the unlinkability claims in
-  ARC §7 and the KVAC paper, with the gaps to a formal proof named explicitly.
+- ✅ A written security argument mapping our code to the unlinkability claims in
+  ARC §7 and the KVAC paper, with the gaps to a formal proof named explicitly —
+  [`docs/SECURITY_ARGUMENT.md`](docs/SECURITY_ARGUMENT.md).
 
 All 10 milestones are complete; the honest status is **a proven-correct ARC core
 and a runnable trust-layer demo, hardened (internally, not third-party audited)

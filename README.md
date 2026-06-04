@@ -153,6 +153,8 @@ model, per-goal guarantees, and known gaps are in
 | [`GOAL.md`](./GOAL.md) | The thesis, the 10-milestone Definition of Done (all met), and deliberately-deferred future work. |
 | [`DEMO.md`](./DEMO.md) | How to run and read the demo, including the `--tor` onion path. |
 | [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) | Trust model, per-goal guarantees, threat actors, non-goals, known weaknesses, deployment guidance. |
+| [`docs/SECURITY_ARGUMENT.md`](./docs/SECURITY_ARGUMENT.md) | Per-property argument: construction → assumption → gap to a formal proof. An auditor's map. |
+| [`docs/ROADMAP.md`](./docs/ROADMAP.md) | The post-v0 frontier — audit-readiness, deployable middleware, WASM client, upstream + PQ research. |
 | [`SECURITY.md`](./SECURITY.md) | Vulnerability disclosure policy + in/out of scope. |
 | [`docs/ARC_PROOF_VECTOR_DISCREPANCY.md`](./docs/ARC_PROOF_VECTOR_DISCREPANCY.md) | The one known upstream vector inconsistency, with full reproduction. |
 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | The contribution bar + the exact CI gate commands. |
