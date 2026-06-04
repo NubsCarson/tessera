@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "./Std.sol";
-import {ChannelRegistry} from "../src/ChannelRegistry.sol";
+import {ChannelRegistry, IRDecVerifier} from "../src/ChannelRegistry.sol";
 
 /// Functional tests for the on-chain court, each mirroring a `settlement.rs`
 /// verdict. States are signed in-test with `vm.sign` over the contract's OWN
@@ -25,7 +25,7 @@ contract ChannelRegistryTest is Test {
     uint256 constant B0 = 10 ether;
 
     function setUp() public {
-        reg = new ChannelRegistry();
+        reg = new ChannelRegistry(IRDecVerifier(address(0)));
         user = vm.addr(USER_PK);
         relayer = vm.addr(RELAYER_PK);
         mallory = vm.addr(MALLORY_PK);

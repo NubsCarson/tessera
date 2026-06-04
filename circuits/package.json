@@ -1,0 +1,15 @@
+{
+  "name": "tessera-circuits",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Tessera Phase 2b-i ZK circuits (R_dec) — Circom + snarkjs Groth16/BN254. Dev/test ceremony only; see README.md. circomlib provides the audited Poseidon template; circomlibjs is used only by poseidon_ref.mjs to cross-check the Rust light-poseidon output.",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "build": "bash build.sh",
+    "poseidon-ref": "node poseidon_ref.mjs"
+  },
+  "dependencies": {
+    "circomlib": "2.0.5",
+    "circomlibjs": "0.1.7"
+  }
+}

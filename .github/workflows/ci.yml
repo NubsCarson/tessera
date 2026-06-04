@@ -156,9 +156,15 @@ jobs:
     # project (NOT a Cargo crate). Built/tested here on its own, like the wasm
     # and tower-e2e jobs. It is DEPENDENCY-FREE: no `forge install`, no git
     # submodule, no `lib/` — the test harness is vendored in `contracts/test/
-    # Std.sol`, so only `solc` itself is fetched (by the Foundry toolchain). One
-    # of the tests pins a REAL Rust-signed state (the cross-language vector) and
-    # verifies it via the contract's `ecrecover` path.
+    # Std.sol`, so only `solc` itself is fetched (by the Foundry toolchain).
+    #
+    # Two cross-language proofs run here, NEITHER needing external tooling:
+    #   * CrossLanguageVector.t.sol pins a REAL Rust-signed state and verifies it
+    #     via the contract's `ecrecover` path (Phase 2c).
+    #   * RDecVerifier.t.sol pins a REAL R_dec Groth16 proof (generated locally by
+    #     circuits/build.sh via circom+snarkjs) and verifies it on-chain through
+    #     the committed RDecVerifier.sol (Phase 2b-i). CI needs NO circom/snarkjs —
+    #     only the committed verifier + the pinned proof vector.
     defaults:
       run:
         working-directory: contracts
@@ -174,7 +180,7 @@ jobs:
       - name: forge build
         run: forge build
 
-      - name: forge test (incl. the Rust->Solidity cross-language vector)
+      - name: forge test (Rust->Solidity sig vector + the pinned R_dec ZK proof)
         run: forge test -vv
 
   fuzz:

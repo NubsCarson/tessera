@@ -173,13 +173,23 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
   identity = the 20-byte ETH address). `contracts/ChannelRegistry.sol` (Foundry) mirrors it:
   open/cooperative-close/unilateral+challenge/slash-equivocation/refund-on-timeout, all verified by
   `ecrecover`, **with a Rust↔Solidity cross-language vector proven on-chain** (23 forge tests; a real
-  Rust-signed state closes a channel). **2b DECIDED, not yet built:** ZK balance-privacy =
-  **Circom + snarkjs Groth16/BN254** — reuse the audited Tornado-Nova pool for funding + a tiny new
-  `R_dec` decrement circuit (~2–5k constraints; **range-check `B_i`/`cost`/`B_{i+1}` all three** — the
-  money-mint footgun; **bind `chan_id ↔ K_chan`**; **no in-circuit ECDSA** — attribution is the
-  out-of-band secp256k1 sig). *Rejected* arkworks (phantom one-language win + an unaudited export SPOF)
-  and halo2 (can't reuse the audited pool; heavier/unaudited EVM verifier). Honest cost: a Circom/JS
-  toolchain + a per-circuit phase-2 ceremony ×2. **Then:** the `ShieldedPool` (unlinkable funding,
+  Rust-signed state closes a channel). **✅ 2b-i (R_dec + ZK settlement) done:**
+  **Circom + snarkjs Groth16/BN254**. `circuits/R_dec.circom` (~3.4k constraints) proves the
+  decrement in ZK — two **Poseidon** commitments (seq++ structural), `B_{i+1}+cost===B_i`,
+  **64-bit range checks on `B_i`/`cost`/`B_{i+1}` all three** (the money-mint footgun), the
+  freshness tag, the per-epoch rate nullifier, and the **`chan_id`↔`K_chan`** binding; **no
+  in-circuit ECDSA** (attribution stays the out-of-band secp256k1 sig). **Commitment
+  reconciliation:** `tessera-channel` gains a **Poseidon(BN254)** commitment — one commitment,
+  proven in `R_dec` AND bound by the court's `ecrecover` over `keccak256(zk-domain ‖ poseidon-C)`,
+  scoped to the ZK path so the cleartext 2c court stays SHA-256 + dependency-free (all 23 forge
+  tests stay green, zero regeneration; `circuits/README.md` argues why this beats putting Poseidon
+  on-chain). `ChannelRegistry.cooperativeCloseZK` verifies a Groth16 proof via the generated
+  `RDecVerifier.sol` and settles **without a cleartext balance in calldata**. A **pinned proof
+  vector is verified on-chain in CI** (no circom/snarkjs needed). *Rejected* arkworks and halo2 (as
+  before). **Honest caveats:** does NOT hide the balance from the relayer (it knows it by
+  construction); the private payout split needs the shielded pool; the dev ceremony is **single-party
+  TEST-ONLY** (a real multi-party phase-2 ceremony is required, not faked). Funding-unlinkability
+  is the next increment. **Then:** the `ShieldedPool` (unlinkable funding,
   Solana→EVM port; reuse `cloaksdk`/`privacy-cash`) → Spilman watchtower → relayer node →
   Sybil/credential (pay + PoP).
 - **Phase 3 — Climb to ceiling.** Mode-switched PQ transport · coherent-persona fingerprint stack ·

@@ -53,6 +53,27 @@ The pre-1.0 development line. **Research-grade and unaudited** — see
   (Solidity) both pin it, and the contract **recovers the same Ethereum address
   via `ecrecover`** from the identical bytes — i.e. a Rust-signed state verifies
   on-chain unchanged.
+- `circuits/` + ZK settlement path (**Phase 2b-i**) — the `R_dec.circom`
+  decrement circuit (Circom + snarkjs **Groth16/BN254**, ~3.4k constraints):
+  proves a monotone-decrementing Spilman transition in zero knowledge — the two
+  **Poseidon** commitments (seq++ structural), `B_next + cost === B_i`, **64-bit
+  range checks on `B_i`/`cost`/`B_next` (all three — the money-mint footgun)**,
+  the freshness tag, the per-epoch rate nullifier, and the **`chan_id ↔ K_chan`**
+  binding. **No in-circuit ECDSA** (attribution stays the out-of-band secp256k1
+  sig). `tessera-channel` gains a **Poseidon (BN254) commitment** (`light-poseidon`
+  `new_circom`, byte-identical to circomlib/circomlibjs — pinned by a Rust
+  known-answer test) + a ZK-path signed digest `keccak256(zk-domain ‖ poseidon C)`.
+  `ChannelRegistry.cooperativeCloseZK` verifies a Groth16 proof via the generated
+  `RDecVerifier.sol` and binds the **same single Poseidon commitment** with
+  `ecrecover` — settling **without any cleartext balance in calldata** (on-chain
+  settlement privacy). **The ZK cross-language proof:** `examples/rdec_vector.rs`
+  emits the witness + a real signed state; `circuits/build.sh` (circom→snarkjs)
+  generates a proof; the proof + public signals are **pinned** in
+  `contracts/test/RDecVerifier.t.sol` and **verified on-chain in CI without
+  circom/snarkjs**. Honest scope: does NOT hide the balance from the relayer (it
+  knows it by construction); the private payout split needs the shielded pool
+  (a later increment); the trusted setup is **single-party TEST-ONLY** (a real
+  multi-party ceremony is required and is not faked). See `circuits/README.md`.
 
 ### Changed
 - **`tessera-channel` chain-facing signatures: P-256 → EVM-native secp256k1**

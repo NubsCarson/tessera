@@ -38,6 +38,13 @@ elliptic-curve = { version = "0.13", default-features = false, features = ["hash
 crypto-bigint = { version = "0.5", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 sha3 = { version = "0.10", default-features = false }
+# Poseidon over BN254 Fr for the Phase 2b-i ZK commitment (tessera-channel). The
+# version pins are load-bearing for the MSRV-1.74 gate: ark-* 0.5 requires rustc
+# 1.75, so we hold ark at 0.4 and light-poseidon at the 0.2.x line that targets
+# ark 0.4. `new_circom(n)` matches circomlib `Poseidon(n)` byte-for-byte.
+light-poseidon = { version = "=0.2.0", default-features = false }
+ark-bn254 = { version = "0.4", default-features = false }
+ark-ff = { version = "0.4", default-features = false }
 subtle = { version = "2.5", default-features = false }
 zeroize = { version = "1", default-features = false }
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }

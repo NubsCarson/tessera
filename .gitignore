@@ -31,3 +31,16 @@
 /contracts/lib
 /contracts/broadcast
 
+# circom / snarkjs build + dev-ceremony outputs (circuits/). Large, regenerable,
+# and TEST-ONLY (the ceremony is single-party — see circuits/README.md). The
+# COMMITTED artifacts are: R_dec.circom, build.sh, fixup_verifier.py, the helper
+# .mjs scripts, the generated contracts/src/RDecVerifier.sol, and the PINNED
+# proof vector hard-coded in contracts/test/RDecVerifier.t.sol — so CI verifies
+# the proof on-chain WITHOUT circom/snarkjs. Everything below is build scratch.
+/circuits/build
+/circuits/node_modules
+/circuits/package-lock.json
+*.ptau
+*.zkey
+*.wtns
+

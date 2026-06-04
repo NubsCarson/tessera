@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "./Std.sol";
-import {ChannelRegistry} from "../src/ChannelRegistry.sol";
+import {ChannelRegistry, IRDecVerifier} from "../src/ChannelRegistry.sol";
 
 /// A malicious "user" contract that, on receiving its refund, tries to reenter
 /// the registry to drain it a second time. The registry's `nonReentrant` guard
@@ -38,7 +38,7 @@ contract ReentrancyTest is Test {
     uint256 constant B0 = 5 ether;
 
     function setUp() public {
-        reg = new ChannelRegistry();
+        reg = new ChannelRegistry(IRDecVerifier(address(0)));
         relayer = vm.addr(RELAYER_PK);
         attacker = new ReentrantUser();
         vm.deal(address(this), 100 ether);

@@ -147,6 +147,7 @@
 #![forbid(unsafe_code)]
 
 pub mod crypto;
+pub mod poseidon;
 pub mod relay;
 pub mod settlement;
 pub mod state;

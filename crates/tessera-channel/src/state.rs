@@ -17,6 +17,7 @@
 //! `seq` only goes up, by construction of [`ChannelState::spend`].
 
 use crate::crypto::{h, keccak_domain, EthDigest, Hash, Sig, VerifyingKey};
+use crate::poseidon::{self, Felt};
 
 /// Domain string for the state commitment `S_i` (SHA-256).
 const STATE_DOMAIN: &[u8] = b"tessera-channel/state/v1";
@@ -26,6 +27,17 @@ const STATE_DOMAIN: &[u8] = b"tessera-channel/state/v1";
 /// (`sig_relayer`) sign recoverably and that the on-chain `ChannelRegistry`
 /// court feeds to `ecrecover`. Keep this string + layout identical in Solidity.
 const STATE_SIG_DOMAIN: &[u8] = b"tessera-channel/state-sig/v1";
+
+/// Domain string for the **ZK-path** signed digest (Phase 2b-i).
+///
+/// Deliberately **distinct** from [`STATE_SIG_DOMAIN`] so a cleartext-path
+/// signature can never be cross-replayed as a ZK-path signature (and vice
+/// versa). The ZK close binds the **Poseidon** commitment instead of the
+/// SHA-256 one: `keccak256(len || ZK_STATE_SIG_DOMAIN || poseidon_commitment)`.
+/// The on-chain `ChannelRegistry.cooperativeCloseZK` reconstructs the identical
+/// bytes and feeds them to `ecrecover` — so the *same single Poseidon commitment*
+/// that `R_dec` proves is the one the court's secp256k1 check binds.
+const ZK_STATE_SIG_DOMAIN: &[u8] = b"tessera-channel/zk-state-sig/v1";
 
 /// A channel identifier. In the full design this is the pool-derived id the
 /// genesis state is opened under; here it is an opaque 32-byte tag.
@@ -115,6 +127,32 @@ impl ChannelState {
     /// `keccak256(abi.encodePacked(uint64(domain.length), domain, commitment))`.
     pub fn state_digest(&self) -> EthDigest {
         keccak_domain(STATE_SIG_DOMAIN, &self.commitment())
+    }
+
+    /// The **Poseidon** commitment `C = Poseidon(chan_id, balance, seq, salt)`
+    /// over BN254 `Fr` — the single commitment the Phase 2b-i `R_dec` circuit
+    /// proves and the ZK on-chain court binds (see [`crate::poseidon`]).
+    ///
+    /// Returned as the canonical 32-byte big-endian field element (always `< r`).
+    /// `chan_id`/`salt` are reduced mod `r`; `balance`/`seq` are `u64 < r`.
+    /// This is byte-identical to what the Circom circuit and snarkjs witness
+    /// compute, which is the property the cross-language proof vector pins.
+    pub fn poseidon_commitment(&self) -> Felt {
+        let fe = poseidon::state_commitment(&self.chan_id, self.balance, self.seq, &self.salt);
+        poseidon::fe_to_be_bytes(&fe)
+    }
+
+    /// The **ZK-path chain-facing signed digest**:
+    /// `keccak256(len(ZK_STATE_SIG_DOMAIN) || ZK_STATE_SIG_DOMAIN || poseidon_commitment)`.
+    ///
+    /// This is what the user signs (recoverably) for a ZK cooperative close, and
+    /// what `ChannelRegistry.cooperativeCloseZK` reconstructs for `ecrecover`. It
+    /// binds the **Poseidon** commitment — so the one commitment `R_dec` proves
+    /// is also the one the court's secp256k1 signature check attributes to the
+    /// user. The domain differs from [`state_digest`](Self::state_digest) so the
+    /// two signing paths can never be confused.
+    pub fn zk_state_digest(&self) -> EthDigest {
+        keccak_domain(ZK_STATE_SIG_DOMAIN, &self.poseidon_commitment())
     }
 
     /// Produce the next state spending `cost`: `balance -= cost`, `seq += 1`,

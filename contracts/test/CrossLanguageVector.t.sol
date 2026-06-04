@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "./Std.sol";
-import {ChannelRegistry} from "../src/ChannelRegistry.sol";
+import {ChannelRegistry, IRDecVerifier} from "../src/ChannelRegistry.sol";
 
 /// THE PROOF (Phase 2c). A **real** signed channel state produced by the Rust
 /// `tessera-channel` crate — minted from a fixed key in
@@ -42,7 +42,7 @@ contract CrossLanguageVectorTest is Test {
     // ===========================================================
 
     function setUp() public {
-        reg = new ChannelRegistry();
+        reg = new ChannelRegistry(IRDecVerifier(address(0)));
     }
 
     function _vectorState() internal pure returns (ChannelRegistry.State memory) {
