@@ -5,8 +5,9 @@
 //! (committing to `x0` under both generators) is what gives ARC its issuance
 //! unlinkability property (spec §7.2).
 
-use crate::group::{self, generator_g, generator_h};
+use crate::group::{self, generator_g, generator_h, random_scalar};
 use p256::{ProjectivePoint, Scalar};
+use rand_core::RngCore;
 
 /// `ServerPrivateKey` (spec §4.1).
 #[derive(Debug, Clone)]
@@ -26,6 +27,18 @@ pub struct ServerPublicKey {
 }
 
 impl ServerPrivateKey {
+    /// `SetupServer()` (spec §4.1): sample a fresh server key pair from a CSPRNG.
+    pub fn setup<R: RngCore + ?Sized>(rng: &mut R) -> (Self, ServerPublicKey) {
+        let sk = Self::from_scalars(
+            random_scalar(rng),
+            random_scalar(rng),
+            random_scalar(rng),
+            random_scalar(rng),
+        );
+        let pk = sk.public_key();
+        (sk, pk)
+    }
+
     /// Construct a private key from its four scalar components.
     ///
     /// (A randomized `SetupServer()` constructor will be added once the
