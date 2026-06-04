@@ -39,7 +39,7 @@
 | S4 | Property-based settlement suite | ✅ | `519da9a` |
 | S5 | Foundry court invariant + interaction-matrix fuzz (128k calls) | ✅ | `74b3acd` |
 | S7 | RDecVerifier malformed-proof negative tests | ✅ | (this commit) |
-| S6 | Wire-codec fuzz harnesses (every `from_bytes`) | ⬜ | |
+| S6 | Wire-codec fuzz harnesses (relay header decoders) | ✅ | (this commit) |
 | S1 | Cross-layer epoch-clock authority spec | ⬜ | |
 | S2 | Cross-epoch nullifier-clash / replay integration test | ⬜ | |
 | S3 | Abuse/DoS model beyond rate-limit (+ bounded buffers) | ⬜ | |

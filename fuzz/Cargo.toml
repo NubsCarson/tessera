@@ -12,6 +12,8 @@ libfuzzer-sys = "0.4"
 hex = "0.4"
 tessera-arc = { path = "../crates/tessera-arc" }
 tessera-origin = { path = "../crates/tessera-origin" }
+# For S6: fuzz the relay's outer-header channel decoders (untrusted wire input).
+tessera-relay = { path = "../crates/tessera-relay" }
 
 # A separate, nightly-only workspace so it doesn't perturb the main build.
 [workspace]
@@ -50,6 +52,13 @@ bench = false
 [[bin]]
 name = "origin_guard_check"
 path = "fuzz_targets/origin_guard_check.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "channel_wire"
+path = "fuzz_targets/channel_wire.rs"
 test = false
 doc = false
 bench = false
