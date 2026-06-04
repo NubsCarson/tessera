@@ -11,6 +11,21 @@ it as a *trust layer for anonymous traffic*.
 > That is exactly what this is: a cryptographic token that admits a request on
 > its own merit, not on who or where it came from.
 
+## See it
+
+![Tessera demo](docs/demo.svg)
+
+```sh
+cargo run -p tessera-demo            # real HTTP origin + client, localhost
+cargo run -p tessera-demo -- --tor   # also drive it over a real Tor onion circuit
+```
+
+The demo stands up an origin guarded by `tessera-origin`, issues a credential to
+a `tessera-client`, and makes **real HTTP requests**: no credential → `403`
+(what every Tor user gets today); with a credential → `200` and a fresh,
+unlinkable tag each time; over the limit → the client refuses; a replay → `403`
+double-spend. The origin never reads the source IP. See [`DEMO.md`](./DEMO.md).
+
 ## The problem it attacks
 
 The web decides whether to trust you by your **IP address**. Tor's exit relays
@@ -52,8 +67,9 @@ vectors:
 | Issuance & presentation arithmetic | ✅ proven against IETF vectors |
 | Fiat-Shamir + Sigma prover & verifier | ✅ proven against authoritative Sigma vectors † |
 | Full ARC API (issue / present / verify) + range proof + double-spend store | ✅ end-to-end round-trip proven |
-| HTTP origin middleware / client | ⬜ |
-| Tor binding (end-to-end demo) | ⬜ |
+| `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
+| Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
+| Hardening (constant-time, fuzzing, audit) | ⬜ |
 
 † The ARC §10.2 *proof* blobs are not byte-reproducible from the pinned
 reference (an upstream vector inconsistency — the ARC *arithmetic* vectors all

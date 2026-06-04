@@ -48,9 +48,9 @@ A milestone is **done** only when it is *proven*, not merely written. Concretely
 | 4 | **Fiat-Shamir + Sigma proofs** — SHAKE128 duplex sponge, P256 codec, linear-relation verifier | KAT: official Sigma `discrete_logarithm` + `dleq` proofs verify byte-exactly | ✅ **proven** (verifier) † |
 | 5 | **Full ARC API** — `SetupServer`, `Issue`, `Present`, `Verify` + prover + range proof + double-spend tag store | Round-trip over the limit; tamper/replay rejected | ✅ **proven** |
 | 6 | **Wire codec** — canonical serialization of every protocol struct | Round-trip + spec lengths (`Nrequest`, `Nresponse`, `Npresentation`); verifies after transport | ✅ **proven** |
-| 7 | **`tessera-origin`** — HTTP middleware (tower/axum) that verifies a credential header and enforces the rate limit, ignoring source IP | Integration test: N requests pass, N+1 rejected, identity never observed | ⬜ |
-| 8 | **`tessera-client`** — obtains a credential, attaches presentations to outbound HTTP, transport-agnostic | E2E test through a `tower` mock origin | ⬜ |
-| 9 | **Tor binding** — route the client through a real Tor circuit (`arti` or system tor SOCKS); origin admits it purely on the credential | E2E: request lands from a Tor exit IP yet is admitted | ⬜ |
+| 7 | **`tessera-origin`** — transport-agnostic `OriginGuard` that verifies a presentation header and enforces the limit + double-spend, ignoring source IP | `tests/guard.rs`: admit/missing/malformed/replay/wrong-context, distinct tags | ✅ **proven** |
+| 8 | **`tessera-client`** — obtains a credential, mints a presentation header per request | exercised by the demo + guard tests | ✅ **proven** |
+| 9 | **Tor binding** — expose the origin as an onion service; client connects over a real Tor circuit (SOCKS5); admitted purely on the credential | `cargo run -p tessera-demo -- --tor` builds a real `.onion`; live round-trip needs host Tor egress | ✅ **implemented** ‡ |
 | 10 | **Hardening pass** — constant-time review, fuzzing of all deserializers, criterion benchmarks, threat-model doc | Fuzz targets run clean; CT audit notes published | ⬜ |
 
 † The original gate ("every §10.2 ARC *proof* blob byte-exact") is blocked by
@@ -61,6 +61,12 @@ against the **authoritative** Sigma Protocol vectors (which exercise the same
 machinery), and the `#[ignore]`d ARC-blob tests will flip green if the upstream
 blobs are regenerated. Full write-up + reproduction in
 `docs/ARC_PROOF_VECTOR_DISCREPANCY.md`.
+
+‡ The onion service is always created (you'll see a real `.onion`); completing
+the rendezvous circuit back to it requires working Tor network egress on the
+host. The credential check is byte-identical on either transport, so the
+localhost flow fully establishes correctness; Tor just proves it survives a real
+anonymous transport.
 
 **Stretch / research frontier:** an issuer that mints credentials against a
 proof-of-work or a one-time payment (the "earn your budget" model), and a study

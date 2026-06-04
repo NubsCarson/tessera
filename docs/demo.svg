@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="540" viewBox="0 0 780 540" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
+  <!-- Tokyo Night Storm -->
+  <rect width="780" height="540" rx="12" fill="#24283b"/>
+  <rect width="780" height="36" rx="12" fill="#1f2335"/>
+  <rect y="24" width="780" height="12" fill="#1f2335"/>
+  <circle cx="22" cy="18" r="6" fill="#f7768e"/>
+  <circle cx="44" cy="18" r="6" fill="#e0af68"/>
+  <circle cx="66" cy="18" r="6" fill="#9ece6a"/>
+  <text x="390" y="23" fill="#565f89" text-anchor="middle" font-size="13">tessera-demo</text>
+
+  <g>
+    <text x="24" y="72" fill="#bb9af7">────────────────────────────────────────────────────────</text>
+    <text x="24" y="98"><tspan fill="#7dcfff" font-weight="bold">TESSERA</tspan><tspan fill="#565f89">   anonymous credentials as a trust layer for the web</tspan></text>
+    <text x="24" y="120" fill="#c0caf5">admit a request on what it can prove — not on who, or where, it is</text>
+    <text x="24" y="142" fill="#bb9af7">────────────────────────────────────────────────────────</text>
+
+    <text x="24" y="178"><tspan fill="#7aa2f7">▸ </tspan><tspan fill="#c0caf5" font-weight="bold">Origin is live</tspan><tspan fill="#565f89">  ·  it will NEVER inspect your IP address</tspan></text>
+
+    <text x="24" y="214"><tspan fill="#bb9af7">■ </tspan><tspan fill="#bb9af7" font-weight="bold">What every Tor user gets today</tspan></text>
+    <text x="40" y="240"><tspan fill="#f7768e">✗ </tspan><tspan fill="#c0caf5">anonymous request, no credential</tspan><tspan fill="#f7768e">        403  blocked</tspan></text>
+
+    <text x="24" y="282"><tspan fill="#bb9af7">■ </tspan><tspan fill="#bb9af7" font-weight="bold">The same anonymous client, now carrying a credential</tspan></text>
+    <text x="40" y="308"><tspan fill="#9ece6a">✓ </tspan><tspan fill="#c0caf5">request #1  ·  tag 037f4ad07cef…</tspan><tspan fill="#9ece6a">   200  admitted</tspan></text>
+    <text x="40" y="332"><tspan fill="#9ece6a">✓ </tspan><tspan fill="#c0caf5">request #2  ·  tag 039431d258be…</tspan><tspan fill="#9ece6a">   200  admitted</tspan></text>
+    <text x="40" y="356"><tspan fill="#9ece6a">✓ </tspan><tspan fill="#c0caf5">request #3  ·  tag 0368344407f1…</tspan><tspan fill="#9ece6a">   200  admitted</tspan></text>
+    <text x="40" y="378" fill="#565f89">distinct, unlinkable tag every time — the server can't correlate them</text>
+
+    <text x="24" y="420"><tspan fill="#bb9af7">■ </tspan><tspan fill="#bb9af7" font-weight="bold">Abuse is cryptographically bounded</tspan></text>
+    <text x="40" y="446"><tspan fill="#e0af68">· </tspan><tspan fill="#c0caf5">request #4 over the limit</tspan><tspan fill="#565f89">   client refuses to over-present</tspan></text>
+    <text x="40" y="470"><tspan fill="#f7768e">✗ </tspan><tspan fill="#c0caf5">replay of request #1</tspan><tspan fill="#f7768e">       403  double-spend</tspan></text>
+
+    <text x="24" y="510"><tspan fill="#9ece6a">✓ </tspan><tspan fill="#c0caf5" font-weight="bold">Every decision came from the credential. The IP was never read.</tspan></text>
+  </g>
+</svg>
