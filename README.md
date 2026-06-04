@@ -67,6 +67,20 @@ This is the missing adapter between Privacy-Pass-style anonymous credentials
 and anonymity networks — see [`GOAL.md`](./GOAL.md) for the full thesis and
 roadmap.
 
+## Crates
+
+A Cargo workspace of six crates — a verifiable crypto core plus the tooling
+around it:
+
+| Crate | What it is |
+|-------|-----------|
+| [`tessera-arc`](./crates/tessera-arc) | The cryptographic core: ARC over P-256 — group/hashing, issuance, presentation + integrated range proof, the SHAKE128 Fiat-Shamir / Sigma proofs, wire serialization, and the double-spend tag store. Proven against the IETF test vectors. |
+| [`tessera-issuer`](./crates/tessera-issuer) | Proof-of-work **issuance gate** ("earn your budget") — makes minting a credential cost CPU. A cost knob, not strong Sybil resistance. |
+| [`tessera-origin`](./crates/tessera-origin) | Server-side `OriginGuard`: admit a request on a valid, in-budget, unspent presentation — **never** on the source IP. Transport-agnostic. |
+| [`tessera-client`](./crates/tessera-client) | Holds a credential and mints one fresh, unlinkable presentation per request. |
+| [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site (the Anthropic API included), optionally over Tor. |
+| [`tessera-demo`](./crates/tessera-demo) | The runnable end-to-end demo: narrated CLI, a `--serve` browser hub, and a `--tor` onion-service path. |
+
 ## Standards
 
 Tessera tracks three IETF drafts and is validated against their official test
@@ -129,14 +143,37 @@ To report a vulnerability, see [`SECURITY.md`](./SECURITY.md). The full trust
 model, per-goal guarantees, and known gaps are in
 [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md).
 
-## Build
+## Documentation
 
-```
-cargo test --workspace
-cargo clippy --all-targets -- -D warnings
-```
+| Doc | What's in it |
+|-----|--------------|
+| [`GOAL.md`](./GOAL.md) | The thesis, the 10-milestone Definition of Done (all met), and deliberately-deferred future work. |
+| [`DEMO.md`](./DEMO.md) | How to run and read the demo, including the `--tor` onion path. |
+| [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) | Trust model, per-goal guarantees, threat actors, non-goals, known weaknesses, deployment guidance. |
+| [`SECURITY.md`](./SECURITY.md) | Vulnerability disclosure policy + in/out of scope. |
+| [`docs/ARC_PROOF_VECTOR_DISCREPANCY.md`](./docs/ARC_PROOF_VECTOR_DISCREPANCY.md) | The one known upstream vector inconsistency, with full reproduction. |
+| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | The contribution bar + the exact CI gate commands. |
+| [`CHANGELOG.md`](./CHANGELOG.md) | Notable changes. |
 
-Requires a stable Rust toolchain (1.74+).
+## Build & run
+
+Requires a stable Rust toolchain (MSRV **1.74**).
+
+```sh
+# verify — the same gates CI runs
+cargo test --workspace --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo fmt --all -- --check
+
+# run it
+cargo run -p tessera-demo             # narrated end-to-end demo
+cargo run -p tessera-demo -- --serve  # browser hub at http://127.0.0.1:8088 (auto-opens)
+cargo run -p tessera-demo -- --tor    # also drive a real Tor onion circuit
+cargo run -p tessera-proxy            # credential-gated CONNECT proxy (Claude over Tor)
+
+# fuzz — nightly + `cargo install cargo-fuzz`
+cargo +nightly fuzz run wire_from_bytes -- -max_total_time=30
+```
 
 ## License
 
