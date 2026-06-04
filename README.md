@@ -50,8 +50,8 @@ vectors:
 | P-256 group / hashing / serialization | ✅ proven against IETF vectors |
 | Server key generation | ✅ proven against IETF vectors |
 | Issuance & presentation arithmetic | ✅ proven against IETF vectors |
-| Fiat-Shamir + Sigma verifier | ✅ proven against authoritative Sigma vectors † |
-| Full ARC API + double-spend store | ⬜ |
+| Fiat-Shamir + Sigma prover & verifier | ✅ proven against authoritative Sigma vectors † |
+| Full ARC API (issue / present / verify) + range proof + double-spend store | ✅ end-to-end round-trip proven |
 | HTTP origin middleware / client | ⬜ |
 | Tor binding (end-to-end demo) | ⬜ |
 

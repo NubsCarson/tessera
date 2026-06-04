@@ -12,8 +12,9 @@
 //! Only the verifier and the statement machinery live here for now; the prover
 //! (which additionally needs a spec-defined RNG) lands with the full ARC API.
 
-use crate::group::{self, deserialize_scalar, reduce_mod_order, serialize_element};
+use crate::group::{self, deserialize_scalar, random_scalar, reduce_mod_order, serialize_element};
 use p256::{ProjectivePoint, Scalar};
+use rand_core::RngCore;
 use sha3::digest::{ExtendableOutput, Update, XofReader};
 use sha3::Shake128;
 
@@ -153,6 +154,11 @@ impl LinearRelation {
         self.constraints.len()
     }
 
+    /// Number of allocated scalar (witness) variables.
+    pub fn num_scalars(&self) -> usize {
+        self.num_scalars
+    }
+
     fn element(&self, index: usize) -> ProjectivePoint {
         self.elements[index].expect("element must be set before use")
     }
@@ -206,6 +212,45 @@ impl LinearRelation {
         }
         out
     }
+}
+
+/// Produce a non-interactive Schnorr proof in challenge-response (short) format
+/// (`draft-irtf-cfrg-fiat-shamir-01` §5, reference `NISigmaProtocol.prove`):
+/// sample one nonce per scalar variable, commit via the linear map, derive the
+/// Fiat-Shamir challenge, and respond `response = nonce + witness * challenge`.
+///
+/// `witness` must have exactly `statement.num_scalars()` entries, ordered to
+/// match the scalar allocation. Returns `serialize(challenge) || serialize(response)`.
+pub fn prove<R: RngCore + ?Sized>(
+    session: &[u8],
+    statement: &LinearRelation,
+    witness: &[Scalar],
+    rng: &mut R,
+) -> Vec<u8> {
+    assert_eq!(
+        witness.len(),
+        statement.num_scalars,
+        "witness length must match the number of allocated scalars"
+    );
+    let nonces: Vec<Scalar> = (0..statement.num_scalars)
+        .map(|_| random_scalar(rng))
+        .collect();
+    let commitment = statement.map(&nonces);
+
+    let mut sponge = init_transcript(session, &statement.label());
+    absorb_commitment(&mut sponge, &commitment);
+    let challenge = verifier_challenge(&sponge);
+
+    let response: Vec<Scalar> = (0..statement.num_scalars)
+        .map(|i| nonces[i] + witness[i] * challenge)
+        .collect();
+
+    let mut out = Vec::with_capacity((1 + statement.num_scalars) * group::NS);
+    out.extend_from_slice(&group::serialize_scalar(&challenge));
+    for r in &response {
+        out.extend_from_slice(&group::serialize_scalar(r));
+    }
+    out
 }
 
 /// Verify a non-interactive Schnorr proof in challenge-response (short) format

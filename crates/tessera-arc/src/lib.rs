@@ -33,6 +33,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod arc;
 pub mod group;
 pub mod keys;
 pub mod proofs;

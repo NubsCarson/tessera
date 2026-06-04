@@ -46,7 +46,7 @@ A milestone is **done** only when it is *proven*, not merely written. Concretely
 | 2 | **Issuance arithmetic** — keygen, request/response/finalize math | KAT: `X0/X1/X2`, `m*_enc`, `U`, `encUPrime`, `*Aux`, `UPrime` | ✅ **proven** |
 | 3 | **Presentation arithmetic** — re-randomization, commitments, tag | KAT: `U`, `UPrimeCommit`, `m1Commit`, `nonceCommit`, `tag`, `D` | ✅ **proven** |
 | 4 | **Fiat-Shamir + Sigma proofs** — SHAKE128 duplex sponge, P256 codec, linear-relation verifier | KAT: official Sigma `discrete_logarithm` + `dleq` proofs verify byte-exactly | ✅ **proven** (verifier) † |
-| 5 | **Full ARC API** — `SetupServer`, `Issue`, `Present`, `Verify` + double-spend tag store | Round-trip over the limit; tamper/replay rejected | ⬜ |
+| 5 | **Full ARC API** — `SetupServer`, `Issue`, `Present`, `Verify` + prover + range proof + double-spend tag store | Round-trip over the limit; tamper/replay rejected | ✅ **proven** |
 | 6 | **Wire codec** — canonical serialization of every protocol struct | Cross-check lengths (`Nrequest`, `Nresponse`, `Npresentation`) | ⬜ |
 | 7 | **`tessera-origin`** — HTTP middleware (tower/axum) that verifies a credential header and enforces the rate limit, ignoring source IP | Integration test: N requests pass, N+1 rejected, identity never observed | ⬜ |
 | 8 | **`tessera-client`** — obtains a credential, attaches presentations to outbound HTTP, transport-agnostic | E2E test through a `tower` mock origin | ⬜ |

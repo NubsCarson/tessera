@@ -17,10 +17,22 @@
 
 use crypto_bigint::{Encoding, NonZero, U512};
 use elliptic_curve::hash2curve::{ExpandMsgXmd, GroupDigest};
-use elliptic_curve::PrimeField;
+use elliptic_curve::{Field, PrimeField};
 use p256::{FieldBytes, NistP256, ProjectivePoint, Scalar};
+use rand_core::RngCore;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+
+/// Sample a uniformly random non-zero scalar from a CSPRNG (spec §6.1
+/// `RandomScalar`). `ff::Field::random` performs the rejection sampling; we
+/// additionally exclude zero (which it returns with negligible probability).
+pub fn random_scalar<R: RngCore + ?Sized>(rng: &mut R) -> Scalar {
+    let mut s = Scalar::random(&mut *rng);
+    while bool::from(s.ct_eq(&Scalar::ZERO)) {
+        s = Scalar::random(&mut *rng);
+    }
+    s
+}
 
 /// `contextString` for the `ARC(P-256)` ciphersuite (spec §6.1).
 pub const CONTEXT_STRING: &[u8] = b"ARCV1-P256";
