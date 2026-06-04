@@ -15,7 +15,7 @@
 //!     matches the ARC ciphersuite byte-for-byte. This is small, fully
 //!     specified, and verified against the IETF test vectors.
 
-use crypto_bigint::{Encoding, NonZero, U384};
+use crypto_bigint::{Encoding, NonZero, U512};
 use elliptic_curve::hash2curve::{ExpandMsgXmd, GroupDigest};
 use elliptic_curve::PrimeField;
 use p256::{FieldBytes, NistP256, ProjectivePoint, Scalar};
@@ -30,11 +30,30 @@ pub const NE: usize = 33;
 /// Serialized length of a scalar, `Ns = 32`.
 pub const NS: usize = 32;
 
-/// The order `p` of the P-256 group, widened to 384 bits for use as a
-/// reduction modulus in [`hash_to_scalar`] (spec §6.1: `Group.Order()`).
-const ORDER_U384: U384 = U384::from_be_hex(
-    "00000000000000000000000000000000ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+/// The order `p` of the P-256 group, widened to 512 bits for use as a
+/// reduction modulus (spec §6.1: `Group.Order()`). 512 bits is wide enough to
+/// reduce both the 48-byte `HashToScalar` output and the 64-byte Fiat-Shamir
+/// challenge squeeze without bias beyond the spec's tolerance.
+const ORDER_U512: U512 = U512::from_be_hex(
+    "0000000000000000000000000000000000000000000000000000000000000000ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
 );
+
+/// Reduce an arbitrary big-endian byte string (up to 64 bytes) modulo the
+/// group order `n`, returning the corresponding scalar (`OS2IP` then `mod n`).
+///
+/// This is the shared core of `HashToScalar` (48-byte input, RFC 9380) and the
+/// Fiat-Shamir `verifier_challenge` (64-byte squeeze, per the reference codec).
+pub fn reduce_mod_order(be: &[u8]) -> Scalar {
+    assert!(be.len() <= 64, "input wider than 512 bits");
+    let mut buf = [0u8; 64];
+    buf[64 - be.len()..].copy_from_slice(be);
+    let wide = U512::from_be_slice(&buf);
+    let reduced = wide % NonZero::new(ORDER_U512).expect("order is non-zero");
+    let reduced_bytes = reduced.to_be_bytes(); // 64 bytes, < n so top 32 are zero
+    let mut sb = [0u8; 32];
+    sb.copy_from_slice(&reduced_bytes[32..64]);
+    Scalar::from_repr(FieldBytes::from(sb)).expect("reduced value is a valid scalar")
+}
 
 /// Errors that can arise from deserializing untrusted bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,18 +103,7 @@ pub fn hash_to_scalar(x: &[u8], info: &[u8]) -> Scalar {
     dst.extend_from_slice(info);
 
     let uniform = expand_message_xmd_sha256(x, &dst, 48);
-    let mut wide_bytes = [0u8; 48];
-    wide_bytes.copy_from_slice(&uniform);
-
-    // OS2IP (big-endian) then reduce mod n.
-    let wide = U384::from_be_slice(&wide_bytes);
-    let reduced = wide % NonZero::new(ORDER_U384).expect("order is non-zero");
-    let reduced_bytes = reduced.to_be_bytes(); // 48 bytes, < n so top 16 are zero
-
-    let mut sb = [0u8; 32];
-    sb.copy_from_slice(&reduced_bytes[16..48]);
-    // `reduced < n` (the scalar field modulus), so `from_repr` always succeeds.
-    Scalar::from_repr(FieldBytes::from(sb)).expect("reduced value is a valid scalar")
+    reduce_mod_order(&uniform)
 }
 
 /// RFC 9380 §5.3.1 `expand_message_xmd` instantiated with SHA-256.
