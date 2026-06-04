@@ -42,3 +42,8 @@ ark-ff = { workspace = true }
 
 [dev-dependencies]
 rand_core.workspace = true
+# Used by tests/no_mint.rs to model the R_dec circuit's money constraints over
+# the SAME BN254 scalar field the circuit uses (same workspace-pinned versions as
+# the regular deps), so the no-mint proof is over the real field arithmetic.
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
