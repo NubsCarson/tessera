@@ -58,7 +58,9 @@ fn main() {
     };
     println!("\nTessera proxy live on http://{addr}  ·  admits on a credential, never your IP  ·  {route}");
     println!("It tunnels TLS end-to-end (CONNECT), so it never sees your plaintext.\n");
-    println!("Use Claude through it (single-use credential — the rate limit; restart for more):\n");
+    println!(
+        "Send any HTTPS request through it (single-use credential — the rate limit; restart for more). Example:\n"
+    );
     println!("  curl -sS -x http://{addr} \\");
     println!("    --proxy-header 'Tessera-Presentation: {header}' \\");
     println!("    https://api.anthropic.com/v1/messages \\");
