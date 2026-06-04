@@ -50,10 +50,16 @@ vectors:
 | P-256 group / hashing / serialization | ✅ proven against IETF vectors |
 | Server key generation | ✅ proven against IETF vectors |
 | Issuance & presentation arithmetic | ✅ proven against IETF vectors |
-| Fiat-Shamir + Sigma proofs | ⬜ in progress |
+| Fiat-Shamir + Sigma verifier | ✅ proven against authoritative Sigma vectors † |
 | Full ARC API + double-spend store | ⬜ |
 | HTTP origin middleware / client | ⬜ |
 | Tor binding (end-to-end demo) | ⬜ |
+
+† The ARC §10.2 *proof* blobs are not byte-reproducible from the pinned
+reference (an upstream vector inconsistency — the ARC *arithmetic* vectors all
+pass; see [`docs/ARC_PROOF_VECTOR_DISCREPANCY.md`](./docs/ARC_PROOF_VECTOR_DISCREPANCY.md)).
+The Fiat-Shamir layer is instead proven against the authoritative IETF Sigma
+Protocol test vectors, which exercise the identical transcript machinery.
 
 The crate currently proves the entire **arithmetic core** of ARC matches the
 reference byte-for-byte:
