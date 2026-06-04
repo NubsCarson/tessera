@@ -115,8 +115,12 @@ An adversarial review panel triaged the remaining ideas. These are intentionally
   already framework-agnostic.
 - **Pluggable/durable `TagStore` backend** — the in-memory store is honestly
   documented as non-durable; no concrete backend consumer yet.
+- **Tor↔LLM-API proxy** — ✅ **shipped** as `tessera-proxy`: a credential-gated
+  `CONNECT` proxy that tunnels TLS end-to-end to any HTTPS site (e.g. the
+  Anthropic API), optionally over Tor — admitting on the credential, never the
+  IP. The original "use Claude through Tor" goal, realized.
 - **Key epochs / rotation on the wire**, **batch verification**, **ristretto255
-  ciphersuite**, **wasm build**, **a Tor↔LLM-API proxy example** — each is a
-  real protocol-surface or scope expansion better done with a driving use case.
+  ciphersuite**, **wasm build** — each is a real protocol-surface or scope
+  expansion better done with a concrete driving use case.
 - **`#![deny(missing_docs)]`**, **CONTRIBUTING/CHANGELOG/badges**, **`zeroize`
   on key drop** — cosmetic/pre-0.1.0 polish; tracked, not blocking.

@@ -5,6 +5,7 @@ members = [
     "crates/tessera-issuer",
     "crates/tessera-origin",
     "crates/tessera-client",
+    "crates/tessera-proxy",
     "crates/tessera-demo",
 ]
 # The fuzz crate is its own (nightly-only) workspace; keep it out of the default build.
