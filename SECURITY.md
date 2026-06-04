@@ -16,9 +16,8 @@ Do not deploy it where a real adversary could be present.
 Please report security issues **privately** — do not open a public issue.
 
 - Preferred: GitHub → the repository's **Security** tab → **Report a
-  vulnerability** (private security advisory), or
-- Email the maintainer at the address on the GitHub profile, with `tessera
-  security` in the subject.
+  vulnerability** (private vulnerability reporting is enabled), or
+- Email **nubs@nubs.site** with `tessera security` in the subject.
 
 Include: affected component (crate + `file:line` if known), a description, and a
 proof-of-concept or reproduction if you have one. You'll get an acknowledgement;

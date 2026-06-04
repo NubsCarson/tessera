@@ -122,5 +122,9 @@ An adversarial review panel triaged the remaining ideas. These are intentionally
 - **Key epochs / rotation on the wire**, **batch verification**, **ristretto255
   ciphersuite**, **wasm build** — each is a real protocol-surface or scope
   expansion better done with a concrete driving use case.
-- **`#![deny(missing_docs)]`**, **CONTRIBUTING/CHANGELOG/badges**, **`zeroize`
-  on key drop** — cosmetic/pre-0.1.0 polish; tracked, not blocking.
+- **`#![deny(missing_docs)]`** — the one remaining cosmetic item; ~52 pub items
+  would need doc lines. A pre-0.1.0 docs pass, not blocking.
+
+(Since shipped, no longer deferred: `zeroize`-on-key-drop — `keys.rs` zeroizes
+the secret scalars on `Drop`; `CONTRIBUTING.md` / `CHANGELOG.md` / README badges;
+per-crate READMEs; and the proof-of-work issuance gate + Tor proxy above.)
