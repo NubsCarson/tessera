@@ -32,9 +32,9 @@ A milestone is **done** only when it is *proven*, not merely written. Concretely
    transcripts, over-budget presentations, and double-spends are rejected.
 4. **No warnings, no `unsafe`, clippy-clean.** `cargo test`, `cargo clippy
    --all-targets -- -D warnings`, and `cargo fmt --check` all green in CI.
-5. **Honest docs.** Every known limitation (no constant-time hardening, no
-   audit, draft-tracking) is stated plainly in the README. We never call
-   research-grade code "production-ready."
+5. **Honest docs.** Every known limitation (no end-to-end constant-time audit,
+   no third-party audit, draft-tracking) is stated plainly in the README. We
+   never call research-grade code "production-ready."
 
 ---
 
