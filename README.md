@@ -41,7 +41,7 @@ a `tessera-client`, and makes **real HTTP requests**: no credential → `403`
 unlinkable tag each time; over the limit → the client refuses; a replay → `403`
 double-spend. The origin never reads the source IP. See [`DEMO.md`](./DEMO.md).
 
-### Use Claude (or any HTTPS site) through Tor, gated on a credential
+### Reach any HTTPS site, gated on a credential — never on your IP
 
 ```sh
 cargo run -p tessera-proxy            # or: -- --tor  (tunnel via Tor at :9050)
@@ -51,8 +51,9 @@ cargo run -p tessera-proxy            # or: -- --tor  (tunnel via Tor at :9050)
 carries a valid Tessera credential — **never on its IP** — then tunnels it to any
 HTTPS endpoint (your TLS stays end-to-end; the proxy never sees plaintext),
 optionally over Tor. Point a normal client at it; no credential → `407`. It
-prints a ready-to-run `curl` for the Anthropic API. This is the original goal,
-end to end: anonymous, accountable, IP-blind access to Claude over Tor.
+prints a ready-to-run `curl` for a sample HTTPS API. The result, end to end:
+anonymous, accountable, IP-blind access to the clearnet — admitted on a
+credential, not an address.
 
 ## The problem it attacks
 
@@ -88,7 +89,7 @@ around it:
 | [`tessera-issuer`](./crates/tessera-issuer) | Proof-of-work **issuance gate** ("earn your budget") — makes minting a credential cost CPU. A cost knob, not strong Sybil resistance. |
 | [`tessera-origin`](./crates/tessera-origin) | Server-side `OriginGuard`: admit a request on a valid, in-budget, unspent presentation — **never** on the source IP. Transport-agnostic. |
 | [`tessera-client`](./crates/tessera-client) | Holds a credential and mints one fresh, unlinkable presentation per request. |
-| [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site (the Anthropic API included), optionally over Tor. |
+| [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site, optionally over Tor. |
 | [`tessera-relay`](./crates/tessera-relay) | The first onion hop + the **channel payment gate**, forming the **2-hop split-trust loop**: the relay learns {client, exit} but never the destination, the exit learns {destination} but never the client; neither sees content. The loop now does **real per-request channel payments** (`tessera-channel` Phase 2a protocol): the relay is the **channel counterparty** — the client opens a channel and each request is a real `spend` the relay verify-and-co-signs *before* forwarding (sign-then-serve); a replayed/over-budget spend is refused and never reaches the destination. The relay thereby **links your in-channel requests** (the accepted within-session linkability, `DESIGN.md` §9). The legacy ARC-v0 spend stand-in is kept behind its own entry point. The **ZK settlement (Phase 2b-i)** + the **shielded funding pool** are separate, and clean egress is still a manual step. Tested end-to-end. |
 | [`tessera-channel`](./crates/tessera-channel) | The **ZK Spilman channel protocol state machine** (`DESIGN.md` §2): a unidirectional, monotone-decrementing, single-payee off-chain payment channel in plain Rust — user-signed states (so equivocation is attributable), sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute/settlement. Chain-facing signatures are **EVM-native secp256k1 over a recoverable keccak256 digest** (so the Phase 2c court verifies them with `ecrecover`) + a SHA-256 state commitment. **The ZK balance-privacy layer (Phase 2b) is NOT here yet.** |
 | [`contracts/`](./contracts) | The **Phase 2c EVM on-chain court** (`DESIGN.md` §6): a Foundry `ChannelRegistry.sol` mirroring `tessera-channel`'s settlement logic — escrow/open, cooperative & unilateral close + challenge, equivocation slash, refund-on-timeout — verifying the crate's secp256k1 states via `ecrecover`. Includes a **real Rust→Solidity cross-language signature vector** test. Testnet-only, UNAUDITED. |
@@ -123,7 +124,7 @@ vectors:
 | Fiat-Shamir + Sigma proofs | ✅ verifier proven against authoritative Sigma vectors; prover exercised via end-to-end round-trip † |
 | Full ARC API (issue / present / verify) + range proof + double-spend store | ✅ end-to-end round-trip proven |
 | `tessera-issuer` — proof-of-work issuance gate ("earn your budget") | ✅ cost-gate (not strong Sybil resistance — see threat model) |
-| `tessera-proxy` — credential-gated CONNECT proxy (use Claude/any HTTPS through Tor) | ✅ admit on credential not IP; TLS tunneled end-to-end |
+| `tessera-proxy` — credential-gated CONNECT proxy (any HTTPS site, optionally over Tor) | ✅ admit on credential not IP; TLS tunneled end-to-end |
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
 | `tessera-origin` optional `tower` middleware (`TesseraLayer`) | ✅ feature-gated drop-in `Layer`; proven in a real `axum` server over a real socket (`tessera-tower-demo`) — admit/malformed/replay/fresh |
 | `tessera-origin` pluggable spent-tag store (`SpentTagStore`) | ✅ in-memory default + durable `FileTagStore`; double-spend survives a guard restart (tested) |
@@ -200,7 +201,7 @@ cargo fmt --all -- --check
 cargo run -p tessera-demo             # narrated end-to-end demo
 cargo run -p tessera-demo -- --serve  # browser hub at http://127.0.0.1:8088 (auto-opens)
 cargo run -p tessera-demo -- --tor    # also drive a real Tor onion circuit
-cargo run -p tessera-proxy            # credential-gated CONNECT proxy (Claude over Tor)
+cargo run -p tessera-proxy            # credential-gated CONNECT proxy (any HTTPS site, optionally over Tor)
 
 # fuzz — nightly + `cargo install cargo-fuzz`
 cargo +nightly fuzz run wire_from_bytes -- -max_total_time=30

@@ -131,10 +131,10 @@ An adversarial review panel triaged the remaining ideas. These are intentionally
   Double-spend enforcement is tested to survive a guard restart. (A *concrete*
   distributed impl is intentionally left to the deployer — it depends on their
   infra.)
-- **Tor↔LLM-API proxy** — ✅ **shipped** as `tessera-proxy`: a credential-gated
-  `CONNECT` proxy that tunnels TLS end-to-end to any HTTPS site (e.g. the
-  Anthropic API), optionally over Tor — admitting on the credential, never the
-  IP. The original "use Claude through Tor" goal, realized.
+- **Credential-gated HTTPS proxy** — ✅ **shipped** as `tessera-proxy`: a
+  `CONNECT` proxy that tunnels TLS end-to-end to any HTTPS site, optionally over
+  Tor — admitting on the credential, never the IP. Anonymous, accountable,
+  IP-blind access to the clearnet, realized end to end.
 - **Key epochs / rotation on the wire**, **batch verification**, **ristretto255
   ciphersuite**, **wasm build** — each is a real protocol-surface or scope
   expansion better done with a concrete driving use case.
