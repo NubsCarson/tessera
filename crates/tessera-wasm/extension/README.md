@@ -70,13 +70,34 @@ in an extension needs either a local helper that issues single-use headers, the
 now-restricted blocking `webRequest`, or very aggressive rule rotation. This
 scaffold uses the timer to demonstrate the mechanism, **not** to be unlinkable.
 
+## Cross-language end-to-end (verified, headless)
+
+The wasm client genuinely interoperates with a real Rust origin. With the
+[`tessera-tower-demo`](../../tessera-tower-demo) server running (it exposes
+`/pubkey` + `/issue` + a guarded `/`), drive the wasm client from Node:
+
+```sh
+# build the nodejs-target glue
+cargo build --manifest-path crates/tessera-wasm/Cargo.toml --target wasm32-unknown-unknown --release
+wasm-bindgen --target nodejs --out-dir /tmp/tessera-node-pkg \
+  crates/tessera-wasm/target/wasm32-unknown-unknown/release/tessera_wasm.wasm
+# run the origin, then drive the wasm client through real issuance + present:
+cargo run --manifest-path crates/tessera-tower-demo/Cargo.toml &
+node crates/tessera-wasm/examples/node-real-issuance.cjs /tmp/tessera-node-pkg
+# -> no credential -> 403 ; wasm credential -> 200 ; replay -> 403 ; PASS
+```
+
+This proves the browser-side flow (`prepare_issuance` → POST request → `finalize`
+→ `present`) produces a credential the Rust origin admits, with double-spend
+rejection — the whole thesis, across languages, no GUI required.
+
 ## What's real vs. scaffold
 
 | Piece | State |
 |-------|-------|
 | `tessera-arc` + `tessera-client` crypto on `wasm32` | ✅ compiles; headless round-trip test passes (node) |
 | `mint_local` / `present()` wasm-bindgen API | ✅ tested in-wasm |
-| MV3 manifest + DNR header-attach wiring | ✅ scaffold, not run in a live browser here |
-| Real issuance (live issuer, persistent key) | ⬜ demo uses an ephemeral key |
-| Per-request unlinkable presentations | ⬜ DNR reuses a value between rotations |
-| Loaded in a browser hitting a live origin | ⬜ **human final mile** |
+| **Real issuance** (`prepare_issuance`/`IssuanceFlow`) against a live issuer | ✅ tested in-wasm + verified cross-language vs a Rust origin (above) |
+| MV3 manifest + DNR header-attach wiring (`background.js` uses real issuance) | ✅ scaffold, not run in a live browser here |
+| Per-request unlinkable presentations | ⬜ DNR reuses a value between rotations (documented limit) |
+| Loaded in a **browser** hitting a live origin (GUI/DNR) | ⬜ **human final mile** |

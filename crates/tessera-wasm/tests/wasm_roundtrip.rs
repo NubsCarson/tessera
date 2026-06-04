@@ -19,7 +19,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use tessera_wasm::{budget_roundtrip, mint_local, mint_present_roundtrip};
+use rand_core::OsRng;
+use tessera_wasm::{budget_roundtrip, mint_local, mint_present_roundtrip, prepare_issuance};
 use wasm_bindgen_test::*;
 
 // No `wasm_bindgen_test_configure!(run_in_browser)`: the default harness runs
@@ -62,4 +63,38 @@ fn js_facing_mint_local_and_present_work_in_wasm() {
     let h1 = cred.present().expect("second present in budget");
     assert_ne!(h0, h1, "presentations must be distinct");
     assert!(cred.present().is_err(), "over-budget present must error");
+}
+
+#[wasm_bindgen_test]
+fn real_issuance_against_an_external_key_verifies() {
+    // The production path: a credential issued by an EXTERNAL key (the issuer),
+    // obtained over the hex wire format, must present-verify against that key —
+    // i.e. the wasm client genuinely interoperates with a real Rust issuer/origin.
+    use tessera_arc::arc::{create_credential_response, verify_presentation, Presentation};
+    use tessera_arc::keys::ServerPrivateKey;
+
+    let mut rng = OsRng;
+    let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+    let pk_bytes = pk.serialize();
+
+    // Browser: prepare a real issuance bound to the issuer's PUBLIC key only.
+    let flow = prepare_issuance(&pk_bytes, b"issue/v1", b"origin/v1", 4).expect("prepare");
+    let req = tessera_arc::arc::CredentialRequest::from_bytes(
+        &hex::decode(flow.request_hex()).expect("hex"),
+    )
+    .expect("request decodes");
+
+    // Issuer (external): produce the credential response from the request.
+    let response = create_credential_response(&sk, &pk, &req, &mut rng).expect("issue");
+    let response_hex = hex::encode(response.to_bytes());
+
+    // Browser: finalize + present, then verify against the EXTERNAL key.
+    let mut cred = flow.finalize(&response_hex).expect("finalize");
+    let header = cred.present().expect("present");
+    let presentation =
+        Presentation::from_bytes(&hex::decode(&header).expect("hex"), 4).expect("presentation");
+    assert!(
+        verify_presentation(&sk, &pk, b"issue/v1", b"origin/v1", &presentation, 4).is_some(),
+        "a credential issued by an external key must present-verify against it"
+    );
 }

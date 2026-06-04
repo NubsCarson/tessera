@@ -19,5 +19,6 @@ tessera-arc = { path = "../tessera-arc" }
 tessera-origin = { path = "../tessera-origin", features = ["tower"] }
 tessera-client = { path = "../tessera-client" }
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+hex = "0.4"
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }

@@ -65,18 +65,20 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
 - **Risks / external.** The extension's real last mile (load in a browser, hit a
   live origin) needs **your** browser — we deliver a compiling, tested wasm core
   + extension scaffold, and flag that final manual step.
-- **Status.** ✅ **done (core + scaffold)** — `crates/tessera-wasm` (its own
-  excluded workspace, like `fuzz/`; `getrandom` `js` feature for browser
-  entropy) builds for `wasm32-unknown-unknown` and exposes a `wasm-bindgen` API
-  (`mint_local` + `TesseraCredential::present()` → the exact
-  `TesseraClient::presentation_header` value). The mint→present round-trip is
-  **tested headlessly** under node via `wasm-bindgen-test-runner` (3 tests
-  pass), with a native `rlib` fallback test of the identical logic. An MV3
-  extension scaffold (`crates/tessera-wasm/extension/`) wires a
-  `Tessera-Presentation` header via `declarativeNetRequest` (limits documented).
-  A dedicated `wasm` CI job builds/tests it separately from the host gates.
-  **Human final mile (unchanged):** loading the extension in a real browser
-  against a live origin, and wiring issuance to a real issuer.
+- **Status.** ✅ **done + cross-language interop proven** — `crates/tessera-wasm`
+  (its own excluded workspace, like `fuzz/`; `getrandom` `js` feature for browser
+  entropy) builds for `wasm32-unknown-unknown` and exposes a `wasm-bindgen` API:
+  `TesseraCredential::present()` (the exact `presentation_header` value),
+  `mint_local` (ephemeral demo), and **`prepare_issuance`/`IssuanceFlow`** — the
+  real issuance path against a live issuer's public key. 4 tests pass **headlessly
+  under node** (incl. `real_issuance_against_an_external_key_verifies`) + a native
+  `rlib` fallback. **Wiring issuance to a real issuer is no longer a gap:**
+  `examples/node-real-issuance.cjs` drives the wasm client (fetch `/pubkey` →
+  `prepare_issuance` → POST `/issue` → `finalize` → `present`) against a running
+  `tessera-tower-demo` Rust origin — verified live: no-cred → 403, wasm credential
+  → 200, replay → 403. The MV3 `background.js` uses that same real flow.
+  **Only remaining human mile:** loading the extension in an actual browser (the
+  GUI / `declarativeNetRequest` plumbing), which can't be exercised headlessly.
 
 ## 4. Upstream contribution + research  ·  *done (issue filed)*
 

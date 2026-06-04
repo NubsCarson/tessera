@@ -505,6 +505,7 @@ name = "tessera-wasm"
 version = "0.0.1"
 dependencies = [
  "getrandom",
+ "hex",
  "rand_core",
  "tessera-arc",
  "tessera-client",

@@ -50,8 +50,18 @@ The pre-1.0 development line. **Research-grade and unaudited** — see
   Double-spend enforcement is tested to survive a guard restart; a distributed
   backend is the deployer's via the trait.
 - **WASM browser client:** `crates/tessera-wasm` (out-of-workspace, like `fuzz/`)
-  — `wasm-bindgen` `mint_local`/`present()`, headless mint→present test under
-  node, + a Manifest-V3 extension scaffold. In-browser use is a scaffold.
+  — `wasm-bindgen` `present()`, the ephemeral `mint_local` demo, and **real
+  issuance** (`prepare_issuance`/`IssuanceFlow`) against a live issuer's public
+  key. Headless node tests (incl. real-issuance-vs-external-key), + an MV3
+  extension scaffold (now using the real issuance flow). **Cross-language interop
+  verified:** `examples/node-real-issuance.cjs` drives the wasm client through
+  issuance + presentation against the `tessera-tower-demo` Rust origin
+  (no-cred → 403, wasm credential → 200, replay → 403). The browser GUI/DNR step
+  remains the one human final mile.
+- **Real-HTTP middleware proof:** `crates/tessera-tower-demo` — a runnable `axum`
+  server using `TesseraLayer` (+ `/pubkey` and `/issue` issuer routes), with an
+  end-to-end test over a real socket on a multi-threaded `tokio` runtime. New
+  `tower-e2e` CI job.
 - **Upstream:** filed [`ietf-wg-privacypass/draft-arc#68`](https://github.com/ietf-wg-privacypass/draft-arc/issues/68)
   documenting the §10.2 proof-blob discrepancy; [`docs/POST_QUANTUM.md`](./docs/POST_QUANTUM.md)
   scopes a PQ-sound path.

@@ -25,6 +25,7 @@ crate-type = ["cdylib", "rlib"]
 tessera-arc = { path = "../tessera-arc" }
 tessera-client = { path = "../tessera-client" }
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+hex = "0.4" # serialize the request/response/presentation byte blobs for issuance
 wasm-bindgen = "=0.2.122"
 
 # Browser entropy: `rand_core 0.6` pulls `getrandom 0.2`, which does not build

@@ -10,19 +10,24 @@
 //!     budget, and `present()`s the hex `Tessera-Presentation` header. This is
 //!     the **exact** value [`tessera_client::TesseraClient::presentation_header`]
 //!     produces.
-//!   * [`mint_local`] — a self-contained issuance helper that runs a full
-//!     server-setup → request → response → finalize round-trip *locally* (no
-//!     network), so a credential can be constructed in a demo / test. A real
-//!     deployment would instead drive issuance against a live issuer; this
-//!     helper exists so the in-browser mint→present round-trip is testable
-//!     without standing up a server.
+//!   * [`prepare_issuance`] + [`IssuanceFlow`] — the **real** issuance path: bind
+//!     a request to a live issuer's *public* key, send `request_hex()` to it, and
+//!     `finalize()` its response into a credential. This is what a production
+//!     browser client uses; proven cross-language against a real Rust origin in
+//!     `examples/node-real-issuance.cjs`.
+//!   * [`mint_local`] — a self-contained *demo* helper that runs the whole
+//!     issuance round-trip locally against an **ephemeral** key (no network), so
+//!     an in-wasm mint→present round-trip is testable without a server. Its
+//!     presentations verify only against that throwaway key.
 //!
 //! ## Honesty
 //!
-//! This is a compiling, tested wasm **core** plus an extension **scaffold**
-//! (`extension/`). The final mile — loading the extension in a real browser
-//! and attaching the header to traffic hitting a live origin — needs a human
-//! and a browser; it is not exercised here. See `extension/README.md`.
+//! This is a compiling, tested wasm **core** (issuance + presentation, with the
+//! real-issuance path proven to interoperate with a Rust origin over real HTTP)
+//! plus an extension **scaffold** (`extension/`). The remaining final mile —
+//! loading the extension in a real **browser** and attaching the header via
+//! `declarativeNetRequest` to live traffic — needs a human and a browser; that
+//! GUI/DNR step is not exercised here. See `extension/README.md`.
 //!
 //! Entropy comes from the Web Crypto API via `getrandom`'s `js` feature on
 //! wasm32 (and from the OS CSPRNG when this crate's `rlib` is built/tested
@@ -34,9 +39,10 @@
 use rand_core::OsRng;
 use tessera_arc::arc::{
     create_credential_request, create_credential_response, finalize_credential, Credential,
+    CredentialResponse,
 };
-use tessera_arc::keys::ServerPrivateKey;
-use tessera_client::TesseraClient;
+use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
+use tessera_client::{begin_issuance, PendingIssuance, TesseraClient};
 use wasm_bindgen::prelude::*;
 
 /// A finalized ARC credential wrapped for the browser, tracking its
@@ -107,6 +113,74 @@ pub fn mint_local(
         presentation_context,
         limit,
     ))
+}
+
+/// A pending **real** issuance: the browser-side half of obtaining a credential
+/// from a live issuer (vs the self-contained [`mint_local`] demo).
+///
+/// Flow: [`prepare_issuance`] → send [`request_hex`](IssuanceFlow::request_hex)
+/// to the issuer → [`finalize`](IssuanceFlow::finalize) with the issuer's
+/// response. No server secret ever touches the client; the request is bound to
+/// the issuer's *public* key.
+#[wasm_bindgen]
+pub struct IssuanceFlow {
+    pending: PendingIssuance,
+    request_bytes: Vec<u8>,
+    presentation_context: Vec<u8>,
+    limit: u64,
+}
+
+#[wasm_bindgen]
+impl IssuanceFlow {
+    /// The hex-encoded `CredentialRequest` to hand to the issuer (e.g. POST it).
+    pub fn request_hex(&self) -> String {
+        hex::encode(&self.request_bytes)
+    }
+
+    /// Finalize with the issuer's hex-encoded `CredentialResponse`, yielding a
+    /// presentable [`TesseraCredential`]. Consumes the flow. Errors (bad hex,
+    /// malformed response, or a response proof that fails to verify) are thrown
+    /// to JS as a `JsError`.
+    pub fn finalize(self, response_hex: &str) -> Result<TesseraCredential, JsError> {
+        let bytes = hex::decode(response_hex.trim()).map_err(|e| JsError::new(&e.to_string()))?;
+        let response =
+            CredentialResponse::from_bytes(&bytes).map_err(|e| JsError::new(&e.to_string()))?;
+        let credential = self
+            .pending
+            .finalize(&response)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(TesseraCredential::from_credential(
+            credential,
+            &self.presentation_context,
+            self.limit,
+        ))
+    }
+}
+
+/// Begin a **real** issuance against an issuer identified by its serialized
+/// public key (`ServerPublicKey::serialize`). Returns an [`IssuanceFlow`] whose
+/// `request_hex()` is sent to the issuer; its response finalizes the credential,
+/// which then presents against `presentation_context` up to `limit` times.
+///
+/// This is the production path the browser extension wants — unlike
+/// [`mint_local`], the credential is issued by a real, external key, so its
+/// presentations verify against that issuer. `limit` must be ≥ 2.
+#[wasm_bindgen]
+pub fn prepare_issuance(
+    server_public_key: &[u8],
+    request_context: &[u8],
+    presentation_context: &[u8],
+    limit: u64,
+) -> Result<IssuanceFlow, JsError> {
+    let pk =
+        ServerPublicKey::from_bytes(server_public_key).map_err(|e| JsError::new(&e.to_string()))?;
+    let (pending, request) = begin_issuance(request_context, pk, &mut OsRng);
+    Ok(IssuanceFlow {
+        pending,
+        request_bytes: request.to_bytes(),
+        presentation_context: presentation_context.to_vec(),
+        limit,
+    })
 }
 
 /// Round-trip helper shared by the wasm-bindgen test and the native `rlib`

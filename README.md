@@ -85,7 +85,7 @@ Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
 
 | Crate | What it is |
 |-------|-----------|
-| [`tessera-wasm`](./crates/tessera-wasm) | `wasm-bindgen` browser bindings: mint a credential and produce the `Tessera-Presentation` header in-browser. **Compiles to `wasm32`** (headless mint→present round-trip test passes under node); ships an MV3 [extension scaffold](./crates/tessera-wasm/extension) — **in-browser use against a live origin is a scaffold / human final mile**. |
+| [`tessera-wasm`](./crates/tessera-wasm) | `wasm-bindgen` browser bindings: real issuance (`prepare_issuance`) + `present()` in-browser. **Compiles to `wasm32`**, headless node tests pass, and a wasm-issued credential is **verified to interoperate with the Rust origin** (`examples/node-real-issuance.cjs`). Ships an MV3 [extension scaffold](./crates/tessera-wasm/extension) — loading it in an actual browser is the human final mile. |
 | [`tessera-tower-demo`](./crates/tessera-tower-demo) | A runnable **`axum` server** using the `tessera-origin` `tower` middleware. `cargo run` it and `curl` the printed commands; its end-to-end test drives a real server on a multi-threaded `tokio` runtime over a real socket (admit / malformed / replay / fresh). |
 
 > Not yet published to crates.io — every crate is `publish = false` pending a

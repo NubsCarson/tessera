@@ -645,6 +645,7 @@ name = "tessera-tower-demo"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "hex",
  "rand_core",
  "tessera-arc",
  "tessera-client",

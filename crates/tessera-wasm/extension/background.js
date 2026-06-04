@@ -22,19 +22,29 @@
 //     issues short-lived single-use headers, or (b) the now-restricted blocking
 //     webRequest, or (c) rotating the DNR rule aggressively. This scaffold
 //     rotates on a timer to illustrate the mechanism, not to be unlinkable.
-//   * A real deployment also needs a real credential: `mint_local()` here uses
-//     an EPHEMERAL server key (demo only) so the header verifies against
-//     nothing real. Wire issuance to a live issuer for actual use.
+//   * Credentials are obtained by REAL issuance against `ISSUER_BASE` (fetch its
+//     public key, `prepare_issuance`, POST the request, `finalize`) — the same
+//     flow proven end-to-end in `examples/node-real-issuance.cjs`. So the header
+//     verifies against a real issuer/origin (not the ephemeral `mint_local`
+//     demo helper). Point `ISSUER_BASE` at your origin (e.g. tessera-tower-demo)
+//     and add it to `host_permissions`.
 //
 // This file is intentionally a SCAFFOLD. Loading it in a browser against a live
 // origin is the human final mile (see README.md).
 
 const RULE_ID = 1;
-// The origin you want to carry the credential to. Must also be in
-// `host_permissions` in manifest.json.
+// The issuer/origin that issues credentials AND that you carry them to. Must
+// also be in `host_permissions` in manifest.json. (tessera-tower-demo exposes
+// the matching `/pubkey` + `/issue` routes used below.)
+const ISSUER_BASE = "https://example.com";
 const TARGET_URL_FILTER = "||example.com/";
+// Must match the issuer/origin's configured contexts + limit.
+const REQUEST_CTX = "tessera-extension/issue/v1";
+const PRESENT_CTX = "tessera-extension/origin/v1";
+const LIMIT = 16n; // presentation budget per credential; re-issue when spent
 
 let wasm = null;
+let credential = null; // current TesseraCredential (re-issued when budget runs out)
 
 // Lazily import the wasm-bindgen `--target web` glue. Run the build step in
 // README.md first to produce `pkg/tessera_wasm.js` + `pkg/tessera_wasm_bg.wasm`.
@@ -47,20 +57,40 @@ async function ensureWasm() {
   return wasm;
 }
 
+const fromHex = (h) => Uint8Array.from(h.trim().match(/../g).map((b) => parseInt(b, 16)));
+
+// REAL issuance against ISSUER_BASE: fetch the public key, prepare a request,
+// POST it to the issuer, finalize the response into a credential. (Same flow as
+// the verified examples/node-real-issuance.cjs.)
+async function issueCredential(m) {
+  const enc = new TextEncoder();
+  const pubkeyHex = await (await fetch(`${ISSUER_BASE}/pubkey`)).text();
+  const flow = m.prepare_issuance(
+    fromHex(pubkeyHex),
+    enc.encode(REQUEST_CTX),
+    enc.encode(PRESENT_CTX),
+    LIMIT
+  );
+  const respHex = await (
+    await fetch(`${ISSUER_BASE}/issue`, { method: "POST", body: flow.request_hex() })
+  ).text();
+  return flow.finalize(respHex);
+}
+
 // Mint a fresh presentation header and install/replace the DNR rule that
 // attaches it to outgoing requests matching TARGET_URL_FILTER.
 async function rotatePresentation() {
   const m = await ensureWasm();
+  if (!credential) credential = await issueCredential(m);
 
-  // Demo issuance: ephemeral key, local round-trip. Replace with a credential
-  // obtained from a real issuer for actual use (see README.md / lib.rs).
-  const enc = new TextEncoder();
-  const cred = m.mint_local(
-    enc.encode("tessera-extension/issue"),
-    enc.encode("tessera-extension/origin"),
-    16n // presentation budget; rotate before exhausting it
-  );
-  const headerValue = cred.present(); // hex Tessera-Presentation header
+  let headerValue;
+  try {
+    headerValue = credential.present(); // spends one unit of the budget
+  } catch {
+    // Budget exhausted (or credential invalid): obtain a fresh one and retry.
+    credential = await issueCredential(m);
+    headerValue = credential.present();
+  }
 
   await chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: [RULE_ID],
