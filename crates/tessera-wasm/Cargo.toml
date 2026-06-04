@@ -1,0 +1,45 @@
+[package]
+name = "tessera-wasm"
+version = "0.0.1"
+description = "wasm-bindgen browser bindings for the Tessera ARC client: mint a credential and produce a `Tessera-Presentation` header in-browser."
+publish = false # not published; research-grade, and the in-browser path is a scaffold
+edition = "2021"
+rust-version = "1.74"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/NubsCarson/tessera"
+authors = ["Tessera contributors"]
+
+# `cdylib` is the artifact wasm-bindgen post-processes into the browser `.wasm`;
+# `rlib` lets the identical mint→present logic run under a plain native
+# `cargo test` (the fallback when a headless wasm runner isn't available).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# A SEPARATE, single-crate workspace. Like `fuzz/`, this keeps tessera-wasm out
+# of the host workspace entirely — it is also listed in the root Cargo.toml's
+# `[workspace].exclude`, so it never touches the host fmt/clippy/test/MSRV/doc
+# gates. wasm32 deps (getrandom `js`) must not perturb the native build.
+[workspace]
+
+[dependencies]
+tessera-arc = { path = "../tessera-arc" }
+tessera-client = { path = "../tessera-client" }
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+wasm-bindgen = "=0.2.122"
+
+# Browser entropy: `rand_core 0.6` pulls `getrandom 0.2`, which does not build
+# for `wasm32-unknown-unknown` unless its `js` feature is on (it then sources
+# randomness from the Web Crypto API via wasm-bindgen). Inert on native.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+# `wasm-bindgen-test` 0.3.72 is the companion of `wasm-bindgen` 0.2.122 (the
+# 0.3.x test/0.2.x core version numbers track together but differ); the
+# `wasm-bindgen-test-runner` must come from `wasm-bindgen-cli` 0.2.122 to match.
+[dev-dependencies]
+wasm-bindgen-test = "=0.3.72"
+
+[profile.release]
+opt-level = 3
+# Keep the shipped .wasm small without a separate wasm-opt pass.
+lto = true

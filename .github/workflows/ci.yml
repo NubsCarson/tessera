@@ -72,6 +72,62 @@ jobs:
       - name: Audit the dependency graph
         run: cargo audit
 
+  wasm:
+    name: wasm browser client
+    runs-on: ubuntu-latest
+    # The wasm client lives in `crates/tessera-wasm`, a SEPARATE workspace
+    # excluded from the root workspace (like `fuzz/`). It is built/tested here on
+    # its own, never folded into the host `test`/`msrv` jobs, so its wasm-only
+    # deps (getrandom `js`) can't perturb the native build.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add the wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build tessera-wasm for wasm32 (the core deliverable)
+        # RUSTFLAGS `-D warnings` (set workspace-wide above) still applies.
+        run: |
+          cargo build --manifest-path crates/tessera-wasm/Cargo.toml \
+            --target wasm32-unknown-unknown --release
+
+      - name: Clippy (deny warnings) on the wasm target
+        run: |
+          rustup component add clippy
+          cargo clippy --manifest-path crates/tessera-wasm/Cargo.toml \
+            --target wasm32-unknown-unknown --all-targets -- -D warnings
+
+      - name: Format check (wasm crate)
+        run: |
+          rustup component add rustfmt
+          cargo fmt --manifest-path crates/tessera-wasm/Cargo.toml --all -- --check
+
+      - name: Node (for the headless wasm-bindgen test runner)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install wasm-bindgen-cli (version pinned to the wasm-bindgen crate)
+        # MUST equal the `wasm-bindgen` crate version in tessera-wasm/Cargo.toml,
+        # or `wasm-bindgen-test-runner` rejects the module.
+        # Clear the workspace-wide `-D warnings`: it must gate *our* code, not a
+        # third-party tool's own crate (Cargo caps lints on deps, but the
+        # top-level installed crate is not capped, so a future toolchain's new
+        # lints could otherwise fail this install).
+        env:
+          RUSTFLAGS: ""
+        run: cargo install wasm-bindgen-cli --version 0.2.122 --locked
+
+      - name: Headless wasm round-trip test (mint -> present) via node
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: |
+          cargo test --manifest-path crates/tessera-wasm/Cargo.toml \
+            --target wasm32-unknown-unknown
+
+      - name: Native fallback test of the identical mint -> present logic
+        run: cargo test --manifest-path crates/tessera-wasm/Cargo.toml
+
   fuzz:
     name: fuzz build + smoke
     runs-on: ubuntu-latest

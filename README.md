@@ -81,6 +81,12 @@ around it:
 | [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site (the Anthropic API included), optionally over Tor. |
 | [`tessera-demo`](./crates/tessera-demo) | The runnable end-to-end demo: narrated CLI, a `--serve` browser hub, and a `--tor` onion-service path. |
 
+Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
+
+| Crate | What it is |
+|-------|-----------|
+| [`tessera-wasm`](./crates/tessera-wasm) | `wasm-bindgen` browser bindings: mint a credential and produce the `Tessera-Presentation` header in-browser. **Compiles to `wasm32`** (headless mint→present round-trip test passes under node); ships an MV3 [extension scaffold](./crates/tessera-wasm/extension) — **in-browser use against a live origin is a scaffold / human final mile**. |
+
 > Not yet published to crates.io — every crate is `publish = false` pending a
 > third-party security audit. Use it via a git or path dependency for now.
 

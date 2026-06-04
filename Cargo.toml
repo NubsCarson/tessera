@@ -8,8 +8,11 @@ members = [
     "crates/tessera-proxy",
     "crates/tessera-demo",
 ]
-# The fuzz crate is its own (nightly-only) workspace; keep it out of the default build.
-exclude = ["fuzz"]
+# The fuzz crate is its own (nightly-only) workspace; keep it out of the default
+# build. tessera-wasm is likewise its own workspace (wasm32-only deps, e.g.
+# getrandom's `js` feature) and must never touch the host fmt/clippy/test/MSRV/
+# doc gates — it has its own `wasm` CI job.
+exclude = ["fuzz", "crates/tessera-wasm"]
 
 [workspace.package]
 edition = "2021"

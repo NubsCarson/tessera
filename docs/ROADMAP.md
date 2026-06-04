@@ -8,7 +8,7 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
 
 ---
 
-## 1. Audit-readiness  ·  *doing first, here*
+## 1. Audit-readiness  ·  *done*
 
 - **Goal.** Make the security story legible to a third-party auditor and to
   reviewers — the only path past the "unaudited" ceiling.
@@ -47,7 +47,7 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
   green. Edge-deploy path documented in the origin README; a compiled Worker is
   explicitly deferred (needs the server secret at the edge + a wasm guard build).
 
-## 3. WASM browser client  ·  *background (final mile needs a browser)*
+## 3. WASM browser client  ·  *done (core + scaffold; browser final mile is yours)*
 
 - **Goal.** Let a *human* browse carrying a credential — the most tangible demo.
 - **Approach.** Build `tessera-arc` + `tessera-client` for `wasm32-unknown-unknown`
@@ -59,9 +59,20 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
 - **Risks / external.** The extension's real last mile (load in a browser, hit a
   live origin) needs **your** browser — we deliver a compiling, tested wasm core
   + extension scaffold, and flag that final manual step.
-- **Status.** ⬜ background workflow.
+- **Status.** ✅ **done (core + scaffold)** — `crates/tessera-wasm` (its own
+  excluded workspace, like `fuzz/`; `getrandom` `js` feature for browser
+  entropy) builds for `wasm32-unknown-unknown` and exposes a `wasm-bindgen` API
+  (`mint_local` + `TesseraCredential::present()` → the exact
+  `TesseraClient::presentation_header` value). The mint→present round-trip is
+  **tested headlessly** under node via `wasm-bindgen-test-runner` (3 tests
+  pass), with a native `rlib` fallback test of the identical logic. An MV3
+  extension scaffold (`crates/tessera-wasm/extension/`) wires a
+  `Tessera-Presentation` header via `declarativeNetRequest` (limits documented).
+  A dedicated `wasm` CI job builds/tests it separately from the host gates.
+  **Human final mile (unchanged):** loading the extension in a real browser
+  against a live origin, and wiring issuance to a real issuer.
 
-## 4. Upstream contribution + research  ·  *background (posting needs your OK)*
+## 4. Upstream contribution + research  ·  *drafts done; posting needs your OK*
 
 - **Goal.** Give back to the standard and chart the post-quantum path.
 - **Approach.** (a) Draft a precise issue for the IETF Privacy Pass WG's
@@ -74,7 +85,11 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
 - **Risks / external.** Posting the issue is an outward action under **your**
   GitHub identity to a third-party repo — we draft it; **you** post it (or
   explicitly OK it).
-- **Status.** ⬜ background (draft); post gated on your go-ahead.
+- **Status.** ✅ **drafts done** — the IETF issue text
+  ([`upstream-arc-vector-issue.md`](./upstream-arc-vector-issue.md)) and
+  [`POST_QUANTUM.md`](./POST_QUANTUM.md) (what Shor breaks, MPCitH/lattice
+  options, migration sketch) are written. **Posting the issue is gated on your
+  explicit go-ahead** — outward action under your GitHub identity.
 
 ---
 
