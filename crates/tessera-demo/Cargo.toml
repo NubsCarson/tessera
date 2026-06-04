@@ -14,6 +14,14 @@ authors.workspace = true
 name = "tessera-demo"
 path = "src/main.rs"
 
+[features]
+# M8: compiles the Tor end-to-end integration test (tor.rs). It self-skips when
+# no `tor` binary is on PATH, so it stays green under CI's `--all-features` run
+# (no Tor there); where Tor exists it spawns a dedicated instance + onion service
+# and proves the credential admission path is transport-agnostic over a real
+# circuit. Run it: `cargo test -p tessera-demo --features tor-test`.
+tor-test = []
+
 [dependencies]
 tessera-arc = { path = "../tessera-arc" }
 tessera-issuer = { path = "../tessera-issuer" }

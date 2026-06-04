@@ -40,12 +40,25 @@ fn port_free(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
-pub fn run_onion_demo(
+/// The two transport-agnosticism observations from one onion probe over real Tor.
+pub struct OnionProbe {
+    /// Status of a NO-credential request over the Tor circuit (expected 403).
+    pub blocked_status: u16,
+    /// Status of a VALID-credential request over the same circuit (expected 200).
+    pub admitted_status: u16,
+}
+
+/// Spin up a dedicated Tor instance + onion service in front of the origin at
+/// `origin_port`, then make two requests over the real Tor circuit: one with no
+/// credential (expected blocked) and one carrying a fresh Tessera credential
+/// (expected admitted). UI-free, so both the `--tor` demo and the `tor-test`
+/// integration test reuse it. Tor + its descriptor publish make this ~30–60s.
+pub fn run_onion_probe(
     origin_port: u16,
     sk: &ServerPrivateKey,
     pk: &ServerPublicKey,
     rng: &mut OsRng,
-) -> Result<()> {
+) -> Result<OnionProbe> {
     if Command::new("tor")
         .arg("--version")
         .stdout(Stdio::null())
@@ -119,29 +132,103 @@ pub fn run_onion_demo(
     })
     .ok_or_else(|| Error::new(ErrorKind::TimedOut, "onion service not reachable in time"))?;
 
-    ui::result(
-        blocked.status == 403,
-        "over Tor · no credential",
-        blocked.status,
-        "blocked — same as any Tor exit today",
-    );
-
-    // Now present a real credential over the same Tor circuit.
+    // Present a real credential over the same Tor circuit.
     let credential = crate::issue_credential(sk, pk, rng);
     let mut client = TesseraClient::new(credential, crate::PRESENT_CTX, crate::LIMIT);
     let header = client
         .presentation_header(rng)
         .map_err(|_| Error::other("presentation failed"))?;
     let admitted = net::get_via_socks5(&proxy, &onion, 80, Some(&header))?;
-    ui::result(
-        admitted.status == 200,
-        "over Tor · with Tessera credential",
-        admitted.status,
-        "admitted — anonymous transport, trusted on proof alone",
-    );
 
     drop(tor); // explicit: kill tor + clean up now
+    Ok(OnionProbe {
+        blocked_status: blocked.status,
+        admitted_status: admitted.status,
+    })
+}
+
+/// `--tor`: the narrated onion demo — run [`run_onion_probe`] over a real Tor
+/// circuit and print the two results (no-credential blocked, credentialed
+/// admitted), demonstrating the credential path is transport-agnostic.
+pub fn run_onion_demo(
+    origin_port: u16,
+    sk: &ServerPrivateKey,
+    pk: &ServerPublicKey,
+    rng: &mut OsRng,
+) -> Result<()> {
+    let probe = run_onion_probe(origin_port, sk, pk, rng)?;
+    ui::result(
+        probe.blocked_status == 403,
+        "over Tor · no credential",
+        probe.blocked_status,
+        "blocked — same as any Tor exit today",
+    );
+    ui::result(
+        probe.admitted_status == 200,
+        "over Tor · with Tessera credential",
+        probe.admitted_status,
+        "admitted — anonymous transport, trusted on proof alone",
+    );
     Ok(())
+}
+
+#[cfg(all(test, feature = "tor-test"))]
+mod tor_transport_test {
+    use super::*;
+    use crate::net;
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use tessera_arc::keys::ServerPrivateKey;
+    use tessera_origin::OriginGuard;
+
+    /// M8 capstone (env-gated): the credential admission path is **transport-
+    /// agnostic** — the SAME `OriginGuard` that admits a direct request admits one
+    /// arriving over a REAL Tor circuit, and rejects one with no credential. This
+    /// self-skips when no `tor` binary is on PATH (e.g. CI), so it never fails for
+    /// a missing dependency; where Tor exists it spins up a dedicated instance +
+    /// onion service and proves the property end-to-end.
+    ///
+    /// Run: `cargo test -p tessera-demo --features tor-test`
+    #[test]
+    fn credential_path_is_transport_agnostic_over_real_tor() {
+        if Command::new("tor")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_err()
+        {
+            eprintln!("skipping tor transport test: no `tor` binary on PATH");
+            return;
+        }
+
+        let mut rng = OsRng;
+        let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind origin");
+        let origin_port = listener.local_addr().expect("addr").port();
+        let guard = Arc::new(OriginGuard::new(
+            sk.clone(),
+            pk,
+            crate::REQUEST_CTX,
+            crate::PRESENT_CTX,
+            crate::LIMIT,
+        ));
+        net::serve(listener, guard, None, None);
+
+        let probe =
+            run_onion_probe(origin_port, &sk, &pk, &mut rng).expect("onion probe over real Tor");
+
+        // The whole point: the guard's verdict is identical regardless of the
+        // transport the bytes arrived on.
+        assert_eq!(
+            probe.blocked_status, 403,
+            "no credential must be blocked over Tor"
+        );
+        assert_eq!(
+            probe.admitted_status, 200,
+            "valid credential must be admitted over Tor"
+        );
+    }
 }
 
 /// Poll `f` until it returns `Some`, or `timeout` elapses.
