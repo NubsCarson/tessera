@@ -1,0 +1,21 @@
+# Tessera on-chain court (Phase 2c) — Foundry config.
+#
+# Deliberately DEPENDENCY-FREE: no `lib/`, no `forge install`, no git submodules.
+# The test harness (a tiny `Test` base + a self-declared `Vm` cheatcode
+# interface) is vendored in `test/Std.sol`, so `forge build` + `forge test` run
+# fully offline in CI (only solc itself is fetched, which the toolchain caches).
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = []
+# Pin the compiler so the bytecode (and the cross-language vector) is
+# reproducible. 0.8.24 (Cancun-era) is widely available to the toolchain.
+solc = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false

@@ -1,7 +1,7 @@
 [package]
 name = "tessera-channel"
 version = "0.0.1"
-description = "The ZK Spilman channel PROTOCOL state machine: a unidirectional, monotone-decrementing, single-payee off-chain payment channel with user-signed states, sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute resolution. Plain crypto (P-256 ECDSA + SHA-256 commitment); the ZK balance-privacy (Phase 2b) and EVM on-chain court (Phase 2c) are NOT here."
+description = "The ZK Spilman channel PROTOCOL state machine: a unidirectional, monotone-decrementing, single-payee off-chain payment channel with user-signed states, sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute resolution. Plain crypto: EVM-native secp256k1 ECDSA over a recoverable keccak256 digest (so the Phase 2c on-chain court verifies states with `ecrecover`) + a SHA-256 state commitment. The ZK balance-privacy (Phase 2b) is NOT here; the EVM ChannelRegistry court (Phase 2c) lives in contracts/."
 readme = "README.md"
 publish = false # not published yet — flip after a third-party security audit
 edition.workspace = true
@@ -13,11 +13,20 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-# ECDSA over P-256 for the user/relayer signatures and the proof-of-relay
-# receipt. Same pinned `p256` the rest of the workspace uses — we only add the
-# `ecdsa` feature on top of the existing `arithmetic`/`hash2curve` set.
-p256 = { workspace = true, features = ["ecdsa"] }
-# SHA-256 for the state commitment S_i and the request/serve hashes.
+# secp256k1 ECDSA for ALL channel signatures (user state sig, relayer
+# co-signature, freshness binding, proof-of-relay receipt). Phase 2c revision:
+# the channel settles on the EVM, which verifies secp256k1 cheaply/natively via
+# `ecrecover` and P-256 only via a non-universal precompile or an expensive lib.
+# 2a used P-256 purely by workspace convenience; we switch to the EVM-native
+# curve so the on-chain `ChannelRegistry` court and Rust agree on identity (the
+# signer's 20-byte Ethereum address) byte-for-byte. Same RustCrypto 0.13 family.
+k256 = { workspace = true }
+# Keccak-256: the EVM hash. The signed digest is keccak256(domain || commitment)
+# and is signed RECOVERABLY, so a Solidity contract recovers the signer address.
+sha3.workspace = true
+# SHA-256: still used for the state commitment S_i and the request hash (the
+# commitment preimage is internal to Rust + the contract stores the 32-byte
+# commitment opaquely, so keeping SHA-256 there costs nothing on-chain).
 sha2.workspace = true
 rand_core.workspace = true
 hex.workspace = true

@@ -110,15 +110,17 @@ impl UserChannel {
     /// it, plus a freshness-binding signature against the relayer's challenge.
     ///
     /// Returns a [`Spend`] with two user signatures:
-    ///   * `state.sig_user` over the **bare** state commitment `S_{i+1}` — the
-    ///     *durable* unit of truth, re-checkable at settlement without any wire
-    ///     context. This is the load-bearing fix: the user signs **every** state,
-    ///     so a later fork is attributable to the user's key.
-    ///   * `sig_fresh` over `H(S_{i+1} || epoch || nonce || request_hash)` — the
-    ///     *ephemeral* binding the relayer checks so a spend can't be wire-
+    ///   * `state.sig_user` — a **recoverable secp256k1** signature over the
+    ///     state's chain-facing keccak digest [`ChannelState::state_digest`] (the
+    ///     *durable* unit of truth, re-checkable at settlement and by the on-chain
+    ///     court via `ecrecover` without any wire context). This is the
+    ///     load-bearing fix: the user signs **every** state, so a later fork is
+    ///     attributable to the user's key/address.
+    ///   * `sig_fresh` over `keccak256(S_{i+1} || epoch || nonce || request_hash)`
+    ///     — the *ephemeral* binding the relayer checks so a spend can't be wire-
     ///     replayed against a different request/epoch. It is deliberately *not*
-    ///     part of the persistent state (it would be the Groth16 proof π in the
-    ///     full design — see `DESIGN.md` §2).
+    ///     part of the persistent state and never reaches the chain (it would be
+    ///     the Groth16 proof π in the full design — see `DESIGN.md` §2).
     ///
     /// `state.sig_relayer` is `None`; the relayer co-signs next. Errors with
     /// [`ChannelError::Underflow`] if `cost` exceeds the current balance.
@@ -132,9 +134,14 @@ impl UserChannel {
             balance: self.latest.balance,
             cost,
         })?;
-        let commitment = next.commitment();
-        let sig_user = self.keys.sign(&commitment);
-        let sig_fresh = self.keys.sign(&spend_message(&commitment, fresh));
+        // The DURABLE, chain-facing signature is over the state's keccak digest
+        // (recoverable secp256k1) — the exact bytes the on-chain court verifies.
+        let sig_user = self.keys.sign_digest(&next.state_digest());
+        // The ephemeral freshness binding is over a keccak digest of
+        // (commitment || epoch || nonce || request_hash). Off-chain only.
+        let sig_fresh = self
+            .keys
+            .sign_digest(&spend_message(&next.commitment(), fresh));
         Ok(Spend {
             signed: SignedState {
                 state: next,
@@ -301,15 +308,21 @@ impl RelayerChannel {
 
         // (4) and bound it to this freshness challenge (replay binding).
         let fresh_msg = spend_message(&proposed.state.commitment(), fresh);
-        if !self.params.user_pk.verify(&fresh_msg, &spend.sig_fresh) {
+        if !self
+            .params
+            .user_pk
+            .verify_digest(&fresh_msg, &spend.sig_fresh)
+        {
             return Err(ChannelError::StaleFreshness);
         }
 
         // All checks passed → co-sign and advance the cursor. Burn the nonce so
-        // the same freshness challenge can't drive a second spend (replay).
+        // the same freshness challenge can't drive a second spend (replay). The
+        // co-signature is over the SAME chain-facing state digest as `sig_user`,
+        // so the on-chain court verifies both with `ecrecover`.
         self.seen_nonces.insert(fresh.nonce);
         self.latest = proposed.state;
-        let sig_relayer = self.keys.sign(&proposed.state.commitment());
+        let sig_relayer = self.keys.sign_digest(&proposed.state.state_digest());
         Ok(SignedState {
             state: proposed.state,
             sig_user: proposed.sig_user.clone(),

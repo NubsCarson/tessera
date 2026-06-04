@@ -14,9 +14,9 @@
 //!     receipt → the unit is not claimable → the refusal-drain (take the payment,
 //!     refuse to relay) gains the relayer nothing.
 
-use crate::crypto::{h, Hash, KeyPair, Sig, VerifyingKey};
+use crate::crypto::{h, keccak_domain, EthDigest, Hash, KeyPair, Sig, VerifyingKey};
 
-/// Domain for the bytes the user signs in a spend (state commitment + freshness).
+/// Domain for the digest the user signs in a spend (state commitment + freshness).
 const SPEND_DOMAIN: &[u8] = b"tessera-channel/spend/v1";
 /// Domain for the relay-acknowledgement receipt.
 const ACK_DOMAIN: &[u8] = b"tessera-channel/relay-ack/v1";
@@ -61,19 +61,23 @@ impl RelayRequest {
     }
 }
 
-/// The exact message the user signs for a spend: the next state's commitment
-/// **bound to** the relayer's freshness challenge.
+/// The exact **keccak digest** the user signs for a spend: the next state's
+/// commitment **bound to** the relayer's freshness challenge.
 ///
-/// `= H(SPEND_DOMAIN || S_{i+1} || epoch || nonce || request_hash)`.
+/// `= keccak256(SPEND_DOMAIN || S_{i+1} || epoch || nonce || request_hash)`.
 ///
-/// Both the user (when signing) and the relayer (when verifying) compute this,
-/// so they must agree on the freshness challenge — a replayed spend carries the
-/// old freshness, which won't match the fresh challenge the relayer expects.
-pub fn spend_message(next_commitment: &Hash, fresh: &RelayRequest) -> Hash {
+/// This is an **off-chain-only** signature (the freshness binding never reaches
+/// the chain — it stands in for the Groth16 proof π), but it is keccak-hashed
+/// and signed recoverably with the *same* [`EthSig`](crate::EthSig) path as the durable state
+/// signature, so the crate has a single signature type. Both the user (when
+/// signing) and the relayer (when verifying) compute this, so they must agree on
+/// the freshness challenge — a replayed spend carries the old freshness, which
+/// won't match the fresh challenge the relayer expects.
+pub fn spend_message(next_commitment: &Hash, fresh: &RelayRequest) -> EthDigest {
     let mut buf = [0u8; 32 + 48];
     buf[..32].copy_from_slice(next_commitment);
     buf[32..].copy_from_slice(&fresh.freshness_bytes());
-    h(SPEND_DOMAIN, &buf)
+    keccak_domain(SPEND_DOMAIN, &buf)
 }
 
 /// A signed proof-of-relay receipt: the relayer attests it forwarded the packet
@@ -86,7 +90,8 @@ pub fn spend_message(next_commitment: &Hash, fresh: &RelayRequest) -> Hash {
 pub struct RelayAck {
     /// The commitment of the state whose relay this receipt acknowledges.
     pub state_commitment: Hash,
-    /// The relayer's signature over `H(ACK_DOMAIN || state_commitment)`.
+    /// The relayer's recoverable secp256k1 signature over
+    /// `keccak256(ACK_DOMAIN || state_commitment)`.
     pub sig: Sig,
 }
 
@@ -99,7 +104,7 @@ impl RelayAck {
     /// then issue. A relayer that refuses to relay simply has no receipt to claim
     /// with. This is the asymmetry that defeats the refusal-drain.
     pub fn issue(relayer: &KeyPair, state_commitment: Hash) -> Self {
-        let sig = relayer.sign(&Self::message(&state_commitment));
+        let sig = relayer.sign_digest(&Self::message(&state_commitment));
         Self {
             state_commitment,
             sig,
@@ -111,10 +116,10 @@ impl RelayAck {
     /// claim another).
     pub fn is_valid_for(&self, relayer_pk: &VerifyingKey, state_commitment: &Hash) -> bool {
         self.state_commitment == *state_commitment
-            && relayer_pk.verify(&Self::message(state_commitment), &self.sig)
+            && relayer_pk.verify_digest(&Self::message(state_commitment), &self.sig)
     }
 
-    fn message(state_commitment: &Hash) -> Hash {
-        h(ACK_DOMAIN, state_commitment)
+    fn message(state_commitment: &Hash) -> EthDigest {
+        keccak_domain(ACK_DOMAIN, state_commitment)
     }
 }

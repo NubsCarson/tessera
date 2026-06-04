@@ -16,10 +16,16 @@
 //! The transition is **monotone-decrementing**: `balance` only goes down and
 //! `seq` only goes up, by construction of [`ChannelState::spend`].
 
-use crate::crypto::{h, Hash, Sig, VerifyingKey};
+use crate::crypto::{h, keccak_domain, EthDigest, Hash, Sig, VerifyingKey};
 
-/// Domain string for the state commitment.
+/// Domain string for the state commitment `S_i` (SHA-256).
 const STATE_DOMAIN: &[u8] = b"tessera-channel/state/v1";
+
+/// Domain string for the **chain-facing signed digest** over a state commitment
+/// (keccak256). This is the digest the user (`sig_user`) and relayer
+/// (`sig_relayer`) sign recoverably and that the on-chain `ChannelRegistry`
+/// court feeds to `ecrecover`. Keep this string + layout identical in Solidity.
+const STATE_SIG_DOMAIN: &[u8] = b"tessera-channel/state-sig/v1";
 
 /// A channel identifier. In the full design this is the pool-derived id the
 /// genesis state is opened under; here it is an opaque 32-byte tag.
@@ -98,6 +104,19 @@ impl ChannelState {
         h(STATE_DOMAIN, &buf)
     }
 
+    /// The **chain-facing signed digest** for this state:
+    /// `keccak256(len(STATE_SIG_DOMAIN) || STATE_SIG_DOMAIN || commitment)`.
+    ///
+    /// This is the 32 bytes that `sig_user` / `sig_relayer` are signed over
+    /// (recoverably), and that the on-chain court reconstructs and feeds to
+    /// `ecrecover`. It folds in the SHA-256 commitment (so it still binds every
+    /// field of the state) but the *outer* hash is keccak256 because that is the
+    /// EVM-native one. The Solidity court computes the byte-identical value:
+    /// `keccak256(abi.encodePacked(uint64(domain.length), domain, commitment))`.
+    pub fn state_digest(&self) -> EthDigest {
+        keccak_domain(STATE_SIG_DOMAIN, &self.commitment())
+    }
+
     /// Produce the next state spending `cost`: `balance -= cost`, `seq += 1`,
     /// same `chan_id`/`salt`.
     ///
@@ -162,16 +181,17 @@ pub struct SignedState {
 
 impl SignedState {
     /// Verify the **user** signature against `user_pk` over this state's
-    /// commitment.
+    /// chain-facing digest (the recoverable secp256k1 sig the on-chain court
+    /// also accepts via `ecrecover`).
     pub fn user_sig_valid(&self, user_pk: &VerifyingKey) -> bool {
-        user_pk.verify(&self.state.commitment(), &self.sig_user)
+        user_pk.verify_digest(&self.state.state_digest(), &self.sig_user)
     }
 
     /// Verify the **relayer** co-signature against `relayer_pk`. Returns `false`
     /// if the co-signature is absent.
     pub fn relayer_sig_valid(&self, relayer_pk: &VerifyingKey) -> bool {
         match &self.sig_relayer {
-            Some(sig) => relayer_pk.verify(&self.state.commitment(), sig),
+            Some(sig) => relayer_pk.verify_digest(&self.state.state_digest(), sig),
             None => false,
         }
     }

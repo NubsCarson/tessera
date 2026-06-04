@@ -29,6 +29,11 @@ categories = ["cryptography", "authentication"]
 
 [workspace.dependencies]
 p256 = { version = "0.13", default-features = false, features = ["arithmetic", "hash2curve"] }
+# secp256k1 (the EVM-native curve). Same RustCrypto `ecdsa`/`elliptic-curve`
+# 0.13 family as `p256`, so the workspace shares one ECDSA stack. Used by
+# `tessera-channel` for the CHAIN-FACING state signatures so an EVM contract can
+# recover the signer with `ecrecover` (see crates/tessera-channel Phase 2c).
+k256 = { version = "0.13", default-features = false, features = ["arithmetic", "ecdsa"] }
 elliptic-curve = { version = "0.13", default-features = false, features = ["hash2curve", "sec1"] }
 crypto-bigint = { version = "0.5", default-features = false }
 sha2 = { version = "0.10", default-features = false }

@@ -90,7 +90,8 @@ around it:
 | [`tessera-client`](./crates/tessera-client) | Holds a credential and mints one fresh, unlinkable presentation per request. |
 | [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site (the Anthropic API included), optionally over Tor. |
 | [`tessera-relay`](./crates/tessera-relay) | The first onion hop: a credential-blind relay in front of the credential-gated exit (`tessera-proxy`), forming the **2-hop split-trust loop** — the relay learns {client, exit} but never the destination, the exit learns {destination, a valid credential} but never the client; neither sees content. Phase 1 "prove the loop", tested end-to-end. |
-| [`tessera-channel`](./crates/tessera-channel) | The **ZK Spilman channel protocol state machine** (Phase 2a, `DESIGN.md` §2): a unidirectional, monotone-decrementing, single-payee off-chain payment channel in plain Rust — user-signed states (so equivocation is attributable), sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute/settlement. Plain crypto (P-256 ECDSA + SHA-256 commitment). **The ZK balance-privacy layer (Phase 2b) and the EVM on-chain court (Phase 2c) are NOT here yet.** |
+| [`tessera-channel`](./crates/tessera-channel) | The **ZK Spilman channel protocol state machine** (`DESIGN.md` §2): a unidirectional, monotone-decrementing, single-payee off-chain payment channel in plain Rust — user-signed states (so equivocation is attributable), sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute/settlement. Chain-facing signatures are **EVM-native secp256k1 over a recoverable keccak256 digest** (so the Phase 2c court verifies them with `ecrecover`) + a SHA-256 state commitment. **The ZK balance-privacy layer (Phase 2b) is NOT here yet.** |
+| [`contracts/`](./contracts) | The **Phase 2c EVM on-chain court** (`DESIGN.md` §6): a Foundry `ChannelRegistry.sol` mirroring `tessera-channel`'s settlement logic — escrow/open, cooperative & unilateral close + challenge, equivocation slash, refund-on-timeout — verifying the crate's secp256k1 states via `ecrecover`. Includes a **real Rust→Solidity cross-language signature vector** test. Testnet-only, UNAUDITED. |
 | [`tessera-demo`](./crates/tessera-demo) | The runnable end-to-end demo: narrated CLI, a `--serve` browser hub, and a `--tor` onion-service path. |
 
 Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
@@ -127,6 +128,8 @@ vectors:
 | `tessera-origin` optional `tower` middleware (`TesseraLayer`) | ✅ feature-gated drop-in `Layer`; proven in a real `axum` server over a real socket (`tessera-tower-demo`) — admit/malformed/replay/fresh |
 | `tessera-origin` pluggable spent-tag store (`SpentTagStore`) | ✅ in-memory default + durable `FileTagStore`; double-spend survives a guard restart (tested) |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
+| `tessera-channel` — ZK Spilman channel protocol state machine (Phase 2a) | ✅ user-signed states / sign-then-serve / proof-of-relay / off-chain settlement; secp256k1+keccak chain-facing sigs |
+| `contracts/ChannelRegistry.sol` — EVM on-chain court (Phase 2c) | ✅ escrow/close/challenge/slash/refund via `ecrecover`; **Rust→Solidity cross-language vector verified**; testnet-only, UNAUDITED |
 | Hardening — CT fix, fuzzing, benches, threat model | ✅ internal audit applied ([`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md)); **not** third-party audited |
 
 † The ARC §10.2 *proof* blobs are not byte-reproducible from the pinned
@@ -201,6 +204,9 @@ cargo run -p tessera-proxy            # credential-gated CONNECT proxy (Claude o
 
 # fuzz — nightly + `cargo install cargo-fuzz`
 cargo +nightly fuzz run wire_from_bytes -- -max_total_time=30
+
+# the Phase 2c on-chain court (Foundry; no external deps)
+cd contracts && forge build && forge test    # incl. the Rust->Solidity vector
 ```
 
 ## License

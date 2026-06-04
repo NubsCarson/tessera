@@ -33,7 +33,35 @@
 //!     verifier (the *on-chain court*). [`settlement`] is an **off-chain model**
 //!     of that court's verdict logic so the logic can be tested now; there is no
 //!     chain, no funds move, and the timeout/refund branch is modeled as state,
-//!     not enforced by a CLTV.
+//!     not enforced by a CLTV. The *Solidity* `ChannelRegistry` that **does**
+//!     move funds lives in [`contracts/`](../../../contracts) and verifies the
+//!     very signatures this crate produces (see Crypto, next).
+//!
+//! ## Crypto — EVM-native secp256k1 over a recoverable keccak digest (2c revision)
+//!
+//! **2a signed with P-256 ECDSA**; that was a workspace-convenience choice and is
+//! **deliberately revised here**. Because the channel settles on the EVM — which
+//! verifies **secp256k1** cheaply and universally via the `ecrecover` precompile,
+//! but P-256 only via a non-universal precompile or an expensive library — the
+//! **durable, chain-facing** signatures are now **Ethereum-style secp256k1**:
+//!
+//!   * keys are secp256k1 ([`KeyPair`], via the `k256` RustCrypto crate);
+//!   * the signed message is the **keccak256 digest**
+//!     [`ChannelState::state_digest`] `= keccak256(domain || S_i)`, signed
+//!     **recoverably** ([`Sig`] = `r ‖ s ‖ v`, low-`s`, `v ∈ {27,28}`), so the
+//!     Solidity court recovers the signer with `ecrecover(digest, v, r, s)`;
+//!   * identity is the **20-byte Ethereum address**
+//!     [`VerifyingKey::eth_address`] `= keccak256(pubkey[1..])[12..]`, so Rust and
+//!     the contract agree on *who signed*.
+//!
+//! The SHA-256 state commitment `S_i` is kept (it is internal / stored opaquely
+//! on-chain); only the *signed digest* is keccak. Every signature here — the
+//! durable state sig, the relayer co-signature, the off-chain freshness binding,
+//! and the proof-of-relay receipt — uses this one recoverable path (the latter
+//! two never touch chain and could have stayed P-256, but sharing one signature
+//! type shrinks the surface). The Rust↔Solidity match is pinned by
+//! `tests/eth_vector.rs` (Rust side) + `contracts/test/CrossLanguageVector.t.sol`
+//! (the contract recovering the *same* address from the *same* bytes).
 //!
 //! ## The corrected core (what the red-team had to fix)
 //!
@@ -112,8 +140,9 @@
 //! ```
 //!
 //! This crate is research-grade and **unaudited**. It is a host (`std`) crate
-//! with `#![forbid(unsafe_code)]`, depending only on the workspace's existing
-//! `p256` (ECDSA), `sha2`, `rand_core`, and `hex`.
+//! with `#![forbid(unsafe_code)]`, depending only on the workspace's `k256`
+//! (secp256k1 ECDSA), `sha3` (keccak256, the EVM hash), `sha2` (SHA-256 state
+//! commitment), `rand_core`, and `hex`.
 
 #![forbid(unsafe_code)]
 
@@ -125,7 +154,7 @@ pub mod state;
 mod channel;
 
 pub use channel::{Channel, RelayerChannel, Served, Spend, UserChannel};
-pub use crypto::{KeyPair, Sig, VerifyingKey};
+pub use crypto::{EthAddress, EthDigest, EthSig, KeyPair, Sig, VerifyingKey};
 pub use relay::{RelayAck, RelayRequest};
 pub use settlement::{settle, Verdict};
 pub use state::{ChannelState, SignedState, StateError};

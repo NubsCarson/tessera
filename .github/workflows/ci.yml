@@ -149,6 +149,34 @@ jobs:
       - name: End-to-end test (admit / malformed / replay over real HTTP)
         run: cargo test --manifest-path crates/tessera-tower-demo/Cargo.toml
 
+  contracts:
+    name: contracts (Foundry on-chain court)
+    runs-on: ubuntu-latest
+    # The Phase 2c EVM court lives in `contracts/`, a self-contained Foundry
+    # project (NOT a Cargo crate). Built/tested here on its own, like the wasm
+    # and tower-e2e jobs. It is DEPENDENCY-FREE: no `forge install`, no git
+    # submodule, no `lib/` — the test harness is vendored in `contracts/test/
+    # Std.sol`, so only `solc` itself is fetched (by the Foundry toolchain). One
+    # of the tests pins a REAL Rust-signed state (the cross-language vector) and
+    # verifies it via the contract's `ecrecover` path.
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Foundry (forge + cast)
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Show toolchain versions
+        run: forge --version && cast --version
+
+      - name: forge build
+        run: forge build
+
+      - name: forge test (incl. the Rust->Solidity cross-language vector)
+        run: forge test -vv
+
   fuzz:
     name: fuzz build + smoke
     runs-on: ubuntu-latest

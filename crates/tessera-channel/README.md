@@ -4,9 +4,27 @@
 payment layer from [`docs/DESIGN.md`](../../docs/DESIGN.md) §2: a
 **unidirectional, monotone-decrementing, single-payee** Spilman channel (the
 single payee is the relayer). It is implemented in plain Rust with **plain
-crypto** — P-256 ECDSA signatures (via the workspace's existing `p256`) and a
-SHA-256 state commitment — so the protocol logic the red-team had to fix can be
-*proven correct on its own*, before the privacy and on-chain layers wrap it.
+crypto** — **EVM-native secp256k1 ECDSA** signatures over a **recoverable
+keccak256 digest** (via the `k256` + `sha3` RustCrypto crates) and a SHA-256
+state commitment — so the protocol logic the red-team had to fix can be *proven
+correct on its own*, and the **Phase 2c on-chain court verifies the very same
+signatures via `ecrecover`** (`contracts/`).
+
+> ### Phase 2c revision — P-256 → secp256k1 (deliberate)
+>
+> 2a signed with **P-256** ECDSA, a workspace-convenience choice (the curve
+> `tessera-arc` ships). This crate now signs the **chain-facing** state
+> signatures with **Ethereum-style secp256k1** instead, because the channel
+> settles on the EVM, which verifies secp256k1 cheaply/universally via the
+> `ecrecover` precompile and P-256 only via a non-universal precompile
+> (EIP-7212) or an expensive in-EVM library. The signed message is the
+> **keccak256 digest** `keccak256(domain ‖ S_i)`, signed **recoverably**
+> (`r‖s‖v`, low-`s`, `v ∈ {27,28}`); identity is the **20-byte Ethereum address**
+> `keccak256(pubkey[1..])[12..]`. The SHA-256 *commitment* `S_i` is unchanged.
+> The freshness-binding and proof-of-relay signatures **never touch chain**, but
+> were moved onto the same recoverable-secp256k1 path so the crate has a single
+> signature type (less surface). The Rust↔Solidity match is **pinned by a real
+> cross-language vector** (see [Cross-language vector](#cross-language-vector)).
 
 It is **not** Lightning / eltoo / Poon-Dryja: an access rail needs a **payee,
 not a payment network**, so there are no HTLCs, routing, liquidity, revocation
@@ -21,7 +39,8 @@ boundary:
 |-------|------|:--------------:|
 | **2a** | The off-chain channel **protocol / state machine** — user-signed states, sign-then-serve co-signing, proof-of-relay, off-chain dispute resolution | ✅ **yes — this is it** |
 | **2b** | The Groth16 `R_dec` **ZK circuit** that *hides the balance* | ❌ **not here** |
-| **2c** | The EVM `ShieldedPool` / `ChannelRegistry` / dispute verifier — the **on-chain court** | ❌ **not here** |
+| **2c** | The EVM `ChannelRegistry` dispute/settlement court | ✅ **the Solidity court is in [`contracts/`](../../contracts)**; this crate now produces the secp256k1/`ecrecover`-verifiable signatures it consumes |
+| **2c** | The `ShieldedPool` (unlinkable funding) + Groth16 dispute verifier | ❌ **not here** |
 
 Concretely, the things this crate **does not do** and does not pretend to:
 
@@ -30,12 +49,14 @@ Concretely, the things this crate **does not do** and does not pretend to:
   zero-knowledge; it only adds **balance privacy**, it does **not** change the
   protocol correctness proven here. The state commitment is a plain SHA-256
   where the full design uses a Poseidon-in-circuit commitment.
-- **No chain. No money moves.** There is no `ShieldedPool`, no `ChannelRegistry`,
-  no CLTV, no bonds, no gas. "Escrow", "open", "refund-on-timeout" and "slash"
-  are **verdicts** ([`settle`](src/settlement.rs) returns a `Verdict`) that a
-  future on-chain court would *enforce*. This crate computes the verdict; it does
-  not settle it. The timeout/refund branch is modeled as **state-machine logic**,
-  not as an on-chain timelock.
+- **No chain *in this crate*. No money moves *here*.** `tessera-channel` itself
+  has no `ChannelRegistry`, no CLTV, no bonds, no gas: "Escrow", "open",
+  "refund-on-timeout" and "slash" are **verdicts** ([`settle`](src/settlement.rs)
+  returns a `Verdict`). The Phase 2c **Solidity `ChannelRegistry`** in
+  [`contracts/`](../../contracts) is the on-chain court that *enforces* those
+  verdicts (escrow, cooperative/unilateral close, equivocation slash,
+  refund-on-timeout) and verifies this crate's signatures with `ecrecover`. There
+  is still **no `ShieldedPool`** (unlinkable funding) and **no Groth16 verifier**.
 - **No transport / onion / mixnet.** "Serve" (the relayer forwarding the packet)
   is modeled as a returned `Served` marker / a `RelayAck` receipt, not real
   forwarding. That lives in `tessera-relay` / the transport layer.
@@ -87,6 +108,25 @@ Off-chain **settlement** (`settle`) models the on-chain court's verdict:
 Plus inline unit tests for commitment determinism / field-sensitivity and the
 state-transition rules.
 
+## Cross-language vector
+
+The whole point of the Phase 2c secp256k1 switch is that **the same signature
+verifies in Rust and in the Solidity court**. That match is pinned, not assumed:
+
+- [`examples/eth_vector.rs`](examples/eth_vector.rs) mints a **fixed** keypair,
+  builds a **real** signed state `S_1` (open `B0=1000`, spend `400` ⇒
+  `balance=600`, `seq=1`), and prints
+  `(address, commitment, state_digest, r, s, v)` for both the user sig and the
+  relayer co-sig. Run: `cargo run -p tessera-channel --example eth_vector`.
+- [`tests/eth_vector.rs`](tests/eth_vector.rs) hard-codes that vector and asserts
+  the Rust side still reproduces it byte-for-byte **and** that the Rust
+  `ecrecover`-equivalent (`VerifyingKey::recover_from_digest`) recovers the
+  signer's address.
+- [`../../contracts/test/CrossLanguageVector.t.sol`](../../contracts/test/CrossLanguageVector.t.sol)
+  hard-codes the **identical** bytes and asserts Solidity's `ecrecover` recovers
+  the **same** address and that `ChannelRegistry`'s verification path accepts the
+  state. If the encoding or digest ever drifts, both suites fail.
+
 ## Honest limits
 
 - A **non-forking linear rollback** (the user re-presenting an *older*
@@ -100,15 +140,20 @@ state-transition rules.
   (the cumulative balance prices in every prior unit). A more granular per-unit
   receipt accounting is straightforward but not modeled.
 - This is **research-grade and UNAUDITED**. The crypto primitives are from
-  audited RustCrypto (`p256`, `sha2`); the protocol logic on top is exactly what
-  still needs review.
+  audited RustCrypto (`k256`, `sha3`, `sha2`); the protocol logic on top — and
+  the cross-language encoding match with the contract — is exactly what still
+  needs review.
 
 ## Design / module map
 
-- [`src/state.rs`](src/state.rs) — `ChannelState`, the commitment `S_i`, genesis
-  `S_0`, the monotone-decrement transition, and `SignedState`.
-- [`src/crypto.rs`](src/crypto.rs) — thin P-256 ECDSA (`KeyPair`/`Sig`/
-  `VerifyingKey`) + domain-separated SHA-256 wrappers.
+- [`src/state.rs`](src/state.rs) — `ChannelState`, the SHA-256 commitment `S_i`,
+  the chain-facing keccak digest `state_digest()`, genesis `S_0`, the
+  monotone-decrement transition, and `SignedState`.
+- [`src/crypto.rs`](src/crypto.rs) — secp256k1 ECDSA (`KeyPair`/`Sig`=`EthSig`/
+  `VerifyingKey`): recoverable signing over a keccak digest (`sign_digest`),
+  `ecrecover`-equivalent recovery (`recover_from_digest`), the 20-byte
+  `eth_address`, and the domain-separated `h` (SHA-256) / `keccak_domain`
+  (keccak256, the chain-facing digest) hashers.
 - [`src/relay.rs`](src/relay.rs) — the freshness challenge (`RelayRequest`) and
   the proof-of-relay receipt (`RelayAck`).
 - [`src/channel.rs`](src/channel.rs) — the state machine: `Channel::open`,
@@ -117,5 +162,6 @@ state-transition rules.
 - [`src/settlement.rs`](src/settlement.rs) — the off-chain court: `settle` →
   `Verdict::{Settle, SlashUser, RefundUser}`.
 
-Std host crate, `#![forbid(unsafe_code)]`, MSRV 1.74, deps only from the existing
-workspace set (`p256` with the `ecdsa` feature, `sha2`, `rand_core`, `hex`).
+Std host crate, `#![forbid(unsafe_code)]`, MSRV 1.74, deps from the workspace set
+(`k256` with the `ecdsa` feature, `sha3` for keccak256, `sha2`, `rand_core`,
+`hex`).

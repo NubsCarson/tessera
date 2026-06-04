@@ -21,3 +21,13 @@
 # and pinning the full dependency graph is the right call for reproducible,
 # auditable security tooling.
 
+# Foundry (contracts/, the Phase 2c on-chain court). Build/cache outputs and any
+# fetched Solidity deps are regenerable, not committed. The current suite is
+# DEPENDENCY-FREE (no forge install / submodules — the test harness is vendored
+# in contracts/test/Std.sol), so `lib/` is normally empty, but ignore it anyway
+# in case OpenZeppelin/solmate is added later via `forge install`.
+/contracts/out
+/contracts/cache
+/contracts/lib
+/contracts/broadcast
+

@@ -35,6 +35,38 @@ The pre-1.0 development line. **Research-grade and unaudited** — see
   benches, `docs/THREAT_MODEL.md`, and CI (fmt, clippy `-D warnings`, tests,
   docs, MSRV 1.74, `cargo-audit`, nightly fuzz).
 
+#### Payment layer — ZK Spilman channel (`DESIGN.md` §2/§6)
+- `tessera-channel` (**Phase 2a**) — the off-chain channel **protocol state
+  machine**: monotone-decrementing single-payee Spilman channel, **user-signed
+  states** (equivocation is attributable), **sign-then-serve** co-signing,
+  HOPR-style **proof-of-relay**, and an off-chain `settle` → `Verdict::{Settle,
+  SlashUser, RefundUser}` model of the on-chain court.
+- `contracts/` (**Phase 2c**) — a Foundry `ChannelRegistry.sol`: the **EVM
+  on-chain court** that enforces those verdicts (`open` escrow, `cooperativeClose`,
+  `unilateralClose`+`challenge`+`settleDispute`, `slashEquivocation`,
+  `refundOnTimeout`), verifying channel states with the **`ecrecover`**
+  precompile. Checks-effects-interactions + a `nonReentrant` guard. No external
+  Solidity deps (the test harness is vendored; no `forge install`/submodules).
+  New `contracts` CI job (Foundry toolchain → `forge build` + `forge test`).
+- **The cross-language proof:** `examples/eth_vector.rs` emits a real Rust-signed
+  state; `tests/eth_vector.rs` (Rust) and `contracts/test/CrossLanguageVector.t.sol`
+  (Solidity) both pin it, and the contract **recovers the same Ethereum address
+  via `ecrecover`** from the identical bytes — i.e. a Rust-signed state verifies
+  on-chain unchanged.
+
+### Changed
+- **`tessera-channel` chain-facing signatures: P-256 → EVM-native secp256k1**
+  (a deliberate revision of Phase 2a). The channel settles on the EVM, which
+  verifies secp256k1 cheaply/universally via `ecrecover` and P-256 only via a
+  non-universal precompile (EIP-7212) or an expensive in-EVM library; 2a used
+  P-256 purely by workspace convenience. The **durable state signature**
+  (`sig_user`), the relayer **co-signature**, and (for a single signature type)
+  the freshness-binding and proof-of-relay sigs now use **recoverable secp256k1**
+  (`k256`) over a **keccak256 digest** (`keccak256(domain ‖ commitment)`); identity
+  is the **20-byte Ethereum address** `keccak256(pubkey[1..])[12..]`. The SHA-256
+  state *commitment* is unchanged. New deps: `k256` (workspace) and `sha3` (already
+  in-tree). All existing `tessera-channel` tests adapted and still pass.
+
 #### Post-v0 frontier ([`docs/ROADMAP.md`](./docs/ROADMAP.md))
 - **Audit-readiness:** [`docs/SECURITY_ARGUMENT.md`](./docs/SECURITY_ARGUMENT.md)
   — every security property as construction → assumption → gap, with `file:line`.

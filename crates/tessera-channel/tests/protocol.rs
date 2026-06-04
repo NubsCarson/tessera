@@ -8,8 +8,10 @@
 //!   5. sign-then-serve ordering,
 //!   6. balance underflow.
 //!
-//! Everything is plain crypto (P-256 ECDSA + SHA-256). No ZK, no chain — those
-//! are Phase 2b / 2c and wrap this logic later.
+//! Everything is plain crypto: EVM-native secp256k1 ECDSA over a recoverable
+//! keccak256 digest (so the Phase 2c on-chain court verifies the same sigs via
+//! `ecrecover`) + a SHA-256 state commitment. No ZK here (Phase 2b); the Solidity
+//! court that consumes these signatures lives in `contracts/` (Phase 2c).
 
 use rand_core::OsRng;
 
