@@ -8,11 +8,13 @@ members = [
     "crates/tessera-proxy",
     "crates/tessera-demo",
 ]
-# The fuzz crate is its own (nightly-only) workspace; keep it out of the default
-# build. tessera-wasm is likewise its own workspace (wasm32-only deps, e.g.
-# getrandom's `js` feature) and must never touch the host fmt/clippy/test/MSRV/
-# doc gates — it has its own `wasm` CI job.
-exclude = ["fuzz", "crates/tessera-wasm"]
+# Excluded, self-contained workspaces — each kept OUT of the host gates so its
+# heavy/special deps can't perturb the MSRV-1.74 / clippy / test / doc build,
+# and each has its own CI job:
+#   fuzz                  — nightly-only cargo-fuzz targets
+#   crates/tessera-wasm   — wasm32-only deps (getrandom `js`)
+#   crates/tessera-tower-demo — axum + tokio (real-HTTP middleware e2e)
+exclude = ["fuzz", "crates/tessera-wasm", "crates/tessera-tower-demo"]
 
 [workspace.package]
 edition = "2021"

@@ -128,6 +128,27 @@ jobs:
       - name: Native fallback test of the identical mint -> present logic
         run: cargo test --manifest-path crates/tessera-wasm/Cargo.toml
 
+  tower-e2e:
+    name: tower middleware e2e (real axum server)
+    runs-on: ubuntu-latest
+    # tessera-tower-demo is its own excluded workspace (axum + tokio); the
+    # end-to-end test stands up a real axum server on a multi-threaded tokio
+    # runtime and drives it over a real socket. Built/tested here only.
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Components
+        run: rustup component add clippy rustfmt
+
+      - name: Format check (demo crate)
+        run: cargo fmt --manifest-path crates/tessera-tower-demo/Cargo.toml --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --manifest-path crates/tessera-tower-demo/Cargo.toml --all-targets -- -D warnings
+
+      - name: End-to-end test (admit / malformed / replay over real HTTP)
+        run: cargo test --manifest-path crates/tessera-tower-demo/Cargo.toml
+
   fuzz:
     name: fuzz build + smoke
     runs-on: ubuntu-latest

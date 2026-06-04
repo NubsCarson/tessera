@@ -41,11 +41,17 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
   all 1.74-clean). A live Cloudflare deploy needs **your** account and a wasm
   build of the guard with the server secret at the edge — out of scope here;
   documented as a sketch, **not** shipped as a compiled Worker.
-- **Status.** ✅ **done** — `TesseraLayer`/`TesseraGuard` shipped behind the
-  off-by-default `tower` feature (`crates/tessera-origin/src/tower_layer.rs`),
-  4-case integration test green, every CI gate (fmt/clippy/test/MSRV-1.74/doc)
-  green. Edge-deploy path documented in the origin README; a compiled Worker is
-  explicitly deferred (needs the server secret at the edge + a wasm guard build).
+- **Status.** ✅ **done + proven in a real server** — `TesseraLayer`/`TesseraGuard`
+  shipped behind the off-by-default `tower` feature
+  (`crates/tessera-origin/src/tower_layer.rs`), 4-case unit test green. Beyond
+  that, `crates/tessera-tower-demo` is a runnable **`axum` server** using the
+  layer plus an end-to-end test that stands it up on a **multi-threaded `tokio`
+  runtime** and drives it over a **real TCP socket**: no-credential → `403`,
+  malformed → `403`, valid → `200`, replay → `403` (double-spend), fresh → `200`.
+  (`axum`/`tokio` live in that excluded crate with its own `tower-e2e` CI job, so
+  the host MSRV-1.74 gate stays clean.) Edge-deploy path documented in the origin
+  README; a compiled Cloudflare Worker is explicitly deferred (needs the server
+  secret at the edge + a wasm guard build + a shared `SpentTagStore`).
 
 ## 3. WASM browser client  ·  *done (core + scaffold; browser final mile is yours)*
 

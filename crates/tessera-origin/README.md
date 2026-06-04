@@ -59,6 +59,13 @@ let guard = Arc::new(guard);
 let _layer = TesseraLayer::new(guard);
 ```
 
+A complete, runnable `axum` server using this layer lives in
+[`crates/tessera-tower-demo`](../tessera-tower-demo) — `cargo run` it and `curl`
+the printed commands. Its end-to-end test stands the server up on a
+multi-threaded `tokio` runtime and drives it over a real socket (admit / malformed
+/ replay / fresh), so the middleware is proven in a real HTTP server, not just a
+unit test.
+
 Note: the feature's HTTP deps (`tower 0.5`, `http 1`, …) currently build on the
 crate's MSRV (1.74) — the all-features CI job is verified on 1.74. A future minor
 bump of those crates may raise their own MSRV above 1.74, at which point pin them

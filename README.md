@@ -86,6 +86,7 @@ Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
 | Crate | What it is |
 |-------|-----------|
 | [`tessera-wasm`](./crates/tessera-wasm) | `wasm-bindgen` browser bindings: mint a credential and produce the `Tessera-Presentation` header in-browser. **Compiles to `wasm32`** (headless mint→present round-trip test passes under node); ships an MV3 [extension scaffold](./crates/tessera-wasm/extension) — **in-browser use against a live origin is a scaffold / human final mile**. |
+| [`tessera-tower-demo`](./crates/tessera-tower-demo) | A runnable **`axum` server** using the `tessera-origin` `tower` middleware. `cargo run` it and `curl` the printed commands; its end-to-end test drives a real server on a multi-threaded `tokio` runtime over a real socket (admit / malformed / replay / fresh). |
 
 > Not yet published to crates.io — every crate is `publish = false` pending a
 > third-party security audit. Use it via a git or path dependency for now.
@@ -111,7 +112,7 @@ vectors:
 | `tessera-issuer` — proof-of-work issuance gate ("earn your budget") | ✅ cost-gate (not strong Sybil resistance — see threat model) |
 | `tessera-proxy` — credential-gated CONNECT proxy (use Claude/any HTTPS through Tor) | ✅ admit on credential not IP; TLS tunneled end-to-end |
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
-| `tessera-origin` optional `tower` middleware (`TesseraLayer`) | ✅ feature-gated drop-in `Layer`; admit/missing/malformed/replay tested |
+| `tessera-origin` optional `tower` middleware (`TesseraLayer`) | ✅ feature-gated drop-in `Layer`; proven in a real `axum` server over a real socket (`tessera-tower-demo`) — admit/malformed/replay/fresh |
 | `tessera-origin` pluggable spent-tag store (`SpentTagStore`) | ✅ in-memory default + durable `FileTagStore`; double-spend survives a guard restart (tested) |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
 | Hardening — CT fix, fuzzing, benches, threat model | ✅ internal audit applied ([`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md)); **not** third-party audited |

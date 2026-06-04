@@ -1,0 +1,23 @@
+[package]
+name = "tessera-tower-demo"
+version = "0.0.1"
+description = "Runnable axum server using the tessera-origin tower middleware (TesseraLayer): a real HTTP origin that admits requests on an ARC credential, never an IP."
+publish = false # research-grade; a deployable example + end-to-end test, not a product
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/NubsCarson/tessera"
+authors = ["Tessera contributors"]
+
+# A SEPARATE, excluded workspace (like `fuzz/` and `tessera-wasm`): `axum` +
+# `tokio` are the heavy async deps deliberately kept OUT of the host workspace
+# so they never perturb its MSRV-1.74 / clippy / test gates. This crate proves
+# the `tower` middleware works in a real multi-threaded HTTP server, end to end.
+[workspace]
+
+[dependencies]
+tessera-arc = { path = "../tessera-arc" }
+tessera-origin = { path = "../tessera-origin", features = ["tower"] }
+tessera-client = { path = "../tessera-client" }
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }

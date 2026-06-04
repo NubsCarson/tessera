@@ -41,7 +41,10 @@ The pre-1.0 development line. **Research-grade and unaudited** — see
 - **Deployable middleware:** `tessera-origin`'s off-by-default `tower` feature —
   `TesseraLayer`/`TesseraGuard`, a drop-in `tower::Layer` that runs the guard and
   short-circuits rejects with `403` (`axum`/`hyper`-compatible). Lean deps
-  (`tower`+`http`+`http-body-util`+`bytes`; no `axum`/`tokio`), 1.74-clean.
+  (`tower`+`http`+`http-body-util`+`bytes`; no `axum`/`tokio`), 1.74-clean. Proven
+  end-to-end in `tessera-tower-demo` — a runnable `axum` server (excluded crate,
+  own `tower-e2e` CI job) whose test drives it on a multi-threaded `tokio` runtime
+  over a real socket (admit / malformed / replay / fresh).
 - **Pluggable spent-tag store:** the `SpentTagStore` trait + `OriginGuard::with_store`,
   with `InMemoryTagStore` (default) and a durable single-process `FileTagStore`.
   Double-spend enforcement is tested to survive a guard restart; a distributed

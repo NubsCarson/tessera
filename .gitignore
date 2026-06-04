@@ -13,6 +13,9 @@
 /crates/tessera-wasm/target
 # wasm-pack / wasm-bindgen `--out-dir` output for the extension (a build artifact)
 /crates/tessera-wasm/extension/pkg
+# tessera-tower-demo is likewise its own (excluded) workspace; ignore its build
+# dir (its Cargo.lock IS committed, like the others).
+/crates/tessera-tower-demo/target
 
 # Cargo.lock IS committed: this workspace will host binaries (origin, client),
 # and pinning the full dependency graph is the right call for reproducible,
