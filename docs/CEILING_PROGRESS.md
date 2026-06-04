@@ -32,6 +32,18 @@
 | M5 | Per-egress-IP human-volume shaping (`tessera-proxy::shaping`) | `6ac22d0` |
 | M8 | Env-gated Tor integration test (transport-agnosticism) | `555c18e` |
 
+## Architecture pivot (the leaner ecash-token + Tor path — `docs/ARCHITECTURE.md`)
+
+| Item | Status | Commit |
+|---|---|---|
+| Decision doc (what we built vs. leaner path, why) | ✅ | `dc56d41` |
+| Performance/latency analysis (speed matters; pivot is faster) | ✅ | `f5dc1c2` |
+| ETH-paid token mint rail (`TokenMint.sol` + 13 forge tests) | ✅ | (this commit) |
+| Leaner-default e2e proof (token + 2-hop loop, no channel) | 🔨 | |
+| Channel/ZK/court demoted to optional-advanced tier (documented, kept) | ✅ | `dc56d41` |
+| Off-chain issuer integration (watch Purchased → blind-issue → redeem) | 🔒 | operational (reuses ARC) |
+| Paid-mint client UX + deployed clean-IP exit + crowd | 🔒 | external/frontend |
+
 ## SHOULD — in progress
 
 | # | Item | Status | Commit |
