@@ -32,6 +32,27 @@
 | M5 | Per-egress-IP human-volume shaping (`tessera-proxy::shaping`) | `6ac22d0` |
 | M8 | Env-gated Tor integration test (transport-agnosticism) | `555c18e` |
 
+## 🚀 v0.1.0 — shipped (first tagged release)
+
+Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `v0.1.0`.
+
+| Ship item | Status | Commit |
+|---|---|---|
+| Blocker: documented verify cmd crashed with Tor installed | ✅ fixed (opt-in `TESSERA_TOR_E2E`, graceful skip) | `ce849db` |
+| Blocker: README headline overclaimed | ✅ honest reframe + "What this is / is NOT" + clean-egress caveat | `ce849db` |
+| Doc-drift: relay default, forge counts, crate count, TokenMint mention | ✅ | `ce849db`, `1c74c39` |
+| Release: bump all crates 0.0.1→0.1.0 + lockfiles + CHANGELOG | ✅ | `048fd45` |
+| **Tag `v0.1.0`** | ✅ pushed | — |
+| Positioning: honest present tense across docs | ✅ | `ac9b9a3` |
+
+**Remaining ship-polish (non-blocking, "nice" tier — deferred, documented):**
+`#![deny(missing_docs)]` across crates (S27 — ~100+ pub items to document; gauged
+50 in tessera-arc alone) · CI hardening I can't verify locally without risking a
+red main (cargo-deny + a `deny.toml`, `cargo llvm-cov` coverage, Slither, a
+`forge fmt --check` gate — the last would require reformatting the generated
+verifier, which we deliberately leave matching its snarkjs output) · pinning the
+CI `cargo install` versions. None blocks the v0.1.0 promotion.
+
 ## Architecture pivot (the leaner ecash-token + Tor path — `docs/ARCHITECTURE.md`)
 
 | Item | Status | Commit |
