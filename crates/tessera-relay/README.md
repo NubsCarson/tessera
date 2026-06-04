@@ -32,24 +32,92 @@ No single hop holds *who* + *where* + *what*:
 * **Neither** sees content: the client's TLS to the destination runs end-to-end
   through both hops, which only move bytes. Tampering breaks TLS.
 
-The integration test (`tests/loop.rs`) wires an observation channel into each hop
-(`Observer` for the relay, `tessera_proxy::ExitObserver` for the exit) and
-asserts directly that the relay never recorded the destination and the exit never
-recorded the client's real source socket.
+The integration tests (`tests/loop.rs` for ARC mode, `tests/channel_loop.rs` for
+the channel-payment mode) wire an observation channel into each hop (`Observer`
+for the relay, `tessera_proxy::ExitObserver` for the exit) and assert directly
+that the relay never recorded the destination and the exit never recorded the
+client's real source socket — including in the paid loop, where the relay's
+observation is recorded **only after** the spend is accepted, so it also witnesses
+"this request was paid for" and still never the destination.
 
-ARC is the **v0 spend stand-in** here — admit/rate-limit/double-spend on an
-anonymous credential. The real ZK Spilman payment channel is Phase 2, not this.
+> In **channel mode** the relay is no longer credential-blind about *payment* (it
+> is the counterparty), but it stays **destination-blind and content-blind**: it
+> reads only its three outer `Tessera-Channel-*` headers, never inside the tunnel.
+> The within-session link it does hold (which in-channel requests are yours) is
+> the **accepted** linkability of `DESIGN.md` §9, named not hidden.
+
+## The loop now does REAL channel pay-per-request (Phase 2a protocol)
+
+The loop now has **two payment modes**, and the **channel-payment mode is the
+real, tested default** for pay-per-request:
+
+* **Channel mode (real — `DESIGN.md` §1/§2).** The **relay is the
+  [`tessera-channel`](../tessera-channel) counterparty + per-request payment
+  gate.** The client OPENS a channel with the relay (`RelayGate::open`; the relay
+  holds a `RelayerChannel`, the client a `UserChannel`). For **each** request the
+  client does a real channel `spend` (`S_{i+1}` + the user signature + a freshness
+  signature against the relayer's challenge) and sends it on the **outer CONNECT
+  headers** (`Tessera-Channel-Id` / `-Spend` / `-Fresh`). The relay
+  `verify_and_cosign`s it and **only then** opens the tunnel to the exit
+  (*sign-then-serve*) — handing back the relayer-co-signed state so the client
+  advances its cursor. A **missing / bad / replayed / over-budget** spend gets
+  `402 Payment Required` and **the request never reaches the destination**. The
+  full protocol (how the spend rides the nested-CONNECT tunnel, and the exit's
+  role + trust) is documented in the `tessera_relay::channel` module.
+* **ARC-v0 mode (legacy stand-in).** The original credential-*blind* relay where
+  the ARC presentation gated at the **exit**. Kept available behind its own entry
+  point (`serve` / `open_through_relay`) so the Phase-1 loop still works and is
+  still tested, but it is no longer how the loop pays for real.
+
+**Why this is the correct trust model** (`DESIGN.md` §1/§2/§8): the relay is the
+**single channel counterparty**, so it *necessarily links your in-channel
+requests* — the **accepted within-session linkability** (`DESIGN.md` §9
+cross-epoch is where that surface is named, not hidden). Co-locating
+balance-authority + first hop in one party is exactly what **collapses
+distributed double-spend into one in-memory cursor**: a replay simply fails
+`verify_and_cosign` against that cursor. The relay **pays the exits downstream**;
+we model that as *"the relay is the exit's trusted client."*
+
+**The exit's role + trust.** The exit is the unchanged content-blind
+`tessera-proxy`. There is **one payment gate, at the relay** — the exit does
+**not** re-verify a channel spend (no redundant double-gating). The exit keeps
+its own ARC `OriginGuard` check, but here that is **demoted from "the payment
+stand-in" to the exit's *participant token***: its own *"is this a Tessera
+participant, never the IP"* admission (`DESIGN.md` §5) so it is not an open proxy.
+The real per-request payment is the channel spend at the relay.
+
+### Honest scope of the channel payment
+
+* This is the **Phase 2a protocol** wired into the live loop — a real,
+  user-signed, relayer-co-signed, freshness-bound, monotone-decrementing spend per
+  request. `cost`/`balance` are in the clear (exactly as in `tessera-channel`).
+* It is **NOT** the **ZK settlement (Phase 2b-i)** — balance privacy against an
+  observer; the relay knows the balance by construction anyway. That is a separate
+  increment (`circuits/` + `cooperativeCloseZK`).
+* It is **NOT** the **shielded funding pool** (unlinkable funding) — also separate.
+* There is **still no real clean egress** — reaching a Tor-blocked site through a
+  clean residential-class IP is a documented **manual** final step (below).
+
+ARC remains usable as the v0 spend stand-in in the legacy mode; the channel mode
+is the real, tested default.
 
 ## Run it
 
 ```sh
+# REAL channel pay-per-request demo: open + a couple of PAID requests + a refused replay
+cargo run -p tessera-relay --example paid_loop
+
+# Legacy ARC-v0 loop (credential gates at the exit):
 cargo run -p tessera-relay            # exit egresses directly
 cargo run -p tessera-relay -- --tor   # exit egresses via Tor (SOCKS5 127.0.0.1:9050)
 ```
 
-It prints the relay + exit addresses and a ready-to-paste single-use credential.
-The canonical client move (the two nested CONNECTs) is
-`tessera_relay::open_through_relay`, which the test and the binary use.
+`paid_loop` opens a channel and prints each paid request (seq/balance), then shows
+the replayed spend getting `402` (no double-spend, destination never touched).
+
+The canonical client moves are `tessera_relay::open_through_relay_paid` (channel
+mode) and `tessera_relay::open_through_relay` (legacy ARC mode); the tests and the
+example/binary use them.
 
 ## Design choices (and why)
 
@@ -61,17 +129,26 @@ The canonical client move (the two nested CONNECTs) is
   here.)
 * **Reuses, doesn't reinvent**, `tessera-proxy`'s byte-pump (`pipe`), its
   `CONNECT`/SOCKS5/Tor egress, and `OriginGuard` credential check (the exit *is*
-  `tessera-proxy`). The only additions to `tessera-proxy` are a `pub` on `pipe`
-  and a backward-compatible `serve_observed` (the split-trust observation hook);
-  `serve` is unchanged for existing callers.
+  `tessera-proxy`, untouched). The channel-payment gate reuses
+  `tessera-channel`'s `RelayerChannel::verify_and_cosign` /
+  `UserChannel::spend`/`serve` verbatim — the relay adds only the **wire framing**
+  (the `Tessera-Channel-*` headers, in the `channel` module) and the **per-channel
+  cursor registry** (`RelayGate`); no new external deps, still a host MSRV-1.74
+  crate. No changes were needed to `tessera-channel` or `tessera-proxy`.
 
 ## Honesty — what this proves and what it does NOT
 
 This proves the **protocol / loop**, locally and deterministically: the multi-hop
-chain works, the split-trust property holds, the credential gates the exit, and
-the tunnel carries opaque bytes both ways (the in-test stand-in for the client's
-real end-to-end TLS — a tampered byte is detectable by the caller exactly as a
-TLS AEAD tag would catch it).
+chain works, the split-trust property holds, the **real channel spend gates each
+request at the relay** (verify-and-co-sign before serving; replay/over-budget
+refused; the destination never touched on a refusal), and the tunnel carries
+opaque bytes both ways (the in-test stand-in for the client's real end-to-end TLS
+— a tampered byte is detectable by the caller exactly as a TLS AEAD tag would
+catch it).
+
+It does **not** prove the **ZK settlement (Phase 2b-i)** or the **shielded funding
+pool** — both separate increments — and the channel does **not** hide the balance
+from the relay (it is the counterparty; it knows it by construction).
 
 It does **not** prove the last-mile reach claim. "A real Tor-blocked site returns
 `200` through a real *clean* exit IP, privately" needs a real residential-class,

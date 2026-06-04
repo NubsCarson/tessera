@@ -26,16 +26,39 @@
 //! site through a real clean exit IP is a documented manual final step (the
 //! egress IP is external — no code removes that). See the crate README.
 //!
+//! # Two payment modes
+//!
+//! There are **two** ways the loop gates a request, and the
+//! [`channel`]-payment one is the **real, tested default**:
+//!
+//!   * **Channel mode (real, default — `DESIGN.md` §1/§2).** The **relay** is the
+//!     [`tessera_channel`] counterparty + per-request payment gate. The client
+//!     opens a channel with the relay ([`RelayGate::open`]); for **each** request
+//!     it does a real channel `spend`, sends it on the outer `CONNECT` headers,
+//!     and the relay [`verify_and_cosign`](tessera_channel::RelayerChannel::verify_and_cosign)s
+//!     it **before** forwarding a single byte (*sign-then-serve*). A bad /
+//!     replayed / over-budget spend → `402 Payment Required`, and the request
+//!     **never reaches the destination**. See the [`channel`] module for the full
+//!     protocol (how the spend rides the nested-CONNECT tunnel + the exit's role).
+//!   * **ARC-v0 mode (legacy stand-in).** [`serve`] keeps the original
+//!     credential-*blind* relay where the ARC presentation gated at the **exit**
+//!     ([`tessera_proxy`]). It is retained behind its own entry point so the
+//!     existing Phase-1 loop still works and is still tested, but the channel mode
+//!     is what the loop does for real pay-per-request.
+//!
 //! Like [`tessera_proxy`], this is std-only (blocking sockets + one thread per
 //! direction), demo/example tooling — not a hardened production relay.
 
 #![forbid(unsafe_code)]
+
+pub mod channel;
 
 use std::io::{BufRead, BufReader, Read, Result, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use tessera_channel::{Channel, ChannelError, RelayerChannel, SignedState, Spend, VerifyingKey};
 // The relay reuses tessera-proxy's byte-pump (`pipe`) verbatim — the exact same
 // transport heart the EXIT uses — rather than reinventing it.
 use tessera_proxy::pipe;
@@ -185,6 +208,391 @@ fn handle(mut stream: TcpStream, exit_addr: SocketAddr, observer: Option<&Observ
     // inside this stream and are never inspected. Reuses tessera-proxy's pipe.
     pipe(stream, upstream);
     Ok(())
+}
+
+// ===========================================================================
+// CHANNEL-PAYMENT MODE (the real, default pay-per-request gate, DESIGN §1/§2)
+// ===========================================================================
+
+/// The relay's **channel counterparty** state: the [`RelayerChannel`]s it holds,
+/// one per open channel, behind a single lock.
+///
+/// This is the design's "**collapse distributed double-spend into a single
+/// in-memory cursor**" (`DESIGN.md` §8): because the relay is the *only*
+/// counterparty, one `RelayerChannel` cursor per channel is the whole
+/// double-spend defense — a replayed or out-of-order spend simply fails
+/// [`RelayerChannel::verify_and_cosign`] against that cursor. The lock makes the
+/// cursor safe across the relay's per-connection threads (each request is a fresh
+/// connection in this host model).
+#[derive(Clone)]
+pub struct RelayGate {
+    relayer_keys: tessera_channel::KeyPair,
+    epoch: u64,
+    // chan_id → its RelayerChannel cursor. A Vec keyed by chan_id keeps it
+    // dependency-free and the channel count is tiny in the demo/test.
+    channels: Arc<Mutex<Vec<(tessera_channel::state::ChanId, RelayerChannel)>>>,
+}
+
+impl RelayGate {
+    /// Create a relay gate that co-signs with `relayer_keys`, issuing freshness
+    /// challenges in `epoch`. No channels are open yet.
+    pub fn new(relayer_keys: tessera_channel::KeyPair, epoch: u64) -> Self {
+        Self {
+            relayer_keys,
+            epoch,
+            channels: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// The relayer's public key (the channel counterparty identity the client
+    /// pins at open time, and verifies co-signatures against).
+    pub fn relayer_pk(&self) -> VerifyingKey {
+        self.relayer_keys.verifying_key()
+    }
+
+    /// The relayer's current freshness epoch.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// **open** — register a [`RelayerChannel`] for `params` (the one-time channel
+    /// handshake). After this, requests bearing `params.chan_id` are gated against
+    /// this cursor. Idempotent on `chan_id` (re-opening replaces the cursor).
+    ///
+    /// `params.relayer_pk` must be this gate's relayer key (the client agreed to
+    /// pay *this* relay); otherwise the channel is rejected.
+    pub fn open(&self, params: Channel) -> std::result::Result<(), ChannelError> {
+        if params.relayer_pk != self.relayer_pk() {
+            return Err(ChannelError::BadSignature);
+        }
+        let chan_id = params.chan_id;
+        let relayer = RelayerChannel::new(self.relayer_keys.clone(), params, self.epoch);
+        let mut g = self.channels.lock().unwrap_or_else(|e| e.into_inner());
+        g.retain(|(id, _)| *id != chan_id);
+        g.push((chan_id, relayer));
+        Ok(())
+    }
+
+    /// Issue a freshness challenge for `request_payload` against the relayer's
+    /// current epoch and a caller-chosen `nonce`. The client answers it in its
+    /// [`spend`](tessera_channel::UserChannel::spend); the relay later checks the
+    /// spend's freshness against the same challenge in [`Self::verify_spend`].
+    ///
+    /// (In this host model the challenge is issued via an API call rather than a
+    /// wire round trip — enough to bind the spend to one epoch/nonce/request and
+    /// prove the replay defense.)
+    pub fn issue_challenge(
+        &self,
+        chan_id: &tessera_channel::state::ChanId,
+        nonce: u64,
+        request_payload: &[u8],
+    ) -> Option<tessera_channel::RelayRequest> {
+        let g = self.channels.lock().unwrap_or_else(|e| e.into_inner());
+        g.iter()
+            .find(|(id, _)| id == chan_id)
+            .map(|(_, r)| r.issue_challenge(nonce, request_payload))
+    }
+
+    /// **verify + co-sign a spend** against the named channel's cursor (the
+    /// per-request payment gate). Returns the doubly-signed state on success.
+    ///
+    /// This is the single place a request is *paid for*: it advances the relay's
+    /// in-memory cursor (so a replay of the same `seq` / a burned nonce fails) and
+    /// returns the relayer-co-signed state (`sign-then-serve`). A bad / replayed /
+    /// over-budget spend errors here and the caller must refuse the tunnel.
+    pub fn verify_spend(
+        &self,
+        chan_id: &tessera_channel::state::ChanId,
+        spend: &Spend,
+        fresh: &tessera_channel::RelayRequest,
+    ) -> std::result::Result<SignedState, ChannelError> {
+        let mut g = self.channels.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, relayer) = g
+            .iter_mut()
+            .find(|(id, _)| id == chan_id)
+            .ok_or(ChannelError::BadSignature)?;
+        relayer.verify_and_cosign(spend, fresh)
+    }
+}
+
+/// Start the relay in **channel-payment mode** on an already-bound listener.
+///
+/// Identical wire shape to [`serve`] (an outer `CONNECT <exit>` then an opaque
+/// tunnel), but **gated on a real channel spend**: the relay reads the three
+/// `Tessera-Channel-*` outer headers, [`verify_spend`](RelayGate::verify_spend)s
+/// them, and **only on success** dials the exit and opens the tunnel
+/// (*sign-then-serve*). A missing / bad / replayed / over-budget spend gets
+/// `402 Payment Required` and the tunnel is never opened — so the inner CONNECT
+/// never reaches the exit and the destination is never touched.
+///
+/// `observer`, if given, records the relay's split-trust observation (peer + the
+/// outer CONNECT target = the exit) — **only after** the spend is accepted, so it
+/// also witnesses "this request was paid for", and still never the destination.
+pub fn serve_channel(
+    listener: TcpListener,
+    exit_addr: SocketAddr,
+    gate: RelayGate,
+    observer: Option<Observer>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            let gate = gate.clone();
+            let observer = observer.clone();
+            thread::spawn(move || {
+                let _ = handle_channel(stream, exit_addr, &gate, observer.as_ref());
+            });
+        }
+    })
+}
+
+fn handle_channel(
+    mut stream: TcpStream,
+    exit_addr: SocketAddr,
+    gate: &RelayGate,
+    observer: Option<&Observer>,
+) -> Result<()> {
+    let peer = stream.peer_addr()?;
+    let mut reader = BufReader::new(stream.try_clone()?.take(64 * 1024));
+
+    // Outer request line: `CONNECT host:port HTTP/1.1`.
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line)?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("");
+    let outer_target = parts.next().unwrap_or("").to_string();
+
+    // Read the OUTER headers — the relay's own protocol surface. It reads ONLY
+    // its three channel headers here; it still never parses anything inside the
+    // tunnel, so the inner CONNECT + destination stay invisible to it.
+    let (mut chan_id_hex, mut spend_hex, mut fresh_hex) = (None, None, None);
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            break;
+        }
+        let line = line.trim_end();
+        if line.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            let value = value.trim().to_string();
+            match name.trim() {
+                n if n.eq_ignore_ascii_case(channel::CHANNEL_ID_HEADER) => {
+                    chan_id_hex = Some(value)
+                }
+                n if n.eq_ignore_ascii_case(channel::CHANNEL_SPEND_HEADER) => {
+                    spend_hex = Some(value)
+                }
+                n if n.eq_ignore_ascii_case(channel::CHANNEL_FRESH_HEADER) => {
+                    fresh_hex = Some(value)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if !method.eq_ignore_ascii_case("CONNECT") {
+        write_status(&mut stream, "405 Method Not Allowed");
+        return Ok(());
+    }
+
+    // A relay forwards only to its fixed next hop (the exit). Refuse otherwise —
+    // checked BEFORE payment so a misdirected request doesn't burn a spend.
+    if outer_target != exit_addr.to_string() {
+        write_status(
+            &mut stream,
+            "403 Forbidden (relay forwards only to its exit)",
+        );
+        return Ok(());
+    }
+
+    // --- THE PAYMENT GATE: verify + co-sign the spend BEFORE serving. ---
+    let cosigned = match channel_gate_decision(gate, &chan_id_hex, &spend_hex, &fresh_hex) {
+        Ok(co) => co,
+        Err(reason) => {
+            // No payment ⇒ no tunnel. The exit is never dialed; the destination
+            // (inside the inner CONNECT we never read) is never touched.
+            write_status(&mut stream, &format!("402 Payment Required ({reason})"));
+            return Ok(());
+        }
+    };
+
+    // Paid. Record the split-trust observation — peer + the EXIT's address, never
+    // the destination — now that we know the request was paid for.
+    if let Some(obs) = observer {
+        obs.record(Observation {
+            peer,
+            connect_target: outer_target.clone(),
+        });
+    }
+
+    // sign-then-serve: only NOW (after co-signing) do we open the byte tunnel.
+    let upstream = match TcpStream::connect(exit_addr) {
+        Ok(c) => c,
+        Err(_) => {
+            write_status(&mut stream, "502 Bad Gateway");
+            return Ok(());
+        }
+    };
+
+    // Hand the client back the relayer-co-signed state on the `200` line so the
+    // user can advance its cursor (and prove sign-then-serve held). It rides in a
+    // response header, before the tunnel bytes begin.
+    let cosigned_hex = channel::encode_cosigned(&cosigned)
+        .map_err(|e| std::io::Error::other(format!("encode cosigned: {e}")))?;
+    stream.write_all(
+        format!(
+            "HTTP/1.1 200 Connection Established\r\n{}: {cosigned_hex}\r\n\r\n",
+            channel::CHANNEL_SPEND_HEADER
+        )
+        .as_bytes(),
+    )?;
+    stream.flush()?;
+
+    // Opaque byte tunnel — same as ARC mode. The inner CONNECT to the destination
+    // rides inside it, invisible to the relay.
+    pipe(stream, upstream);
+    Ok(())
+}
+
+/// The pure decision half of the payment gate: decode the three headers and
+/// verify+co-sign, or return a short human reason for the `402`.
+fn channel_gate_decision(
+    gate: &RelayGate,
+    chan_id_hex: &Option<String>,
+    spend_hex: &Option<String>,
+    fresh_hex: &Option<String>,
+) -> std::result::Result<SignedState, String> {
+    let chan_id_hex = chan_id_hex.as_deref().ok_or("no channel id")?;
+    let spend_hex = spend_hex.as_deref().ok_or("no spend")?;
+    let fresh_hex = fresh_hex.as_deref().ok_or("no freshness")?;
+    let chan_id = channel::decode_chan_id(chan_id_hex).map_err(|e| e.to_string())?;
+    let spend = channel::decode_spend(spend_hex).map_err(|e| e.to_string())?;
+    let fresh = channel::decode_fresh(fresh_hex).map_err(|e| e.to_string())?;
+    gate.verify_spend(&chan_id, &spend, &fresh)
+        .map_err(|e| e.to_string())
+}
+
+/// Drive **one paid request** through the channel-payment loop from the client
+/// side. Given the client's [`UserChannel`](tessera_channel::UserChannel), the
+/// relayer freshness challenge (issued by [`RelayGate::issue_challenge`]) and the
+/// `cost`, this:
+///
+///   1. builds + signs the channel `spend` (`S_{i+1}` + σ_user + σ_fresh);
+///   2. opens the outer `CONNECT <exit>` carrying the three `Tessera-Channel-*`
+///      headers, and reads back the relayer-co-signed state on the `200`;
+///   3. **advances the user's cursor** with that co-signed state (proving
+///      sign-then-serve held — the client only adopts a co-signed state); and
+///   4. sends the inner `CONNECT <destination>` (carrying any exit-side header)
+///      through the now-open tunnel.
+///
+/// Returns the opened stream positioned right after the exit's `200`, i.e. an
+/// end-to-end byte pipe to `destination`. On a refused payment the relay replies
+/// `402` and this returns an error (the tunnel is never opened, the destination
+/// never touched).
+#[allow(clippy::too_many_arguments)]
+pub fn open_through_relay_paid(
+    relay_addr: SocketAddr,
+    exit_addr: SocketAddr,
+    user: &mut tessera_channel::UserChannel,
+    chan_id: &tessera_channel::state::ChanId,
+    cost: u64,
+    fresh: &tessera_channel::RelayRequest,
+    destination: &str,
+    exit_header: &str,
+) -> Result<TcpStream> {
+    // (1) build + sign the spend (errors on underflow — caught before any socket).
+    let spend = user
+        .spend(cost, fresh)
+        .map_err(|e| std::io::Error::other(format!("spend: {e}")))?;
+
+    let mut stream = TcpStream::connect(relay_addr)?;
+
+    // (2) OUTER hop: ask the relay to connect us to the EXIT, carrying the spend.
+    // Names only the exit, never the destination.
+    stream.write_all(
+        format!(
+            "CONNECT {exit_addr} HTTP/1.1\r\n\
+             {id_hdr}: {chan_id_hex}\r\n\
+             {spend_hdr}: {spend_hex}\r\n\
+             {fresh_hdr}: {fresh_hex}\r\n\r\n",
+            id_hdr = channel::CHANNEL_ID_HEADER,
+            chan_id_hex = channel::encode_chan_id(chan_id),
+            spend_hdr = channel::CHANNEL_SPEND_HEADER,
+            spend_hex = channel::encode_spend(&spend),
+            fresh_hdr = channel::CHANNEL_FRESH_HEADER,
+            fresh_hex = channel::encode_fresh(fresh),
+        )
+        .as_bytes(),
+    )?;
+    stream.flush()?;
+
+    // Read the relay's status block and pull the co-signed state header off it.
+    let block = read_status_block(&mut stream, "relay")?;
+    let status_line = block.lines().next().unwrap_or("");
+    if !status_line.contains("200") {
+        return Err(std::io::Error::other(format!(
+            "relay refused the paid tunnel: {}",
+            status_line.trim_end()
+        )));
+    }
+
+    // (3) advance the user's cursor with the relayer's co-signature — this is the
+    // CLIENT side of sign-then-serve: the user only adopts a co-signed state.
+    let cosigned_hex = header_value(&block, channel::CHANNEL_SPEND_HEADER)
+        .ok_or_else(|| std::io::Error::other("relay 200 carried no co-signed state"))?;
+    let cosigned = channel::decode_cosigned(&cosigned_hex)?;
+    user.accept_cosigned(&cosigned)
+        .map_err(|e| std::io::Error::other(format!("co-sign: {e}")))?;
+    // Serve gate: a request may only be sent on a co-signed state. This is the
+    // belt-and-braces local assertion of sign-then-serve.
+    user.serve(&cosigned)
+        .map_err(|e| std::io::Error::other(format!("serve gate: {e}")))?;
+
+    // (4) INNER hop: now tunneled to the EXIT, send the real CONNECT to the
+    // destination. Only the exit reads this; the relay never saw it.
+    stream.write_all(format!("CONNECT {destination} HTTP/1.1\r\n{exit_header}\r\n").as_bytes())?;
+    stream.flush()?;
+    expect_200(&mut stream, "exit")?;
+
+    Ok(stream)
+}
+
+/// Read exactly one HTTP status block (status line + headers up to the blank
+/// line) off `stream`, one byte at a time so we never read past `\r\n\r\n` into
+/// the tunnel payload. Shared by the paid-loop client (which also needs a header
+/// off the block, unlike [`expect_200`]).
+fn read_status_block(stream: &mut TcpStream, who: &str) -> Result<String> {
+    let mut block = Vec::with_capacity(256);
+    let mut byte = [0u8; 1];
+    loop {
+        if stream.read(&mut byte)? == 0 {
+            return Err(std::io::Error::other(format!(
+                "{who} closed the connection before any status line"
+            )));
+        }
+        block.push(byte[0]);
+        if block.ends_with(b"\r\n\r\n") {
+            break;
+        }
+        if block.len() > 16 * 1024 {
+            return Err(std::io::Error::other(format!(
+                "{who} status block too large"
+            )));
+        }
+    }
+    Ok(String::from_utf8_lossy(&block).into_owned())
+}
+
+/// Pull a header value out of a parsed status block (case-insensitive name).
+fn header_value(block: &str, name: &str) -> Option<String> {
+    block.lines().skip(1).find_map(|line| {
+        let (n, v) = line.split_once(':')?;
+        n.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| v.trim().to_string())
+    })
 }
 
 /// Drive the 2-hop loop from the client side: open the outer tunnel to the

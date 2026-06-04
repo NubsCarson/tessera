@@ -23,6 +23,9 @@ tessera-arc = { path = "../tessera-arc" }
 tessera-origin = { path = "../tessera-origin" }
 tessera-client = { path = "../tessera-client" }
 tessera-proxy = { path = "../tessera-proxy" }
+# The relay is the channel COUNTERPARTY + per-request payment gate (DESIGN §1/§2):
+# it holds a RelayerChannel and verify_and_cosigns each spend before forwarding.
+tessera-channel = { path = "../tessera-channel" }
 rand_core.workspace = true
 hex.workspace = true
 

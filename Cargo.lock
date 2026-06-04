@@ -1025,6 +1025,7 @@ dependencies = [
  "hex",
  "rand_core",
  "tessera-arc",
+ "tessera-channel",
  "tessera-client",
  "tessera-origin",
  "tessera-proxy",
