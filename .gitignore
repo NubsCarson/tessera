@@ -2,6 +2,12 @@
 **/*.rs.bk
 .DS_Store
 
+# cargo-fuzz build/run outputs (the targets + Cargo.toml are committed)
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/Cargo.lock
+
 # Cargo.lock IS committed: this workspace will host binaries (origin, client),
 # and pinning the full dependency graph is the right call for reproducible,
 # auditable security tooling.

@@ -9,8 +9,9 @@
 //! suite proves this port reproduces the reference by *verifying the official
 //! proof blobs* and rejecting tampered ones.
 //!
-//! Only the verifier and the statement machinery live here for now; the prover
-//! (which additionally needs a spec-defined RNG) lands with the full ARC API.
+//! Both the prover ([`prove`]) and verifier ([`verify`]) for the
+//! `NISchnorrProofShake128P256` transform live here, along with the
+//! [`LinearRelation`] statement machinery they share.
 
 use crate::group::{self, deserialize_scalar, random_scalar, reduce_mod_order, serialize_element};
 use p256::{ProjectivePoint, Scalar};
@@ -84,8 +85,13 @@ fn init_transcript(session: &[u8], instance_label: &[u8]) -> Sponge {
     sponge
 }
 
-/// `verifier_challenge` (reference `ByteSchnorrCodec`): squeeze
-/// `scalar_byte_length + 32 = 64` bytes and reduce modulo the group order.
+/// `verifier_challenge`: squeeze `scalar_byte_length + 32 = 64` bytes and reduce
+/// modulo the group order, matching the authoritative sigma-protocols
+/// `ByteSchnorrCodec` after PR #141 ("use 32 more bytes of challenges"). Note
+/// the older sigma copy vendored under `draft-arc` still squeezes `+16`; this
+/// crate tracks the current reference, which is why the §10.2 ARC proof blobs
+/// (generated in the `+16` era) are `#[ignore]`d — see
+/// `docs/ARC_PROOF_VECTOR_DISCREPANCY.md`.
 fn verifier_challenge(sponge: &Sponge) -> Scalar {
     reduce_mod_order(&sponge.squeeze(group::NS + 32))
 }
@@ -161,6 +167,34 @@ impl LinearRelation {
 
     fn element(&self, index: usize) -> ProjectivePoint {
         self.elements[index].expect("element must be set before use")
+    }
+
+    /// Whether this statement is safe to evaluate: every constraint references
+    /// in-range, set elements/scalars, and all bound elements are pairwise
+    /// distinct (matching the reference `_check_relation`'s uniqueness rule).
+    /// [`verify`] gates on this so it can never panic on a malformed statement.
+    fn well_formed(&self) -> bool {
+        let n_elems = self.elements.len();
+        if self.elements.iter().any(|e| e.is_none()) {
+            return false;
+        }
+        for (lhs, terms) in &self.constraints {
+            if *lhs >= n_elems {
+                return false;
+            }
+            for &(s_idx, e_idx) in terms {
+                if s_idx >= self.num_scalars || e_idx >= n_elems {
+                    return false;
+                }
+            }
+        }
+        let mut seen = std::collections::HashSet::with_capacity(n_elems);
+        for e in &self.elements {
+            if !seen.insert(serialize_element(&e.expect("all set, checked above"))) {
+                return false; // duplicate bound element
+            }
+        }
+        true
     }
 
     /// Evaluate the linear map on a witness/response vector of scalars,
@@ -263,6 +297,13 @@ pub fn prove<R: RngCore + ?Sized>(
 /// Fiat-Shamir challenge from it, and accepts iff it equals the stored
 /// challenge. Returns `false` on any malformed input — never panics.
 pub fn verify(session: &[u8], statement: &LinearRelation, proof: &[u8]) -> bool {
+    // Reject malformed statements up front so the arithmetic below (and the
+    // label/commitment serialization) can never index out of range or unwrap a
+    // None — this upholds the "never panics" contract even on a hand-built or
+    // fuzzed statement.
+    if !statement.well_formed() {
+        return false;
+    }
     let num_scalars = statement.num_scalars;
     let expected_len = group::NS + num_scalars * group::NS;
     if proof.len() != expected_len {

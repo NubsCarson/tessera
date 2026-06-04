@@ -93,9 +93,12 @@ fn main() {
         }
         let r = net::get_direct(&addr_s, Some(&header)).expect("request");
         let tag = r.result.strip_prefix("admit tag=").unwrap_or(&r.result);
+        // Char-based truncation: never slices a multi-byte boundary even if a
+        // hostile server returned a non-ASCII Tessera-Result header.
+        let tag_short: String = tag.chars().take(16).collect();
         ui::result(
             r.status == 200,
-            &format!("request #{i}  ·  tag {}…", &tag[..tag.len().min(16)]),
+            &format!("request #{i}  ·  tag {tag_short}…"),
             r.status,
             "admitted — distinct, unlinkable tag each time",
         );
