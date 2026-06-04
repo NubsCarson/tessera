@@ -5,12 +5,15 @@
 //! We assert the honest path verifies, the limit is enforced, double-spends are
 //! caught, and tampering / wrong-context presentations are rejected.
 
+use p256::Scalar;
 use rand_core::OsRng;
 use tessera_arc::arc::{
     create_credential_request, create_credential_response, finalize_credential,
-    verify_presentation, ArcError, PresentationState, TagStore,
+    verify_presentation, ArcError, Presentation, PresentationState, TagStore,
 };
+use tessera_arc::group::{generator_g, generator_h, hash_to_group, random_scalar, scalar_invert};
 use tessera_arc::keys::ServerPrivateKey;
+use tessera_arc::proofs::{prove_presentation, PresentationWitness};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
 const PRESENT_CTX: &[u8] = b"tessera://origin.example/v1";
@@ -65,6 +68,80 @@ fn presentation_beyond_limit_is_refused() {
     assert_eq!(
         state.present(&mut rng).unwrap_err(),
         ArcError::LimitExceeded
+    );
+}
+
+#[test]
+fn degenerate_limit_below_two_is_refused_not_panicked() {
+    // A limit < 2 has no valid range-proof shape; present() must return an
+    // error rather than panicking inside compute_bases (prove-side guard).
+    let (_sk, _pk, credential) = issue_credential();
+    let mut rng = OsRng;
+    for bad in [0u64, 1] {
+        let mut state = PresentationState::new(credential.clone(), PRESENT_CTX, bad);
+        assert_eq!(
+            state.present(&mut rng).unwrap_err(),
+            ArcError::LimitExceeded
+        );
+    }
+}
+
+#[test]
+fn overlimit_nonce_is_refused_by_the_range_proof_not_just_the_counter() {
+    // The honest client counter is advisory; the cryptographic enforcement of
+    // "no over-presentation" is the range proof in the verifier. Bypass the
+    // counter and hand-build a presentation at nonce == LIMIT (out of range),
+    // then assert the verifier rejects it — proving the *crypto* enforces the
+    // bound, not just `PresentationState`.
+    let (sk, pk, cred) = issue_credential();
+    let mut rng = OsRng;
+
+    let g = generator_g();
+    let h = generator_h();
+    let a = random_scalar(&mut rng);
+    let r = random_scalar(&mut rng);
+    let z = random_scalar(&mut rng);
+    let u = cred.u * a;
+    let u_prime_commit = cred.u_prime * a + g * r;
+    let m1_commit = u * cred.m1 + h * z;
+    let nonce_blinding = random_scalar(&mut rng);
+    let nonce_scalar = Scalar::from(LIMIT); // valid slots are 0..LIMIT
+    let nonce_commit = g * nonce_scalar + h * nonce_blinding;
+    let generator_t = hash_to_group(PRESENT_CTX, b"Tag");
+    let tag = generator_t * scalar_invert(&(cred.m1 + nonce_scalar)).unwrap();
+    let v = cred.x1 * z - g * r;
+
+    let pp = prove_presentation(
+        &PresentationWitness {
+            u,
+            u_prime_commit,
+            m1_commit,
+            tag,
+            generator_t,
+            m1: cred.m1,
+            x1: cred.x1,
+            v,
+            r,
+            z,
+            nonce: LIMIT,
+            nonce_blinding,
+            nonce_commit,
+            limit: LIMIT,
+        },
+        &mut rng,
+    );
+    let presentation = Presentation {
+        u,
+        u_prime_commit,
+        m1_commit,
+        tag,
+        nonce_commit,
+        d: pp.d,
+        proof: pp.proof,
+    };
+    assert!(
+        verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &presentation, LIMIT).is_none(),
+        "a nonce >= limit must be refused by the verifier's range proof"
     );
 }
 
