@@ -1,5 +1,10 @@
 # Tessera
 
+[![CI](https://github.com/NubsCarson/tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/NubsCarson/tessera/actions/workflows/ci.yml)
+[![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![MSRV 1.74](https://img.shields.io/badge/MSRV-1.74-blue.svg)](#build)
+![status: research-grade, unaudited](https://img.shields.io/badge/status-research--grade%20%C2%B7%20unaudited-orange.svg)
+
 **Anonymous, rate-limited credentials for censorship-resistant network access.**
 
 Tessera is a from-scratch, spec-faithful implementation of the IETF
