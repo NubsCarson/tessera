@@ -2,6 +2,8 @@
 name = "tessera-arc"
 version = "0.0.1"
 description = "Anonymous Rate-Limited Credentials (IETF ARC) over P-256 — the cryptographic core of Tessera."
+readme = "README.md"
+publish = false # not published yet — flip after a third-party security audit
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

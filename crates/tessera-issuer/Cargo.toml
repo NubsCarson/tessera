@@ -2,6 +2,8 @@
 name = "tessera-issuer"
 version = "0.0.1"
 description = "Proof-of-work issuance gate for Tessera ARC credentials — make obtaining a credential cost something."
+readme = "README.md"
+publish = false # not published yet — flip after a third-party security audit
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -81,6 +81,9 @@ around it:
 | [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site (the Anthropic API included), optionally over Tor. |
 | [`tessera-demo`](./crates/tessera-demo) | The runnable end-to-end demo: narrated CLI, a `--serve` browser hub, and a `--tor` onion-service path. |
 
+> Not yet published to crates.io — every crate is `publish = false` pending a
+> third-party security audit. Use it via a git or path dependency for now.
+
 ## Standards
 
 Tessera tracks three IETF drafts and is validated against their official test

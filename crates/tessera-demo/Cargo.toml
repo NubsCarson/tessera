@@ -2,6 +2,7 @@
 name = "tessera-demo"
 version = "0.0.1"
 description = "End-to-end Tessera demo: an origin that admits anonymous requests on a credential, not an IP."
+readme = "README.md"
 publish = false
 edition.workspace = true
 rust-version.workspace = true

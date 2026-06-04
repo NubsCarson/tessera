@@ -2,6 +2,7 @@
 name = "tessera-proxy"
 version = "0.0.1"
 description = "A credential-gated HTTP CONNECT proxy: admit on a Tessera credential (not an IP), tunnel TLS through Tor."
+readme = "README.md"
 publish = false
 edition.workspace = true
 rust-version.workspace = true

@@ -2,6 +2,8 @@
 name = "tessera-origin"
 version = "0.0.1"
 description = "Server-side ARC presentation guard: admit anonymous requests on a credential, not on IP."
+readme = "README.md"
+publish = false # not published yet — flip after a third-party security audit
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
