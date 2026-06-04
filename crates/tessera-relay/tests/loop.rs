@@ -22,12 +22,19 @@ use tessera_arc::arc::create_credential_response;
 use tessera_arc::keys::ServerPrivateKey;
 use tessera_client::{begin_issuance, TesseraClient};
 use tessera_origin::OriginGuard;
-use tessera_proxy::{serve_observed, ExitObservation, ExitObserver, Upstream};
+use tessera_proxy::{
+    serve_observed, serve_observed_shaped, ExitObservation, ExitObserver, ShapingConfig,
+    SharedShaper, Upstream, VolumeShaper,
+};
 use tessera_relay::{open_through_relay, serve as serve_relay, Observer};
 
 const REQ: &[u8] = b"tessera://issue/v1";
 const CTX: &[u8] = b"tessera://relay-loop/v1";
 const LIMIT: u64 = 8;
+
+/// Shared record of what the exit observed (kept aliased so helper return types
+/// stay simple — clippy::type_complexity).
+type ExitSeen = Arc<Mutex<Vec<ExitObservation>>>;
 
 /// A minimal HTTP/1.1 origin: replies `200 OK` with a fixed body, and records
 /// the peer address of every connection it accepts (so the test can prove the
@@ -119,6 +126,38 @@ fn spawn_exit() -> (SocketAddr, TesseraClient, Arc<Mutex<Vec<ExitObservation>>>)
     });
     serve_observed(listener, guard, Upstream::Direct, Some(observer));
     (addr, client, seen)
+}
+
+/// Like [`spawn_exit`] but the EXIT additionally runs the M5 per-egress
+/// **human-volume shaper** — i.e. the *full leaner-default exit stack* (token gate
+/// with shaping), the recommended architecture (`docs/ARCHITECTURE.md`). Returns
+/// the shared shaper so the test can confirm it was engaged.
+fn spawn_shaped_exit() -> (SocketAddr, TesseraClient, ExitSeen, SharedShaper) {
+    let mut rng = OsRng;
+    let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+    let (pending, request) = begin_issuance(REQ, pk, &mut rng);
+    let response = create_credential_response(&sk, &pk, &request, &mut rng).unwrap();
+    let credential = pending.finalize(&response).unwrap();
+    let client = TesseraClient::new(credential, CTX, LIMIT);
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let guard = Arc::new(OriginGuard::new(sk, pk, REQ, CTX, LIMIT));
+
+    let seen = Arc::new(Mutex::new(Vec::<ExitObservation>::new()));
+    let seen_cb = Arc::clone(&seen);
+    let observer: ExitObserver = Arc::new(move |obs: ExitObservation| {
+        seen_cb.lock().unwrap().push(obs);
+    });
+    let shaper = Arc::new(Mutex::new(VolumeShaper::new(ShapingConfig::default(), 1)));
+    serve_observed_shaped(
+        listener,
+        guard,
+        Upstream::Direct,
+        Some(observer),
+        Some(Arc::clone(&shaper)),
+    );
+    (addr, client, seen, shaper)
 }
 
 /// Stand up the RELAY in front of `exit_addr` with an observer; return its addr.
@@ -307,6 +346,62 @@ fn replay_is_double_spend_rejected_then_fresh_succeeds() {
         "a fresh presentation must succeed"
     );
     assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+/// THE LEANER DEFAULT, end-to-end (`docs/ARCHITECTURE.md`): an unlinkable ecash
+/// token (an ARC presentation) admits a request through the 2-hop loop to the
+/// destination — **no payment channel, no on-chain settlement, no ZK** — with the
+/// M5 human-volume shaper engaged at the exit and the split-trust property intact.
+/// This is the recommended path proven as one unit.
+#[test]
+fn leaner_default_token_path_through_shaped_exit() {
+    let (origin, hits, _origin_peers) = spawn_http_origin();
+    let (exit, mut client, exit_seen, shaper) = spawn_shaped_exit();
+    let relay_obs = Observer::new();
+    let relay = spawn_relay(exit, relay_obs.clone());
+
+    // A single unlinkable token admits the request all the way to the origin.
+    let header = client.presentation_header(&mut OsRng).unwrap();
+    let (client_src, resp) = http_get_through_loop(relay, exit, origin, &header).unwrap();
+    assert!(
+        resp.contains("200 OK"),
+        "token admitted through the loop, got:\n{resp}"
+    );
+    assert!(
+        resp.contains("tessera-origin-ok"),
+        "reached the real origin body"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 1, "origin hit exactly once");
+
+    // The M5 shaper was engaged at the exit: it recorded the (single) destination
+    // host it paced this tunnel to — proving the token gate + shaping compose.
+    assert_eq!(
+        shaper.lock().unwrap().distinct_destinations(),
+        1,
+        "the exit's human-volume shaper saw exactly one destination"
+    );
+
+    // Split-trust still holds on the leaner path: the EXIT saw the destination +
+    // a valid token, but its peer is the relay — never the client's socket.
+    let exit_seen = exit_seen.lock().unwrap().clone();
+    assert_eq!(exit_seen.len(), 1, "exit admitted one token-gated tunnel");
+    assert_eq!(
+        exit_seen[0].connect_target,
+        origin.to_string(),
+        "exit sees the destination"
+    );
+    assert_ne!(
+        exit_seen[0].peer, client_src,
+        "exit never sees the client's socket"
+    );
+    // And the RELAY never saw the destination.
+    for t in relay_obs.targets() {
+        assert_ne!(
+            t,
+            origin.to_string(),
+            "relay must never observe the destination"
+        );
+    }
 }
 
 #[test]
