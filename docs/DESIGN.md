@@ -166,10 +166,13 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
 - **Phase 1 — Prove the loop (make-or-break, mostly reuse).** `client → Tor → credential-gated exit
   (e2e TLS) → site → return`, ARC as v0 spend stand-in; local first, then **one real clean exit IP**
   → a Tor-`403` site returns `200`, privately. Tested.
-- **Phase 2 — Real payment.** EVM port of pool + `ChannelRegistry` (refund-on-timeout from day 1) →
-  `R_dec` Groth16 circuit (new trusted setup) → user-signed state + sign-then-serve →
-  **proof-of-relay** → Spilman watchtower → relayer node → Sybil/credential (pay + PoP). Reuse
-  `cloaksdk`/`privacy-cash` for the pool + toolchain.
+- **Phase 2 — Real payment.** **✅ Phase 2a done:** the channel *protocol state machine* is built +
+  tested in `crates/tessera-channel` (plain P-256 ECDSA + SHA-256 commitment) — user-signed states
+  (equivocation is attributable), sign-then-serve co-signing, HOPR proof-of-relay, and off-chain
+  dispute/settlement (`Settle`/`SlashUser`/`RefundUser`). **Remaining:** *2b* — the ZK balance-privacy
+  layer (`R_dec` decrement circuit; choose Circom-reuse-the-audited-pool vs Rust-native arkworks/halo2)
+  → *2c* — the EVM `ChannelRegistry` + Groth16 verifier + the pool port (Foundry is available locally;
+  reuse `cloaksdk`/`privacy-cash`) → Spilman watchtower → relayer node → Sybil/credential (pay + PoP).
 - **Phase 3 — Climb to ceiling.** Mode-switched PQ transport · coherent-persona fingerprint stack ·
   residential egress · PIR private-read tier · threshold issuance.
 - **Research-track (before any "ceiling" claim):** cross-epoch SDA budget · accountable hostile-exit ·

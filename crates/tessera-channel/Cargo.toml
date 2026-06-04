@@ -1,0 +1,26 @@
+[package]
+name = "tessera-channel"
+version = "0.0.1"
+description = "The ZK Spilman channel PROTOCOL state machine: a unidirectional, monotone-decrementing, single-payee off-chain payment channel with user-signed states, sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute resolution. Plain crypto (P-256 ECDSA + SHA-256 commitment); the ZK balance-privacy (Phase 2b) and EVM on-chain court (Phase 2c) are NOT here."
+readme = "README.md"
+publish = false # not published yet — flip after a third-party security audit
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# ECDSA over P-256 for the user/relayer signatures and the proof-of-relay
+# receipt. Same pinned `p256` the rest of the workspace uses — we only add the
+# `ecdsa` feature on top of the existing `arithmetic`/`hash2curve` set.
+p256 = { workspace = true, features = ["ecdsa"] }
+# SHA-256 for the state commitment S_i and the request/serve hashes.
+sha2.workspace = true
+rand_core.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+rand_core.workspace = true

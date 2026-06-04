@@ -7,6 +7,7 @@ members = [
     "crates/tessera-client",
     "crates/tessera-proxy",
     "crates/tessera-relay",
+    "crates/tessera-channel",
     "crates/tessera-demo",
 ]
 # Excluded, self-contained workspaces — each kept OUT of the host gates so its

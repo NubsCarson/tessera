@@ -79,7 +79,7 @@ roadmap.
 
 ## Crates
 
-A Cargo workspace of six crates — a verifiable crypto core plus the tooling
+A Cargo workspace of eight crates — a verifiable crypto core plus the tooling
 around it:
 
 | Crate | What it is |
@@ -90,6 +90,7 @@ around it:
 | [`tessera-client`](./crates/tessera-client) | Holds a credential and mints one fresh, unlinkable presentation per request. |
 | [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site (the Anthropic API included), optionally over Tor. |
 | [`tessera-relay`](./crates/tessera-relay) | The first onion hop: a credential-blind relay in front of the credential-gated exit (`tessera-proxy`), forming the **2-hop split-trust loop** — the relay learns {client, exit} but never the destination, the exit learns {destination, a valid credential} but never the client; neither sees content. Phase 1 "prove the loop", tested end-to-end. |
+| [`tessera-channel`](./crates/tessera-channel) | The **ZK Spilman channel protocol state machine** (Phase 2a, `DESIGN.md` §2): a unidirectional, monotone-decrementing, single-payee off-chain payment channel in plain Rust — user-signed states (so equivocation is attributable), sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute/settlement. Plain crypto (P-256 ECDSA + SHA-256 commitment). **The ZK balance-privacy layer (Phase 2b) and the EVM on-chain court (Phase 2c) are NOT here yet.** |
 | [`tessera-demo`](./crates/tessera-demo) | The runnable end-to-end demo: narrated CLI, a `--serve` browser hub, and a `--tor` onion-service path. |
 
 Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
