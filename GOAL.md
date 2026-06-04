@@ -92,5 +92,28 @@ of the anonymity-set dynamics when ARC rides over Tor.
 - A written security argument mapping our code to the unlinkability claims in
   ARC §7 and the KVAC paper, with the gaps to a formal proof named explicitly.
 
-Until milestone 10 lands, the honest status is: **a proven-correct ARC core, on
-the way to a deployable system.** No overclaiming.
+All 10 milestones are complete; the honest status is **a proven-correct ARC core
+and a runnable trust-layer demo, hardened (internally, not third-party audited)
+and CI-gated.** No overclaiming.
+
+---
+
+## Deliberately deferred (considered, not overlooked)
+
+An adversarial review panel triaged the remaining ideas. These are intentionally
+**not** done pre-1.0, with reasons — so their absence is a decision, not a gap:
+
+- **Proof-of-work / payment issuance gate** ("earn your budget") — the real
+  Sybil lever (THREAT_MODEL §4.3/§6.3), but a naive PoW gives weak Sybil
+  resistance and it's a genuine protocol-design effort, not a quick win. Future
+  research, not a half-baked add.
+- **`axum`/`tower` middleware** — valuable for adoption but pulls a heavy async
+  dependency tree; belongs behind an optional feature, post-1.0. The guard is
+  already framework-agnostic.
+- **Pluggable/durable `TagStore` backend** — the in-memory store is honestly
+  documented as non-durable; no concrete backend consumer yet.
+- **Key epochs / rotation on the wire**, **batch verification**, **ristretto255
+  ciphersuite**, **wasm build**, **a Tor↔LLM-API proxy example** — each is a
+  real protocol-surface or scope expansion better done with a driving use case.
+- **`#![deny(missing_docs)]`**, **CONTRIBUTING/CHANGELOG/badges**, **`zeroize`
+  on key drop** — cosmetic/pre-0.1.0 polish; tracked, not blocking.

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 7 * * *" # daily: catch new RustSec advisories
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,18 +37,40 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Test (the IETF known-answer vectors + robustness fuzzing live here)
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features --locked
 
       - name: Benchmarks compile
-        run: cargo bench --workspace --no-run
+        run: cargo bench --workspace --no-run --locked
 
       - name: Docs (deny broken intra-doc links)
         env:
           RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps --locked
+
+  msrv:
+    name: MSRV 1.74
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.74.0
+        run: |
+          rustup toolchain install 1.74.0 --profile minimal
+          rustup override set 1.74.0
+      - name: Build on the declared MSRV
+        run: cargo +1.74.0 build --workspace --all-features --locked
+
+  audit:
+    name: cargo-audit (RustSec advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Audit the dependency graph
+        run: cargo audit
 
   fuzz:
     name: fuzz build + smoke

@@ -59,6 +59,27 @@ fn full_roundtrip_presentations_verify_within_limit() {
 }
 
 #[test]
+fn server_private_key_serialization_roundtrips_and_debug_is_redacted() {
+    let (sk, pk) = ServerPrivateKey::setup(&mut OsRng);
+    let bytes = sk.serialize();
+    assert_eq!(bytes.len(), 4 * 32, "private key is 4*Ns bytes");
+
+    let sk2 = ServerPrivateKey::from_bytes(&bytes).expect("decode");
+    assert_eq!(
+        sk2.public_key().serialize(),
+        pk.serialize(),
+        "deserialized key derives the same public key"
+    );
+
+    // Debug must never reveal the secret scalars.
+    assert_eq!(format!("{sk:?}"), "ServerPrivateKey(<redacted>)");
+
+    // Truncated / empty input is rejected, not panicked.
+    assert!(ServerPrivateKey::from_bytes(&bytes[..127]).is_err());
+    assert!(ServerPrivateKey::from_bytes(&[]).is_err());
+}
+
+#[test]
 fn presentation_beyond_limit_is_refused() {
     let (_sk, _pk, credential) = issue_credential();
     let mut state = PresentationState::new(credential, PRESENT_CTX, 2);

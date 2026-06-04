@@ -105,6 +105,10 @@ path to that is milestone 10 in [`GOAL.md`](./GOAL.md). The cryptographic
 primitives come from the audited [RustCrypto](https://github.com/RustCrypto)
 project; the protocol logic on top is what still needs review.
 
+To report a vulnerability, see [`SECURITY.md`](./SECURITY.md). The full trust
+model, per-goal guarantees, and known gaps are in
+[`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md).
+
 ## Build
 
 ```
