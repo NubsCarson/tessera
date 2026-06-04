@@ -18,10 +18,17 @@
 
 use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use tessera_origin::{Decision, OriginGuard, PRESENTATION_HEADER};
+
+pub mod shaping;
+pub use shaping::{ShapingConfig, ShapingDecision, VolumeShaper};
+
+/// A per-egress-IP human-volume shaper shared across the proxy's connection
+/// threads. See [`shaping`].
+pub type SharedShaper = Arc<Mutex<VolumeShaper>>;
 
 /// Where the proxy sends admitted tunnels.
 #[derive(Debug, Clone)]
@@ -74,14 +81,37 @@ pub fn serve_observed(
     upstream: Upstream,
     observer: Option<ExitObserver>,
 ) -> thread::JoinHandle<()> {
+    serve_observed_shaped(listener, guard, upstream, observer, None)
+}
+
+/// Like [`serve_observed`], but additionally applies per-egress-IP **human-volume
+/// shaping** (M5, see [`shaping`]) via a shared [`VolumeShaper`]. Each admitted
+/// tunnel is paced according to the shaper's verdict (a graceful, bounded delay
+/// when over the human envelope — never a hard block) before connecting, and the
+/// shaper's concurrency count is bracketed around the tunnel. Pass one shaper per
+/// egress IP; `None` disables shaping (equivalent to [`serve_observed`]).
+pub fn serve_observed_shaped(
+    listener: TcpListener,
+    guard: Arc<OriginGuard>,
+    upstream: Upstream,
+    observer: Option<ExitObserver>,
+    shaper: Option<SharedShaper>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
             let guard = Arc::clone(&guard);
             let upstream = upstream.clone();
             let observer = observer.clone();
+            let shaper = shaper.clone();
             thread::spawn(move || {
-                let _ = handle_connect(stream, &guard, &upstream, observer.as_ref());
+                let _ = handle_connect(
+                    stream,
+                    &guard,
+                    &upstream,
+                    observer.as_ref(),
+                    shaper.as_ref(),
+                );
             });
         }
     })
@@ -97,6 +127,7 @@ fn handle_connect(
     guard: &OriginGuard,
     upstream: &Upstream,
     observer: Option<&ExitObserver>,
+    shaper: Option<&SharedShaper>,
 ) -> Result<()> {
     let peer = stream.peer_addr().ok();
     let mut reader = BufReader::new(stream.try_clone()?.take(64 * 1024));
@@ -157,6 +188,29 @@ fn handle_connect(
     // Open the tunnel to the requested host:port.
     let (host, port) = split_host_port(&target)
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "bad CONNECT target"))?;
+
+    // Per-egress-IP human-volume shaping (M5): pace this tunnel to stay within a
+    // human-plausible envelope for the egress IP. Over-envelope traffic is delayed
+    // gracefully (never hard-blocked — a refusal is itself a detectable signal),
+    // and the tunnel is bracketed in the shaper's concurrency count. Keyed on the
+    // destination host (metadata only; the tunnel stays end-to-end TLS). The
+    // `ShaperPermit` guarantees the `note_open` taken here is matched by a
+    // `note_close` on every return path (including the early 502 below).
+    let _permit = shaper.map(|sh| {
+        let delay = match sh.lock() {
+            Ok(mut g) => {
+                let d = g.decide_now(&host);
+                g.note_open();
+                d.delay
+            }
+            Err(_) => std::time::Duration::ZERO,
+        };
+        if !delay.is_zero() {
+            thread::sleep(delay);
+        }
+        ShaperPermit { shaper: sh }
+    });
+
     let upstream_conn = match upstream {
         Upstream::Direct => TcpStream::connect((host.as_str(), port)),
         Upstream::Tor(proxy) => socks5_connect(proxy, &host, port),
@@ -176,6 +230,20 @@ fn handle_connect(
     // end-to-end with the upstream; the proxy only moves opaque bytes.
     pipe(stream, upstream_conn);
     Ok(())
+}
+
+/// Releases the shaper's concurrency permit when the tunnel handler returns
+/// (including on the early `502` path), so `note_open`/`note_close` always pair.
+struct ShaperPermit<'a> {
+    shaper: &'a SharedShaper,
+}
+
+impl Drop for ShaperPermit<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut g) = self.shaper.lock() {
+            g.note_close();
+        }
+    }
 }
 
 fn split_host_port(target: &str) -> Option<(String, u16)> {

@@ -121,6 +121,18 @@ Prototype it as a metered scope of the existing ARC/P-256 credential with separa
 earn/spend caps, and make the path-selector refuse any flow that would push an
 exit past its human-volume envelope.
 
+**✅ Built (M5):** the first increment of this is implemented and tested as
+`tessera_proxy::shaping::VolumeShaper` and wired into the exit
+(`serve_observed_shaped` + the live binary). It enforces, per egress IP and on
+metadata only, a **distinct-destination cap + concurrency cap + sticky-session +
+jitter**, and over the envelope it **paces gracefully (a bounded, capped delay) —
+never hard-blocks** (a hard refusal is itself a fingerprintable signal). The
+headline behavior is proven by a test (one IP → 1000 unrelated domains is
+throttled, never blocked). Still external/future: tying the envelope to the
+credential's earn/spend caps as a *network-wide* invariant (vs the current
+per-exit local governor), and the path-selector refusing over-envelope flows
+across a multi-exit fleet.
+
 ## 5. Honest verdict — is "most of the web at human volume" achievable?
 
 **Yes — but only as a portfolio, with the hard core explicitly bounded, built in

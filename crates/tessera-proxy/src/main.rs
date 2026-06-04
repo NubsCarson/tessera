@@ -6,14 +6,14 @@
 //!       `cargo run -p tessera-proxy -- --tor`  (tunnel through Tor at :9050)
 
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rand_core::OsRng;
 use tessera_arc::arc::{create_credential_response, Credential};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 use tessera_client::{begin_issuance, TesseraClient};
 use tessera_origin::OriginGuard;
-use tessera_proxy::{serve, Upstream};
+use tessera_proxy::{serve_observed_shaped, ShapingConfig, Upstream, VolumeShaper};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
 const PRESENT_CTX: &[u8] = b"tessera://proxy/v1";
@@ -43,7 +43,15 @@ fn main() {
     } else {
         Upstream::Direct
     };
-    serve(listener, guard, upstream);
+    // Per-egress-IP human-volume shaping (M5): keep this egress IP's outbound
+    // traffic within a human-plausible envelope (bounded distinct destinations,
+    // concurrency, jitter, sticky sessions) so a clean IP is not burned by
+    // bot-shaped fan-out. Over-envelope traffic is paced gracefully, never blocked.
+    let shaper = Arc::new(Mutex::new(VolumeShaper::new(
+        ShapingConfig::default(),
+        addr.port() as u64,
+    )));
+    serve_observed_shaped(listener, guard, upstream, None, Some(shaper));
 
     // Mint a few single-use credentials to paste into example requests.
     let mut client = TesseraClient::new(credential, PRESENT_CTX, LIMIT);
@@ -57,7 +65,10 @@ fn main() {
         "direct"
     };
     println!("\nTessera proxy live on http://{addr}  ·  admits on a credential, never your IP  ·  {route}");
-    println!("It tunnels TLS end-to-end (CONNECT), so it never sees your plaintext.\n");
+    println!("It tunnels TLS end-to-end (CONNECT), so it never sees your plaintext.");
+    println!(
+        "Egress is human-volume shaped (M5): bot-shaped fan-out is paced, never the IP burned.\n"
+    );
     println!(
         "Send any HTTPS request through it (single-use credential — the rate limit; restart for more). Example:\n"
     );
