@@ -15,9 +15,9 @@
 ## Status snapshot
 
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
-- **SHOULD tier: 4/34** — hardening + completeness; in progress (S4, S5, S7, S8).
+- **SHOULD tier: 6/34** — hardening + completeness; in progress (S1, S4, S5, S6, S7, S8).
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** ~70 Rust workspace tests + 48 Foundry tests, all green; CI green on `main`.
+- **Verification:** ~70 Rust workspace tests + 48 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
 
 ## MUST — done
 
@@ -40,7 +40,7 @@
 | S5 | Foundry court invariant + interaction-matrix fuzz (128k calls) | ✅ | `74b3acd` |
 | S7 | RDecVerifier malformed-proof negative tests | ✅ | (this commit) |
 | S6 | Wire-codec fuzz harnesses (relay header decoders) | ✅ | (this commit) |
-| S1 | Cross-layer epoch-clock authority spec | ⬜ | |
+| S1 | Cross-layer epoch-clock authority spec (`docs/EPOCH_AUTHORITY.md`) | ✅ | (this commit) |
 | S2 | Cross-epoch nullifier-clash / replay integration test | ⬜ | |
 | S3 | Abuse/DoS model beyond rate-limit (+ bounded buffers) | ⬜ | |
 | S8 | Reentrancy interaction-matrix fuzz | ✅ (subsumed by S5) | `74b3acd` |
