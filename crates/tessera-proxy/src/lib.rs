@@ -32,19 +32,56 @@ pub enum Upstream {
     Tor(String),
 }
 
+/// What the exit observed about one *admitted* tunnel: the peer socket it
+/// accepted from and the CONNECT target (`host:port`, SNI-level destination) it
+/// is about to tunnel to. Reported only after the credential check passes, so it
+/// also witnesses "a valid credential was presented."
+///
+/// This is the EXIT's side of the split-trust ledger: it sees the destination
+/// and that a credential was valid, but its `peer` is whoever connected to it —
+/// the relay, never the client. `tessera-relay`'s integration test reads this to
+/// prove the exit never learns the client's real address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExitObservation {
+    /// The socket this connection came from. In the 2-hop loop this is the relay.
+    pub peer: std::net::SocketAddr,
+    /// The CONNECT target being tunneled to (the final destination, SNI-level).
+    pub connect_target: String,
+}
+
+/// A callback invoked once per admitted tunnel with its [`ExitObservation`].
+pub type ExitObserver = Arc<dyn Fn(ExitObservation) + Send + Sync>;
+
 /// Start the proxy on an already-bound listener, in a background thread.
+///
+/// Equivalent to [`serve_observed`] with no observer.
 pub fn serve(
     listener: TcpListener,
     guard: Arc<OriginGuard>,
     upstream: Upstream,
+) -> thread::JoinHandle<()> {
+    serve_observed(listener, guard, upstream, None)
+}
+
+/// Like [`serve`], but with an optional [`ExitObserver`] called once per
+/// *admitted* tunnel — used by `tessera-relay` to witness, and assert on, what
+/// the exit learns (destination + a valid credential) and crucially does *not*
+/// (the client's address). Production code uses [`serve`]; this is for the
+/// split-trust proof.
+pub fn serve_observed(
+    listener: TcpListener,
+    guard: Arc<OriginGuard>,
+    upstream: Upstream,
+    observer: Option<ExitObserver>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
             let guard = Arc::clone(&guard);
             let upstream = upstream.clone();
+            let observer = observer.clone();
             thread::spawn(move || {
-                let _ = handle_connect(stream, &guard, &upstream);
+                let _ = handle_connect(stream, &guard, &upstream, observer.as_ref());
             });
         }
     })
@@ -55,7 +92,13 @@ fn write_status(stream: &mut TcpStream, status: &str) {
     let _ = stream.flush();
 }
 
-fn handle_connect(mut stream: TcpStream, guard: &OriginGuard, upstream: &Upstream) -> Result<()> {
+fn handle_connect(
+    mut stream: TcpStream,
+    guard: &OriginGuard,
+    upstream: &Upstream,
+    observer: Option<&ExitObserver>,
+) -> Result<()> {
+    let peer = stream.peer_addr().ok();
     let mut reader = BufReader::new(stream.try_clone()?.take(64 * 1024));
 
     // Request line: `CONNECT host:port HTTP/1.1`.
@@ -101,6 +144,16 @@ fn handle_connect(mut stream: TcpStream, guard: &OriginGuard, upstream: &Upstrea
         }
     }
 
+    // Admitted: witness what the exit learned — the destination + that a valid
+    // credential was presented — for the split-trust ledger. `peer` is whoever
+    // connected (the relay in the 2-hop loop), never the client.
+    if let (Some(obs), Some(peer)) = (observer, peer) {
+        obs(ExitObservation {
+            peer,
+            connect_target: target.clone(),
+        });
+    }
+
     // Open the tunnel to the requested host:port.
     let (host, port) = split_host_port(&target)
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "bad CONNECT target"))?;
@@ -130,8 +183,14 @@ fn split_host_port(target: &str) -> Option<(String, u16)> {
     Some((host.to_string(), port.parse().ok()?))
 }
 
-/// Bidirectional copy between two streams (one thread per direction).
-fn pipe(a: TcpStream, b: TcpStream) {
+/// Bidirectional copy between two streams (one thread per direction): copy `a→b`
+/// on a spawned thread and `b→a` on this one, half-closing each direction on EOF.
+///
+/// This is the byte-transport heart of the tunnel — both the EXIT here and the
+/// first-hop RELAY (`tessera-relay`, which reuses this) only ever move opaque
+/// bytes. The client's TLS runs end-to-end through it untouched, so neither hop
+/// sees plaintext and any tampering surfaces as a TLS error at the real endpoint.
+pub fn pipe(a: TcpStream, b: TcpStream) {
     let (mut a_read, mut a_write) = (a.try_clone(), a);
     let (mut b_read, mut b_write) = (b.try_clone(), b);
     let t = thread::spawn(move || {

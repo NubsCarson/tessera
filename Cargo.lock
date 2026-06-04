@@ -708,6 +708,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tessera-relay"
+version = "0.0.1"
+dependencies = [
+ "hex",
+ "rand_core",
+ "tessera-arc",
+ "tessera-client",
+ "tessera-origin",
+ "tessera-proxy",
+]
+
+[[package]]
 name = "tinytemplate"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

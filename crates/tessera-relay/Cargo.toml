@@ -1,0 +1,29 @@
+[package]
+name = "tessera-relay"
+version = "0.0.1"
+description = "The first onion hop: a credential-blind relay that forwards a nested CONNECT to the credential-gated exit (tessera-proxy) without ever learning the final destination — the 2-hop split-trust loop."
+readme = "README.md"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "tessera-relay"
+path = "src/main.rs"
+
+[dependencies]
+# The relay reuses tessera-proxy's CONNECT/pipe/SOCKS5/OriginGuard logic for the
+# EXIT hop; the relay hop itself is the new, credential-blind first hop.
+tessera-arc = { path = "../tessera-arc" }
+tessera-origin = { path = "../tessera-origin" }
+tessera-client = { path = "../tessera-client" }
+tessera-proxy = { path = "../tessera-proxy" }
+rand_core.workspace = true
+hex.workspace = true
+
+[dev-dependencies]

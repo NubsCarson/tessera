@@ -89,6 +89,7 @@ around it:
 | [`tessera-origin`](./crates/tessera-origin) | Server-side `OriginGuard`: admit a request on a valid, in-budget, unspent presentation — **never** on the source IP. Transport-agnostic. |
 | [`tessera-client`](./crates/tessera-client) | Holds a credential and mints one fresh, unlinkable presentation per request. |
 | [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site (the Anthropic API included), optionally over Tor. |
+| [`tessera-relay`](./crates/tessera-relay) | The first onion hop: a credential-blind relay in front of the credential-gated exit (`tessera-proxy`), forming the **2-hop split-trust loop** — the relay learns {client, exit} but never the destination, the exit learns {destination, a valid credential} but never the client; neither sees content. Phase 1 "prove the loop", tested end-to-end. |
 | [`tessera-demo`](./crates/tessera-demo) | The runnable end-to-end demo: narrated CLI, a `--serve` browser hub, and a `--tor` onion-service path. |
 
 Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
