@@ -1,7 +1,7 @@
 # Finding: ARC §10.2 proof blobs do not reconcile with the pinned reference
 
-**Status:** open · **Severity:** does not affect correctness of this crate ·
-**Date:** 2026-06
+**Status:** filed upstream as [`draft-arc#68`](https://github.com/ietf-wg-privacypass/draft-arc/issues/68)
+· **Severity:** does not affect correctness of this crate · **Date:** 2026-06
 
 ## TL;DR
 
@@ -92,6 +92,8 @@ the Sigma-vector confirmation) were run during development. To re-derive:
 
 ## Next step
 
-File an issue upstream against `draft-arc` to regenerate `allVectors.json`
-against the current `draft-irtf-cfrg-sigma-protocols` POC, and re-enable the
-`#[ignore]`d tests once the blobs are consistent.
+✅ Filed upstream as [`ietf-wg-privacypass/draft-arc#68`](https://github.com/ietf-wg-privacypass/draft-arc/issues/68)
+(2026-06-04), asking that `allVectors.json` be regenerated against the current
+`draft-irtf-cfrg-sigma-protocols` POC and the pinned `poc/sigma` submodule
+bumped. Once the blobs are consistent, re-enable the `#[ignore]`d positive tests
+in `tests/proof_vectors.rs` — they are written and will flip green unchanged.

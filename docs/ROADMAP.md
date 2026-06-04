@@ -72,7 +72,7 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
   **Human final mile (unchanged):** loading the extension in a real browser
   against a live origin, and wiring issuance to a real issuer.
 
-## 4. Upstream contribution + research  ·  *drafts done; posting needs your OK*
+## 4. Upstream contribution + research  ·  *done (issue filed)*
 
 - **Goal.** Give back to the standard and chart the post-quantum path.
 - **Approach.** (a) Draft a precise issue for the IETF Privacy Pass WG's
@@ -85,17 +85,20 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
 - **Risks / external.** Posting the issue is an outward action under **your**
   GitHub identity to a third-party repo — we draft it; **you** post it (or
   explicitly OK it).
-- **Status.** ✅ **drafts done** — the IETF issue text
-  ([`upstream-arc-vector-issue.md`](./upstream-arc-vector-issue.md)) and
-  [`POST_QUANTUM.md`](./POST_QUANTUM.md) (what Shor breaks, MPCitH/lattice
-  options, migration sketch) are written. **Posting the issue is gated on your
-  explicit go-ahead** — outward action under your GitHub identity.
+- **Status.** ✅ **done** — the IETF issue is **filed** as
+  [`draft-arc#68`](https://github.com/ietf-wg-privacypass/draft-arc/issues/68)
+  (as-posted text in [`upstream-arc-vector-issue.md`](./upstream-arc-vector-issue.md);
+  tightened to only the draft's own published data + claims our tests support),
+  and [`POST_QUANTUM.md`](./POST_QUANTUM.md) (what Shor breaks, MPCitH/lattice
+  options, migration sketch) is written.
 
 ---
 
 ### Honesty note
 
-"Fully done, all four, autonomously" has real boundaries: tracks 2–4 each have a
-final mile that needs you (a Cloudflare account, a browser, your GitHub
-identity). Everything up to those miles will be built clean, tested, and
-CI-green; the human-gated step is called out explicitly in each, never faked.
+All four tracks are landed. Track 4's outward action (the GitHub-identity mile)
+is **done** — [`draft-arc#68`](https://github.com/ietf-wg-privacypass/draft-arc/issues/68)
+is filed. The only remaining human-gated miles are genuinely physical/account
+ones, never faked: a live **Cloudflare** deploy (track 2 ships a documented
+sketch, not a deploy) and loading the **MV3 extension in a real browser** against
+a live origin (track 3 ships a compiling, headless-tested wasm core + scaffold).
