@@ -4,11 +4,13 @@ The map of everything: what each doc covers, **why** the key decisions were made
 (so the reasoning is durable, not just the outcome), and the paths not yet taken.
 If you read nothing else, read the **honest status** at the bottom.
 
-> Tessera is a **private, uncensorable clearnet-access network**: reach any HTTPS
-> site privately, paying anonymously per request, admitted on a credential/token
-> — never an IP — for humans and AI agents, with anonymity provided by Tor.
-> Research-grade, **UNAUDITED**. The contribution is the *composition* + the
-> *candor*, not a new primitive.
+> Tessera is a **research-grade protocol artifact + self-hostable tool** for
+> private, uncensorable clearnet *access*: reach any HTTPS site privately, paying
+> anonymously per request, admitted on a credential/token — never an IP — for
+> humans and AI agents, with anonymity provided by Tor. It is **not yet a deployed
+> network** a stranger can use (that needs a clean egress IP + a Tor crowd + an
+> audit — see **Honest status** below). Research-grade, **UNAUDITED**. The
+> contribution is the *composition* + the *candor*, not a new primitive.
 
 ## Read in this order
 
