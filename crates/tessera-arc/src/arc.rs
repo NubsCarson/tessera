@@ -29,6 +29,12 @@ pub enum ArcError {
     InvalidResponseProof,
     /// The presentation limit for this credential/context was reached.
     LimitExceeded,
+    /// The credential cannot form a presentation because `m1 + nonce` is not
+    /// invertible (zero modulo the group order). For a randomly issued
+    /// credential this is astronomically unlikely (~2⁻²⁵⁶); it is surfaced as a
+    /// recoverable error rather than a panic so a hosted client (e.g. wasm)
+    /// never aborts.
+    DegenerateCredential,
 }
 
 impl core::fmt::Display for ArcError {
@@ -37,6 +43,9 @@ impl core::fmt::Display for ArcError {
             ArcError::InvalidRequestProof => "credential-request proof failed to verify",
             ArcError::InvalidResponseProof => "credential-response proof failed to verify",
             ArcError::LimitExceeded => "presentation limit reached",
+            ArcError::DegenerateCredential => {
+                "credential cannot form a presentation (m1 + nonce not invertible)"
+            }
         })
     }
 }
@@ -250,8 +259,12 @@ impl PresentationState {
         let nonce_commit = g * nonce_scalar + h * nonce_blinding;
 
         let generator_t = hash_to_group(&self.presentation_context, b"Tag");
-        let tag =
-            generator_t * scalar_invert(&(cred.m1 + nonce_scalar)).expect("m1 + nonce is non-zero");
+        // `m1 + nonce` is non-zero (hence invertible) for any randomly issued
+        // credential; the `ok_or` makes the ~2⁻²⁵⁶ degenerate case a recoverable
+        // error instead of a panic, so a hosted (wasm) client never aborts.
+        let m1_nonce_inv =
+            scalar_invert(&(cred.m1 + nonce_scalar)).ok_or(ArcError::DegenerateCredential)?;
+        let tag = generator_t * m1_nonce_inv;
         let v = cred.x1 * z - g * r;
 
         let pp = prove_presentation(

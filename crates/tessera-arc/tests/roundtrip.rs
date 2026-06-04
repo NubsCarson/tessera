@@ -230,3 +230,28 @@ fn forged_credential_cannot_be_minted_from_bad_request() {
         ArcError::InvalidRequestProof
     );
 }
+
+#[test]
+fn degenerate_credential_is_an_error_not_a_panic() {
+    // `m1 + nonce(0) == 0` makes the tag's scalar inversion fail. A randomly
+    // issued credential never hits this (~2⁻²⁵⁶), but a hosted (wasm) client
+    // must get a recoverable error, never a panic/abort. Construct the
+    // degenerate credential directly and confirm `present` returns an error.
+    use p256::ProjectivePoint;
+    use tessera_arc::arc::Credential;
+
+    let cred = Credential {
+        m1: Scalar::ZERO,
+        u: ProjectivePoint::GENERATOR,
+        u_prime: ProjectivePoint::GENERATOR,
+        x1: ProjectivePoint::GENERATOR,
+    };
+    let mut state = PresentationState::new(cred, PRESENT_CTX, LIMIT);
+    assert!(
+        matches!(
+            state.present(&mut OsRng),
+            Err(ArcError::DegenerateCredential)
+        ),
+        "degenerate m1 must yield a recoverable error, not a panic"
+    );
+}

@@ -54,6 +54,17 @@ The pre-1.0 development line. **Research-grade and unaudited** — see
   scopes a PQ-sound path.
 - CI: a dedicated `wasm` job; GitHub Actions bumped to the Node-24 majors.
 
+### Fixed
+- An adversarial multi-agent review of the frontier code confirmed 4 issues
+  (the tower middleware's tower-contract handling and the durable-store test were
+  cleared): (1) `PresentationState::present` returned via `.expect()` on the
+  `m1 + nonce` inversion — a JS-reachable panic (~2⁻²⁵⁶, not attacker-controlled)
+  that violated the wasm crate's "no panic on the JS path" contract; now returns
+  `ArcError::DegenerateCredential` (regression-tested); (2) a TOCTOU window in
+  `FileTagStore::open` (`exists()`-then-open) replaced with open-then-handle-
+  `NotFound`; (3) an unhandled `chrome.alarms.create()` promise rejection in the
+  extension scaffold now `.catch`-es.
+
 ### Known issues
 - The ARC §10.2 **proof-blob** test vectors do not reconcile with the pinned
   reference (upstream skew); the proof layer is proven against the Sigma vectors

@@ -93,7 +93,12 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Rotate periodically so the attached header changes over time (illustrative;
 // see the unlinkability LIMITS note above — this is not per-request).
-chrome.alarms?.create?.("tessera-rotate", { periodInMinutes: 1 });
+// `create()` returns a Promise in MV3; attach `.catch` so a failed alarm
+// (bad args / quota) surfaces in the console instead of an unhandled rejection
+// (the optional `?.catch?.` also tolerates older void-returning shims).
+chrome.alarms
+  ?.create?.("tessera-rotate", { periodInMinutes: 1 })
+  ?.catch?.((e) => console.error("[tessera] alarm creation failed:", e));
 chrome.alarms?.onAlarm?.addListener?.((a) => {
   if (a.name === "tessera-rotate") {
     rotatePresentation().catch((e) =>

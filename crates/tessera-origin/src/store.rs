@@ -104,19 +104,26 @@ impl FileTagStore {
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref();
         let mut spent = HashSet::new();
-        if path.exists() {
-            for line in BufReader::new(File::open(path)?).lines() {
-                let line = line?;
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                if let Ok(bytes) = hex::decode(line) {
-                    if let Ok(tag) = Tag::try_from(bytes.as_slice()) {
-                        spent.insert(tag);
+        // Open-then-handle-NotFound rather than `exists()`-then-open: that
+        // check-then-use pattern has a TOCTOU window (the file could vanish
+        // between the two), and a single open is also one fewer syscall.
+        match File::open(path) {
+            Ok(f) => {
+                for line in BufReader::new(f).lines() {
+                    let line = line?;
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    if let Ok(bytes) = hex::decode(line) {
+                        if let Ok(tag) = Tag::try_from(bytes.as_slice()) {
+                            spent.insert(tag);
+                        }
                     }
                 }
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // fresh start
+            Err(e) => return Err(e),
         }
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         Ok(Self {
