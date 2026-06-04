@@ -11,24 +11,33 @@ use std::thread;
 use tessera_origin::{Decision, OriginGuard, PRESENTATION_HEADER};
 
 /// Pages the origin serves, so a browser or `curl` sees something clean too.
+const PAGE_STYLE: &str = "font:17px/1.6 system-ui;max-width:42rem;margin:4rem auto;\
+    background:#24283b;color:#c0caf5;padding:0 1.25rem";
+const HOME_LINK: &str =
+    "<p><a href='/' style='color:#7aa2f7;text-decoration:none'>← back to the demo</a></p>";
+
 fn admit_page(tag: &str) -> String {
     format!(
         "<!doctype html><meta charset=utf-8><title>Tessera · admitted</title>\
-         <body style='font:16px system-ui;max-width:40rem;margin:4rem auto;color:#1a1b26'>\
-         <h1>🔓 Admitted</h1>\
+         <body style='{PAGE_STYLE}'>\
+         <h1 style='color:#9ece6a'>🔓 Admitted</h1>\
          <p>You proved you hold a valid, in-budget credential — without revealing \
          who you are or where you connected from. Your IP was never consulted.</p>\
-         <p style='color:#565f89'>presentation tag: <code>{tag}</code></p></body>"
+         <p style='color:#565f89'>presentation tag: <code>{tag}</code></p>\
+         <p style='color:#565f89'><b>Now reload this page</b> — the same credential can't be \
+         reused, so you'll be blocked for double-spend. That's the rate limit working.</p>\
+         {HOME_LINK}</body>"
     )
 }
 
 fn block_page(reason: &str) -> String {
     format!(
         "<!doctype html><meta charset=utf-8><title>Tessera · blocked</title>\
-         <body style='font:16px system-ui;max-width:40rem;margin:4rem auto;color:#1a1b26'>\
-         <h1>🔒 Blocked</h1>\
-         <p>This request carried no acceptable credential ({reason}). On most of \
-         today's web this is exactly what a Tor exit IP gets — blocked on sight.</p></body>"
+         <body style='{PAGE_STYLE}'>\
+         <h1 style='color:#f7768e'>🔒 Blocked</h1>\
+         <p>This request carried no acceptable credential (<code>{reason}</code>). On most of \
+         today's web this is exactly what a Tor exit IP gets — blocked on sight.</p>\
+         {HOME_LINK}</body>"
     )
 }
 
@@ -42,18 +51,27 @@ pub struct HttpResult {
 /// Start the origin HTTP server on an already-bound listener, in a background
 /// thread. Each connection is handled by [`OriginGuard::check`] on the
 /// `Tessera-Presentation` header — the source IP is never examined.
-pub fn serve(listener: TcpListener, guard: Arc<OriginGuard>) -> thread::JoinHandle<()> {
+/// `landing`, if set, is served at the bare `/` path for requests that carry no
+/// credential — a friendly, self-explanatory hub page. Any other path without a
+/// credential still gets the 403 Blocked page. Pass `None` for the scripted demo.
+pub fn serve(
+    listener: TcpListener,
+    guard: Arc<OriginGuard>,
+    landing: Option<String>,
+) -> thread::JoinHandle<()> {
+    let landing = Arc::new(landing);
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
             let guard = Arc::clone(&guard);
+            let landing = Arc::clone(&landing);
             // One thread per connection is plenty for a demo.
-            thread::spawn(move || handle_connection(stream, &guard));
+            thread::spawn(move || handle_connection(stream, &guard, &landing));
         }
     })
 }
 
-fn handle_connection(mut stream: TcpStream, guard: &OriginGuard) {
+fn handle_connection(mut stream: TcpStream, guard: &OriginGuard, landing: &Option<String>) {
     // Bound the request so a hostile client can't exhaust memory with endless headers.
     let mut reader = BufReader::new(
         match stream.try_clone() {
@@ -91,15 +109,26 @@ fn handle_connection(mut stream: TcpStream, guard: &OriginGuard) {
         presentation = query_param(&request_line, "t");
     }
 
-    let decision = guard.check(presentation.as_deref());
-    let (status_line, result, body) = match &decision {
-        Decision::Admit { tag } => ("200 OK", format!("admit tag={tag}"), admit_page(tag)),
-        Decision::Reject(reason) => (
-            "403 Forbidden",
-            format!("reject {}", reason.label()),
-            block_page(reason.label()),
-        ),
-    };
+    let target = request_line.split_whitespace().nth(1).unwrap_or("");
+    let (status_line, result, body) =
+        if presentation.is_none() && target == "/" && landing.is_some() {
+            // The friendly hub page (no credential, bare root).
+            (
+                "200 OK",
+                "landing".to_string(),
+                landing.as_ref().unwrap().clone(),
+            )
+        } else {
+            // Everything else is decided purely by the credential (or its absence).
+            match guard.check(presentation.as_deref()) {
+                Decision::Admit { tag } => ("200 OK", format!("admit tag={tag}"), admit_page(&tag)),
+                Decision::Reject(reason) => (
+                    "403 Forbidden",
+                    format!("reject {}", reason.label()),
+                    block_page(reason.label()),
+                ),
+            }
+        };
 
     let response = format!(
         "HTTP/1.1 {status_line}\r\n\
