@@ -124,7 +124,7 @@ impl UserChannel {
     /// [`ChannelError::Underflow`] if `cost` exceeds the current balance.
     ///
     /// This does **not** advance the user's cursor; the cursor only moves once
-    /// the relayer returns the co-signed state to [`accept_cosigned`], so a spend
+    /// the relayer returns the co-signed state to [`UserChannel::accept_cosigned`], so a spend
     /// the relayer never co-signs leaves the user safely on the last
     /// doubly-signed state.
     pub fn spend(&self, cost: u64, fresh: &RelayRequest) -> Result<Spend, ChannelError> {
@@ -254,7 +254,7 @@ impl RelayerChannel {
     ///
     /// The relayer will only accept a spend whose freshness matches a challenge
     /// it issued and whose nonce it has not already consumed this epoch (tracked
-    /// in [`verify_and_cosign`]).
+    /// in [`RelayerChannel::verify_and_cosign`]).
     pub fn issue_challenge(&self, nonce: u64, request_payload: &[u8]) -> RelayRequest {
         RelayRequest::new(self.epoch, nonce, request_payload)
     }
