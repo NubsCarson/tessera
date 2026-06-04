@@ -12,9 +12,15 @@ credential** (the IETF ARC protocol) that a client carries through any
 transport — including Tor — to prove "I am a budgeted, accountable client"
 **without revealing identity, and without two requests ever being linkable.**
 
-This is not a censorship-*evasion* tool (disguising Tor as not-Tor). It is a
-censorship-*obsolescence* tool: give servers a trust signal so much better than
-IP that they have no reason to block anonymity.
+**Direction note (vNext) — read this first.** v0 (this document) framed Tessera
+as censorship-*obsolescence*, not evasion: give servers a trust signal better
+than IP so they have no reason to block anonymity. That remains true and is the
+right play for *cooperating* origins. The project is now **evolving to also
+pursue privacy-preserving *circumvention*** — reaching sites that do **not**
+cooperate, via clean egress behind an anonymous, paid (ZK payment-channel) rail.
+The full vNext north-star + Definition of Done is in
+[`docs/DESIGN.md`](./docs/DESIGN.md) (§11); the v0 milestones below remain the
+proven foundation it builds on.
 
 ---
 

@@ -5,11 +5,21 @@
 [![MSRV 1.74](https://img.shields.io/badge/MSRV-1.74-blue.svg)](#build)
 ![status: research-grade, unaudited](https://img.shields.io/badge/status-research--grade%20%C2%B7%20unaudited-orange.svg)
 
-**Anonymous, rate-limited credentials for censorship-resistant network access.**
+**Private, uncensorable access to the clearnet — pay anonymously, per request, to reach any site without being blocked.**
 
-Tessera is a from-scratch, spec-faithful implementation of the IETF
-**Anonymous Rate-Limited Credentials (ARC)** protocol, plus the tooling to use
-it as a *trust layer for anonymous traffic*.
+Tessera began as a from-scratch, spec-faithful implementation of the IETF
+**Anonymous Rate-Limited Credentials (ARC)** protocol (a *trust layer for
+anonymous traffic*), and is **evolving** into a private, uncensorable
+clearnet-access network — admit a request on an anonymous credential/payment,
+**not** an IP. The proven ARC credential is now one component of that larger system.
+
+> **Direction (vNext):** the full design — a ZK payment-channel rail, a
+> mode-switched mixnet transport, a coherent-persona anti-fingerprint layer, and
+> clean residential egress — is in [`docs/DESIGN.md`](./docs/DESIGN.md). It is
+> **early/design-stage and research-grade**, honest about its limits (clean-IP
+> supply, the anti-bot arms race, no post-quantum, unaudited, ~85% prior art).
+> This direction pursues privacy-preserving **circumvention** — a deliberate
+> evolution beyond v0's "obsolescence, not evasion" framing.
 
 > A **tessera** was a small token used in ancient Rome as a ticket of
 > admission — proof you were allowed in, carried in the hand, tied to no name.
@@ -159,7 +169,8 @@ model, per-goal guarantees, and known gaps are in
 
 | Doc | What's in it |
 |-----|--------------|
-| [`GOAL.md`](./GOAL.md) | The thesis, the 10-milestone Definition of Done (all met), and deliberately-deferred future work. |
+| [`docs/DESIGN.md`](./docs/DESIGN.md) | **vNext** — the full private-uncensorable-access design: ZK payment-channel rail, mixnet transport, anti-fingerprint, clean egress, the open frontier (cross-epoch anonymity) and honest ceilings. The live direction. |
+| [`GOAL.md`](./GOAL.md) | The v0 thesis, the 10-milestone Definition of Done (all met), and deliberately-deferred future work. |
 | [`DEMO.md`](./DEMO.md) | How to run and read the demo, including the `--tor` onion path. |
 | [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) | Trust model, per-goal guarantees, threat actors, non-goals, known weaknesses, deployment guidance. |
 | [`docs/SECURITY_ARGUMENT.md`](./docs/SECURITY_ARGUMENT.md) | Per-property argument: construction → assumption → gap to a formal proof. An auditor's map. |
