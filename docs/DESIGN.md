@@ -166,13 +166,22 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
 - **Phase 1 — Prove the loop (make-or-break, mostly reuse).** `client → Tor → credential-gated exit
   (e2e TLS) → site → return`, ARC as v0 spend stand-in; local first, then **one real clean exit IP**
   → a Tor-`403` site returns `200`, privately. Tested.
-- **Phase 2 — Real payment.** **✅ Phase 2a done:** the channel *protocol state machine* is built +
-  tested in `crates/tessera-channel` (plain P-256 ECDSA + SHA-256 commitment) — user-signed states
-  (equivocation is attributable), sign-then-serve co-signing, HOPR proof-of-relay, and off-chain
-  dispute/settlement (`Settle`/`SlashUser`/`RefundUser`). **Remaining:** *2b* — the ZK balance-privacy
-  layer (`R_dec` decrement circuit; choose Circom-reuse-the-audited-pool vs Rust-native arkworks/halo2)
-  → *2c* — the EVM `ChannelRegistry` + Groth16 verifier + the pool port (Foundry is available locally;
-  reuse `cloaksdk`/`privacy-cash`) → Spilman watchtower → relayer node → Sybil/credential (pay + PoP).
+- **Phase 2 — Real payment.** **✅ 2a (channel protocol) + ✅ 2c (EVM court) done.**
+  `crates/tessera-channel` = the Spilman state machine (user-signed states so equivocation is
+  attributable, sign-then-serve co-signing, HOPR proof-of-relay, off-chain `Settle`/`SlashUser`/
+  `RefundUser`), with chain-facing sigs now **EVM-native secp256k1/`ecrecover`** (keccak digest;
+  identity = the 20-byte ETH address). `contracts/ChannelRegistry.sol` (Foundry) mirrors it:
+  open/cooperative-close/unilateral+challenge/slash-equivocation/refund-on-timeout, all verified by
+  `ecrecover`, **with a Rust↔Solidity cross-language vector proven on-chain** (23 forge tests; a real
+  Rust-signed state closes a channel). **2b DECIDED, not yet built:** ZK balance-privacy =
+  **Circom + snarkjs Groth16/BN254** — reuse the audited Tornado-Nova pool for funding + a tiny new
+  `R_dec` decrement circuit (~2–5k constraints; **range-check `B_i`/`cost`/`B_{i+1}` all three** — the
+  money-mint footgun; **bind `chan_id ↔ K_chan`**; **no in-circuit ECDSA** — attribution is the
+  out-of-band secp256k1 sig). *Rejected* arkworks (phantom one-language win + an unaudited export SPOF)
+  and halo2 (can't reuse the audited pool; heavier/unaudited EVM verifier). Honest cost: a Circom/JS
+  toolchain + a per-circuit phase-2 ceremony ×2. **Then:** the `ShieldedPool` (unlinkable funding,
+  Solana→EVM port; reuse `cloaksdk`/`privacy-cash`) → Spilman watchtower → relayer node →
+  Sybil/credential (pay + PoP).
 - **Phase 3 — Climb to ceiling.** Mode-switched PQ transport · coherent-persona fingerprint stack ·
   residential egress · PIR private-read tier · threshold issuance.
 - **Research-track (before any "ceiling" claim):** cross-epoch SDA budget · accountable hostile-exit ·
