@@ -171,6 +171,7 @@ model, per-goal guarantees, and known gaps are in
 | Doc | What's in it |
 |-----|--------------|
 | [`docs/DESIGN.md`](./docs/DESIGN.md) | **vNext** — the full private-uncensorable-access design: ZK payment-channel rail, mixnet transport, anti-fingerprint, clean egress, the open frontier (cross-epoch anonymity) and honest ceilings. The live direction. |
+| [`docs/IP_EGRESS_IDEAS.md`](./docs/IP_EGRESS_IDEAS.md) | The clean-egress (reach IP-blocking sites) portfolio — the hardest part: ranked ideas, build-now vs bets vs traps, and the honest "no silver bullet" verdict. |
 | [`GOAL.md`](./GOAL.md) | The v0 thesis, the 10-milestone Definition of Done (all met), and deliberately-deferred future work. |
 | [`DEMO.md`](./DEMO.md) | How to run and read the demo, including the `--tor` onion path. |
 | [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) | Trust model, per-goal guarantees, threat actors, non-goals, known weaknesses, deployment guidance. |

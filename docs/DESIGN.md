@@ -151,7 +151,9 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
 2. **Hostile exit.** Residential egress is malicious-by-default (MITM/selective-fail); audit-loops
    can't distinguish honest from logging exits. Accountable, MITM-resistant egress under
    unlinkability is **unsolved**.
-3. **Named hard ceilings:** clean-IP supply is external/human-gated; "PQ from day one" is honestly
+3. **Named hard ceilings:** clean-IP supply is external/human-gated (the full
+   egress strategy — a portfolio, no silver bullet — is in
+   [`IP_EGRESS_IDEAS.md`](./IP_EGRESS_IDEAS.md)); "PQ from day one" is honestly
    "PQ transport + everlasting-transcript privacy, computational elsewhere" (PQ anonymous creds
    aren't production-grade); **TEE ≠ trust** (TEE.fail 2025 — a physical-access operator can forge
    quotes, and the relayer *is* that adversary for its own box → zero fund-safety/unlinkability
