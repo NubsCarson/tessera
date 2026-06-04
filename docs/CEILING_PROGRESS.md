@@ -15,9 +15,9 @@
 ## Status snapshot
 
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
-- **SHOULD tier: 2/34** — hardening + completeness; in progress.
+- **SHOULD tier: 4/34** — hardening + completeness; in progress (S4, S5, S7, S8).
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** ~63 Rust workspace tests + 43 Foundry tests, all green; CI green on `main`.
+- **Verification:** ~70 Rust workspace tests + 48 Foundry tests, all green; CI green on `main`.
 
 ## MUST — done
 
@@ -38,7 +38,7 @@
 |---|------|--------|--------|
 | S4 | Property-based settlement suite | ✅ | `519da9a` |
 | S5 | Foundry court invariant + interaction-matrix fuzz (128k calls) | ✅ | `74b3acd` |
-| S7 | RDecVerifier malformed-proof negative tests | ⬜ | |
+| S7 | RDecVerifier malformed-proof negative tests | ✅ | (this commit) |
 | S6 | Wire-codec fuzz harnesses (every `from_bytes`) | ⬜ | |
 | S1 | Cross-layer epoch-clock authority spec | ⬜ | |
 | S2 | Cross-epoch nullifier-clash / replay integration test | ⬜ | |

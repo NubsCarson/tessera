@@ -77,7 +77,8 @@ contract RDecVerifierTest is Test {
     uint256 constant PUB_NF_RATE =
         9762290224755334236367648883748812583534368405355054603815349276586667978777;
     // C_next as bytes32 (the on-chain Poseidon commitment):
-    bytes32 constant C_NEXT_B32 = 0x2ba2ed61085c8322997df388f1182cb4e733876f416e3f56b3e56eb08b300d5c;
+    bytes32 constant C_NEXT_B32 =
+        0x2ba2ed61085c8322997df388f1182cb4e733876f416e3f56b3e56eb08b300d5c;
     // keccak256 ZK-path signed digest Rust produced for C_next:
     bytes32 constant ZK_DIGEST = 0x07f3535be260d9f55cbded10185250b09d679ef72e9de1bd7cacbc87d06c0114;
     // The user's recoverable secp256k1 signature over ZK_DIGEST:
@@ -200,5 +201,82 @@ contract RDecVerifierTest is Test {
         uint256[4] memory p = _pub();
         p[1] = p[1] ^ 1; // flip a bit of C_next
         assertTrue(!verifier.verifyProof(_a(), _b(), _c(), p), "tampered proof must NOT verify");
+    }
+
+    // ----- S7: malformed-proof negative space -----------------------------
+    // A Groth16 verifier may return `false`, revert, OR — for an off-curve point —
+    // make the BN254 pairing precompile burn unbounded gas. `_accepts` forwards a
+    // bounded gas budget via a low-level staticcall (a valid verify is ~217k gas,
+    // so ~3M is generous): any malformed input that returns false, reverts, or
+    // runs out of that budget is reported as "not accepted" without killing the
+    // test. Only a clean `true` return counts as acceptance.
+
+    function _accepts(
+        uint256[2] memory a,
+        uint256[2][2] memory b,
+        uint256[2] memory c,
+        uint256[4] memory pub
+    ) internal view returns (bool) {
+        (bool ok, bytes memory ret) = address(verifier).staticcall{gas: 3_000_000}(
+            abi.encodeWithSelector(verifier.verifyProof.selector, a, b, c, pub)
+        );
+        return ok && ret.length == 32 && abi.decode(ret, (bool));
+    }
+
+    /// Sanity: the pristine pinned proof is accepted (so the rejections below are
+    /// meaningful, not vacuous).
+    function testPristineProofIsAccepted() public view {
+        assertTrue(_accepts(_a(), _b(), _c(), _pub()), "pristine proof must verify");
+    }
+
+    /// Flipping a bit in ANY proof point (a, b, or c) must break verification.
+    function testFlippedProofPointsAreRejected() public view {
+        uint256[2] memory a = _a();
+        a[0] ^= 1;
+        assertTrue(!_accepts(a, _b(), _c(), _pub()), "flipped a[0] must be rejected");
+
+        a = _a();
+        a[1] ^= 1;
+        assertTrue(!_accepts(a, _b(), _c(), _pub()), "flipped a[1] must be rejected");
+
+        uint256[2][2] memory b = _b();
+        b[0][0] ^= 1;
+        assertTrue(!_accepts(_a(), b, _c(), _pub()), "flipped b[0][0] must be rejected");
+
+        b = _b();
+        b[1][1] ^= 1;
+        assertTrue(!_accepts(_a(), b, _c(), _pub()), "flipped b[1][1] must be rejected");
+
+        uint256[2] memory c = _c();
+        c[0] ^= 1;
+        assertTrue(!_accepts(_a(), _b(), c, _pub()), "flipped c[0] must be rejected");
+    }
+
+    /// Flipping a bit in EACH of the four public signals must break verification —
+    /// no signal can be tampered while still verifying against the pinned proof.
+    function testEachMutatedPublicSignalIsRejected() public view {
+        for (uint256 i = 0; i < 4; i++) {
+            uint256[4] memory p = _pub();
+            p[i] ^= 1;
+            assertTrue(!_accepts(_a(), _b(), _c(), p), "a mutated public signal must be rejected");
+        }
+    }
+
+    /// An all-zero proof must never verify (guards a verifier that accepts the
+    /// trivial point).
+    function testZeroProofIsRejected() public view {
+        uint256[2] memory z2;
+        uint256[2][2] memory z22;
+        assertTrue(!_accepts(z2, z22, z2, _pub()), "zero proof must be rejected");
+    }
+
+    /// A valid proof against a DIFFERENT (shifted) public-signal vector is
+    /// rejected — proof and signals are bound together.
+    function testProofAgainstAllShiftedSignalsIsRejected() public view {
+        uint256[4] memory p = _pub();
+        for (uint256 i = 0; i < 4; i++) {
+            p[i] += 1;
+        }
+        assertTrue(!_accepts(_a(), _b(), _c(), p), "proof must not verify against shifted signals");
     }
 }
