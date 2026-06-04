@@ -22,23 +22,30 @@ For every track: **Goal · Approach · Done-when · Risks / external dependency 
   construction → assumption → gap; nothing hand-waved; all claims trace to
   `file:line`.
 - **Risks / external.** None — fully solo. Does **not** replace a real audit.
-- **Status.** ✅ in progress in this change.
+- **Status.** ✅ **done** — [`SECURITY_ARGUMENT.md`](./SECURITY_ARGUMENT.md)
+  shipped (every property: construction → assumption → gap, all `file:line`).
 
-## 2. Make it deployable  ·  *background*
+## 2. Make it deployable  ·  *done*
 
 - **Goal.** Let a real site verify Tessera with minimal effort — turn the
   framework-agnostic `OriginGuard` into drop-in middleware.
 - **Approach.** An optional `tower::Layer` on `tessera-origin` (feature `tower`,
   off by default so the core stays lean) that extracts the header and runs the
-  guard, with an `axum` example; plus a sketch/README for a Cloudflare Worker
-  edge deployment.
-- **Done-when.** The `Layer` compiles behind its feature, has a `tower`/`axum`
-  integration test (admit/reject/replay), and CI builds it; the Worker path is
-  documented and compiles.
-- **Risks / external.** Pulls heavy async deps (feature-gated to contain them);
-  a live Cloudflare deploy needs **your** account — we ship a verified sketch,
-  not a deploy.
-- **Status.** ⬜ background workflow.
+  guard, `axum`/`hyper`-compatible; plus a documented Cloudflare Worker
+  edge-deploy *sketch*.
+- **Done-when.** The `Layer` compiles behind its feature, has a `tower`
+  integration test (admit / missing / malformed / replay), and CI builds it on
+  all-features incl. the MSRV-1.74 job; the edge-deploy path is documented.
+- **Risks / external.** Pulls HTTP deps (feature-gated to contain them; no
+  `axum`/`tokio` in the graph — `tower`+`http`+`http-body-util`+`bytes` only,
+  all 1.74-clean). A live Cloudflare deploy needs **your** account and a wasm
+  build of the guard with the server secret at the edge — out of scope here;
+  documented as a sketch, **not** shipped as a compiled Worker.
+- **Status.** ✅ **done** — `TesseraLayer`/`TesseraGuard` shipped behind the
+  off-by-default `tower` feature (`crates/tessera-origin/src/tower_layer.rs`),
+  4-case integration test green, every CI gate (fmt/clippy/test/MSRV-1.74/doc)
+  green. Edge-deploy path documented in the origin README; a compiled Worker is
+  explicitly deferred (needs the server secret at the edge + a wasm guard build).
 
 ## 3. WASM browser client  ·  *background (final mile needs a browser)*
 

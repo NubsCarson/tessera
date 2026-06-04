@@ -59,8 +59,28 @@ let guard = Arc::new(guard);
 let _layer = TesseraLayer::new(guard);
 ```
 
-Note: the feature's HTTP/async deps need a newer compiler than the crate's
-declared MSRV (1.74); the core guard (default features) still builds on 1.74.
+Note: the feature's HTTP deps (`tower 0.5`, `http 1`, …) currently build on the
+crate's MSRV (1.74) — the all-features CI job is verified on 1.74. A future minor
+bump of those crates may raise their own MSRV above 1.74, at which point pin them
+back or build the MSRV job without `--all-features` (the core guard always builds
+on 1.74).
+
+## Edge deployment (Cloudflare Worker / WASM) — sketch
+
+The guard is just "header in → `Decision` out", so it maps cleanly onto an edge
+runtime. The shape, **not a shipped artifact**:
+
+- Build `tessera-origin` (guard + `tessera-arc`) for `wasm32-unknown-unknown`
+  with `getrandom`'s `js` feature, inside a [`workers-rs`](https://github.com/cloudflare/workers-rs)
+  Worker. On each `fetch`, read `Tessera-Presentation` and call `check`; on
+  `Admit` `fetch()` the origin, on `Reject` return `403` — the same logic as the
+  `tower` layer, at the edge.
+- **Two real constraints, why this is a sketch and not shipped here:** (1) the
+  Worker holds the **server secret key** — it must come from a Worker secret /
+  KMS, never the bundle; (2) the in-memory spent-tag set does **not** survive
+  across Worker isolates, so double-spend enforcement needs a shared store
+  (Durable Object / KV / D1) — i.e. the durable-`TagStore` work, which is not
+  done. Until both are addressed, an edge deploy weakens the replay guarantee.
 
 ## Status
 

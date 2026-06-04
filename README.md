@@ -105,6 +105,7 @@ vectors:
 | `tessera-issuer` — proof-of-work issuance gate ("earn your budget") | ✅ cost-gate (not strong Sybil resistance — see threat model) |
 | `tessera-proxy` — credential-gated CONNECT proxy (use Claude/any HTTPS through Tor) | ✅ admit on credential not IP; TLS tunneled end-to-end |
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
+| `tessera-origin` optional `tower` middleware (`TesseraLayer`) | ✅ feature-gated drop-in `Layer`; admit/missing/malformed/replay tested |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
 | Hardening — CT fix, fuzzing, benches, threat model | ✅ internal audit applied ([`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md)); **not** third-party audited |
 

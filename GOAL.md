@@ -111,9 +111,13 @@ An adversarial review panel triaged the remaining ideas. These are intentionally
   resistance** (enough compute still scales; unfair to low-power clients) — for
   per-human guarantees, gate on payment / attestation / a one-per-person
   credential instead. *That* stronger gate remains future research.
-- **`axum`/`tower` middleware** — valuable for adoption but pulls a heavy async
-  dependency tree; belongs behind an optional feature, post-1.0. The guard is
-  already framework-agnostic.
+- **`axum`/`tower` middleware** — ✅ **shipped** as the off-by-default `tower`
+  feature on `tessera-origin` (`TesseraLayer`/`TesseraGuard`): a drop-in
+  `tower::Layer` that runs the guard and short-circuits rejects with `403`,
+  `axum`/`hyper`-compatible. Kept lean — `tower`+`http`+`http-body-util`+`bytes`,
+  no `axum`/`tokio` in the graph, 1.74-clean. (ROADMAP track 2.) The *Cloudflare
+  Worker edge deploy* remains a documented sketch, not a compiled artifact — it
+  needs the server secret at the edge and a durable cross-isolate tag store.
 - **Pluggable/durable `TagStore` backend** — the in-memory store is honestly
   documented as non-durable; no concrete backend consumer yet.
 - **Tor↔LLM-API proxy** — ✅ **shipped** as `tessera-proxy`: a credential-gated
