@@ -65,7 +65,7 @@ vectors:
 | P-256 group / hashing / serialization | ✅ proven against IETF vectors |
 | Server key generation | ✅ proven against IETF vectors |
 | Issuance & presentation arithmetic | ✅ proven against IETF vectors |
-| Fiat-Shamir + Sigma prover & verifier | ✅ proven against authoritative Sigma vectors † |
+| Fiat-Shamir + Sigma proofs | ✅ verifier proven against authoritative Sigma vectors; prover exercised via end-to-end round-trip † |
 | Full ARC API (issue / present / verify) + range proof + double-spend store | ✅ end-to-end round-trip proven |
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
@@ -78,10 +78,11 @@ The Fiat-Shamir layer is instead proven against the authoritative IETF Sigma
 Protocol test vectors, which exercise the identical transcript machinery.
 
 The crate currently proves the entire **arithmetic core** of ARC matches the
-reference byte-for-byte:
+reference byte-for-byte (`tests/test_vectors.rs`; the full crate has many more
+tests — round-trip, wire, sigma-vector, proof, and robustness suites):
 
 ```
-$ cargo test -p tessera-arc
+$ cargo test -p tessera-arc --test test_vectors
 running 8 tests
 test generator_h_is_deterministic ... ok
 test server_public_key_matches_vectors ... ok
@@ -95,9 +96,11 @@ test presentation2_arithmetic_matches ... ok
 
 ## ⚠️ Security status — read this
 
-This is **research-grade, draft-tracking code**. It has **not** been audited,
-is **not** end-to-end constant-time hardened, and the underlying specs are
-IETF *drafts* that may change. **Do not use it to protect real users yet.** The
+This is **research-grade, draft-tracking code**. It has **not** been
+third-party audited; the known secret-dependent path (the range-proof bit
+decomposition) is constant-time-hardened via `subtle`, but there has been **no
+end-to-end constant-time audit**; and the underlying specs are IETF *drafts*
+that may change. **Do not use it to protect real users yet.** The
 path to that is milestone 10 in [`GOAL.md`](./GOAL.md). The cryptographic
 primitives come from the audited [RustCrypto](https://github.com/RustCrypto)
 project; the protocol logic on top is what still needs review.

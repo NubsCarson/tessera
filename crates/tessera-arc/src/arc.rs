@@ -222,9 +222,11 @@ impl PresentationState {
     }
 
     /// Create the next presentation, advancing the nonce (spec §4.3.2). Fails
-    /// once the presentation limit is reached.
+    /// once the presentation limit is reached. A limit below 2 admits no valid
+    /// range proof, so it yields `LimitExceeded` rather than panicking in
+    /// `compute_bases` (mirrors the verify-side `limit < 2` guard).
     pub fn present<R: RngCore + ?Sized>(&mut self, rng: &mut R) -> Result<Presentation, ArcError> {
-        if self.next_nonce >= self.limit {
+        if self.limit < 2 || self.next_nonce >= self.limit {
             return Err(ArcError::LimitExceeded);
         }
         let nonce = self.next_nonce;
