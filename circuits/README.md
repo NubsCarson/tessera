@@ -193,4 +193,27 @@ honest, with published transcripts) — an external process we deliberately do
 from these throwaway keys and must be regenerated from a real ceremony before
 any non-test use.
 
+### Production ceremony checklist (the external hand-off, not done here)
+
+Before `RDecVerifier.sol` may guard real funds, all of these must happen — none
+is something this repo can self-issue:
+
+1. **Finalize the circuit** — no further `R_dec.circom` changes after this point
+   (any change invalidates the ceremony; re-run from scratch).
+2. **Perpetual Powers of Tau** — use a large, public, already-attested phase-1
+   transcript (e.g. Hermez/`snarkjs` PoT) sized ≥ the circuit's constraint count,
+   rather than a locally-generated one.
+3. **Multi-party phase-2** — ≥ several *independent* contributors (separate
+   people, hardware, and entropy; at least one provably honest), each publishing
+   a signed contribution transcript; a public coordinator + verifiable
+   contribution chain.
+4. **Beacon** — finalize with a public, unpredictable randomness beacon (e.g. a
+   future block hash / drand round) committed in advance.
+5. **Independent verification** — third parties re-verify the full transcript and
+   that the deployed `RDecVerifier.sol` matches the ceremony's verification key.
+6. **Regenerate + re-pin** — replace the committed verifier and the pinned proof
+   vector with the ceremony output; re-run the on-chain verification test.
+
+Until every box is checked, the setup is forgeable and the circuit is test-only.
+
 **UNAUDITED. Research-grade. Do not protect real users with this.**
