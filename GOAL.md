@@ -47,7 +47,7 @@ A milestone is **done** only when it is *proven*, not merely written. Concretely
 | 3 | **Presentation arithmetic** — re-randomization, commitments, tag | KAT: `U`, `UPrimeCommit`, `m1Commit`, `nonceCommit`, `tag`, `D` | ✅ **proven** |
 | 4 | **Fiat-Shamir + Sigma proofs** — SHAKE128 duplex sponge, P256 codec, linear-relation verifier | KAT: official Sigma `discrete_logarithm` + `dleq` proofs verify byte-exactly | ✅ **proven** (verifier) † |
 | 5 | **Full ARC API** — `SetupServer`, `Issue`, `Present`, `Verify` + prover + range proof + double-spend tag store | Round-trip over the limit; tamper/replay rejected | ✅ **proven** |
-| 6 | **Wire codec** — canonical serialization of every protocol struct | Cross-check lengths (`Nrequest`, `Nresponse`, `Npresentation`) | ⬜ |
+| 6 | **Wire codec** — canonical serialization of every protocol struct | Round-trip + spec lengths (`Nrequest`, `Nresponse`, `Npresentation`); verifies after transport | ✅ **proven** |
 | 7 | **`tessera-origin`** — HTTP middleware (tower/axum) that verifies a credential header and enforces the rate limit, ignoring source IP | Integration test: N requests pass, N+1 rejected, identity never observed | ⬜ |
 | 8 | **`tessera-client`** — obtains a credential, attaches presentations to outbound HTTP, transport-agnostic | E2E test through a `tower` mock origin | ⬜ |
 | 9 | **Tor binding** — route the client through a real Tor circuit (`arti` or system tor SOCKS); origin admits it purely on the credential | E2E: request lands from a Tor exit IP yet is admitted | ⬜ |
