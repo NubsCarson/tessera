@@ -16,7 +16,7 @@ jobs:
     name: test + lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Rust toolchain (stable + clippy + rustfmt)
         # The repo's rust-toolchain.toml already selects stable; just ensure the
@@ -25,7 +25,7 @@ jobs:
         run: rustup component add clippy rustfmt
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -54,7 +54,7 @@ jobs:
     name: MSRV 1.74
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Rust 1.74.0
         run: |
           rustup toolchain install 1.74.0 --profile minimal
@@ -66,7 +66,7 @@ jobs:
     name: cargo-audit (RustSec advisories)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Audit the dependency graph
@@ -80,7 +80,7 @@ jobs:
     # its own, never folded into the host `test`/`msrv` jobs, so its wasm-only
     # deps (getrandom `js`) can't perturb the native build.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Add the wasm32 target
         run: rustup target add wasm32-unknown-unknown
@@ -103,7 +103,7 @@ jobs:
           cargo fmt --manifest-path crates/tessera-wasm/Cargo.toml --all -- --check
 
       - name: Node (for the headless wasm-bindgen test runner)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -132,7 +132,7 @@ jobs:
     name: fuzz build + smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust nightly
         run: rustup toolchain install nightly
