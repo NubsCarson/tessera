@@ -89,10 +89,11 @@
 //!
 //!   * A **non-forking linear rollback** by the user (just re-presenting an old
 //!     doubly-signed state instead of forking) produces no attributable object —
-//!     exactly as `DESIGN.md` §2 admits. It is covered by `seq` + countersig +
-//!     the watchtower (a *stated* safety component, out of scope here). We do
-//!     **not** claim to detect it; [`settlement`] simply takes the
-//!     highest-`seq` doubly-signed state as truth.
+//!     exactly as `DESIGN.md` §2 admits. The on-chain defense is the dispute
+//!     window: a stale unilateral close is overridden by the latest doubly-signed
+//!     state, which the [`watchtower`] holds and submits on the disadvantaged
+//!     party's behalf. [`settlement`] itself does **not** detect a rollback; it
+//!     simply takes the highest-`seq` doubly-signed state it is given as truth.
 //!   * Nothing here moves money or talks to a chain. "Escrow", "refund", and
 //!     "slash" are **verdicts** a future on-chain court would enforce; this crate
 //!     computes the verdict, it does not settle it.
@@ -151,6 +152,7 @@ pub mod poseidon;
 pub mod relay;
 pub mod settlement;
 pub mod state;
+pub mod watchtower;
 
 mod channel;
 
@@ -159,6 +161,7 @@ pub use crypto::{EthAddress, EthDigest, EthSig, KeyPair, Sig, VerifyingKey};
 pub use relay::{RelayAck, RelayRequest};
 pub use settlement::{settle, Verdict};
 pub use state::{ChannelState, SignedState, StateError};
+pub use watchtower::{Watchtower, WatchtowerAction};
 
 /// Crate-wide error type for the protocol state machine.
 ///

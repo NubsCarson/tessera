@@ -194,9 +194,14 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
   before). **Honest caveats:** does NOT hide the balance from the relayer (it knows it by
   construction); the private payout split needs the shielded pool; the dev ceremony is **single-party
   TEST-ONLY** (a real multi-party phase-2 ceremony is required, not faked). Funding-unlinkability
-  is the next increment. **Then:** the `ShieldedPool` (unlinkable funding,
-  Solana→EVM port; reuse `cloaksdk`/`privacy-cash`) → Spilman watchtower → relayer node →
-  Sybil/credential (pay + PoP).
+  is the next increment. **✅ M2 (Spilman watchtower) done:** `tessera-channel`'s
+  `watchtower` module is the reactive safety component — it holds the highest
+  doubly-signed state and, on observing a stale unilateral close, emits a
+  `challenge` whose state provably satisfies the court's precondition
+  (`seq > bestSeq`, `balance ≤ B0`, doubly-signed); the live RPC poll/submit
+  wrapper is the documented operational layer. **Then:** the `ShieldedPool`
+  (unlinkable funding, Solana→EVM port; reuse `cloaksdk`/`privacy-cash`) → relayer
+  node → Sybil/credential (pay + PoP).
 - **Phase 3 — Climb to ceiling.** Mode-switched PQ transport · coherent-persona fingerprint stack ·
   residential egress · PIR private-read tier · threshold issuance.
 - **Research-track (before any "ceiling" claim):** cross-epoch SDA budget · accountable hostile-exit ·
