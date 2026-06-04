@@ -47,6 +47,14 @@ impl RejectReason {
     }
 }
 
+impl std::fmt::Display for RejectReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+impl std::error::Error for RejectReason {}
+
 /// The guard's verdict for a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
@@ -118,17 +126,17 @@ impl OriginGuard {
             Err(_) => return Decision::Reject(RejectReason::Malformed),
         };
 
-        let (valid, tag) = verify_presentation(
+        let tag = match verify_presentation(
             &self.private_key,
             &self.public_key,
             &self.request_context,
             &self.presentation_context,
             &presentation,
             self.limit,
-        );
-        if !valid {
-            return Decision::Reject(RejectReason::InvalidProof);
-        }
+        ) {
+            Some(tag) => tag,
+            None => return Decision::Reject(RejectReason::InvalidProof),
+        };
 
         // Enforce single-use of each (credential, context, nonce) slot.
         let mut spent = self.spent.lock().expect("tag store mutex poisoned");

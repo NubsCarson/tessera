@@ -19,3 +19,9 @@ rand_core.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+rand_core.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "arc"
+harness = false

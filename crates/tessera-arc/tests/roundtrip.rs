@@ -41,9 +41,8 @@ fn full_roundtrip_presentations_verify_within_limit() {
     let mut tags = Vec::new();
     for i in 0..LIMIT {
         let presentation = state.present(&mut rng).expect("under limit");
-        let (valid, tag) =
-            verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &presentation, LIMIT);
-        assert!(valid, "presentation {i} must verify");
+        let tag = verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &presentation, LIMIT)
+            .unwrap_or_else(|| panic!("presentation {i} must verify"));
         assert!(store.accept(tag), "tag {i} must be fresh");
         tags.push(tag);
     }
@@ -78,8 +77,10 @@ fn tampered_presentation_is_rejected() {
 
     // Flip a byte of the proof.
     presentation.proof[0] ^= 0x01;
-    let (valid, _) = verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &presentation, LIMIT);
-    assert!(!valid, "tampered proof must be rejected");
+    assert!(
+        verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &presentation, LIMIT).is_none(),
+        "tampered proof must be rejected"
+    );
 }
 
 #[test]
@@ -90,15 +91,18 @@ fn wrong_presentation_context_is_rejected() {
     let presentation = state.present(&mut rng).expect("under limit");
 
     // Verify under a different presentation context than the tag was bound to.
-    let (valid, _) = verify_presentation(
-        &sk,
-        &pk,
-        REQUEST_CTX,
-        b"tessera://other-origin/v1",
-        &presentation,
-        LIMIT,
+    assert!(
+        verify_presentation(
+            &sk,
+            &pk,
+            REQUEST_CTX,
+            b"tessera://other-origin/v1",
+            &presentation,
+            LIMIT,
+        )
+        .is_none(),
+        "presentation bound to another context must fail"
     );
-    assert!(!valid, "presentation bound to another context must fail");
 }
 
 #[test]
@@ -109,9 +113,8 @@ fn double_spend_same_tag_is_caught() {
     let mut store = TagStore::new();
 
     let presentation = state.present(&mut rng).expect("under limit");
-    let (valid, tag) =
-        verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &presentation, LIMIT);
-    assert!(valid);
+    let tag = verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &presentation, LIMIT)
+        .expect("first use verifies");
     assert!(store.accept(tag), "first use is fresh");
     // Replaying the identical tag (same nonce) must be rejected by the store.
     assert!(!store.accept(tag), "replay must be caught as double-spend");

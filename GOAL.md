@@ -51,7 +51,7 @@ A milestone is **done** only when it is *proven*, not merely written. Concretely
 | 7 | **`tessera-origin`** — transport-agnostic `OriginGuard` that verifies a presentation header and enforces the limit + double-spend, ignoring source IP | `tests/guard.rs`: admit/missing/malformed/replay/wrong-context, distinct tags | ✅ **proven** |
 | 8 | **`tessera-client`** — obtains a credential, mints a presentation header per request | exercised by the demo + guard tests | ✅ **proven** |
 | 9 | **Tor binding** — expose the origin as an onion service; client connects over a real Tor circuit (SOCKS5); admitted purely on the credential | `cargo run -p tessera-demo -- --tor` builds a real `.onion`; live round-trip needs host Tor egress | ✅ **implemented** ‡ |
-| 10 | **Hardening pass** — constant-time review, fuzzing of all deserializers, criterion benchmarks, threat-model doc | Fuzz targets run clean; CT audit notes published | ⬜ |
+| 10 | **Hardening pass** — constant-time fix, fuzzing of all deserializers, criterion benchmarks, threat-model doc | 18-finding adversarial audit applied; 5 fuzz targets run clean (found+fixed 1 panic); stable robustness test; benches; `docs/THREAT_MODEL.md` | ✅ **done** (audit, not external) § |
 
 † The original gate ("every §10.2 ARC *proof* blob byte-exact") is blocked by
 an upstream test-vector inconsistency: the committed ARC proof blobs do not
@@ -61,6 +61,16 @@ against the **authoritative** Sigma Protocol vectors (which exercise the same
 machinery), and the `#[ignore]`d ARC-blob tests will flip green if the upstream
 blobs are regenerated. Full write-up + reproduction in
 `docs/ARC_PROOF_VECTOR_DISCREPANCY.md`.
+
+§ "Done" here means the internal hardening pass landed: an 18-finding
+adversarial multi-agent audit (constant-time, soundness, panic-safety,
+cleanliness) was applied; the secret-dependent range-proof bit decomposition is
+now branchless (`subtle`); 5 `cargo-fuzz` targets cover every deserializer +
+`sigma::verify` + the origin guard and run clean (the fuzzer found and we fixed a
+real `limit < 2` panic); a stable-toolchain robustness test gives CI no-panic
+coverage; criterion benches exist; and `docs/THREAT_MODEL.md` is published. This
+is **not** a third-party security audit — that remains the bar before protecting
+real users.
 
 ‡ The onion service is always created (you'll see a real `.onion`); completing
 the rendezvous circuit back to it requires working Tor network egress on the

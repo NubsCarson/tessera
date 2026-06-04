@@ -31,6 +31,18 @@ pub enum ArcError {
     LimitExceeded,
 }
 
+impl core::fmt::Display for ArcError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            ArcError::InvalidRequestProof => "credential-request proof failed to verify",
+            ArcError::InvalidResponseProof => "credential-response proof failed to verify",
+            ArcError::LimitExceeded => "presentation limit reached",
+        })
+    }
+}
+
+impl std::error::Error for ArcError {}
+
 /// The client secrets retained between request creation and finalization.
 #[derive(Debug)]
 pub struct ClientSecrets {
@@ -272,9 +284,10 @@ impl PresentationState {
     }
 }
 
-/// Server: verify a presentation (spec §4.3.3). Returns `(valid, tag_bytes)`;
-/// the caller must additionally pass `tag_bytes` through a [`TagStore`] to
-/// enforce single-use of each (credential, context, nonce) slot.
+/// Server: verify a presentation (spec §4.3.3). Returns `Some(tag_bytes)` **iff**
+/// the proof verified — making it impossible to use a tag from an invalid
+/// presentation. The caller must still pass `tag_bytes` through a [`TagStore`]
+/// to enforce single-use of each (credential, context, nonce) slot.
 pub fn verify_presentation(
     private_key: &ServerPrivateKey,
     public_key: &ServerPublicKey,
@@ -282,7 +295,7 @@ pub fn verify_presentation(
     presentation_context: &[u8],
     presentation: &Presentation,
     limit: u64,
-) -> (bool, [u8; 33]) {
+) -> Option<[u8; 33]> {
     let valid = verify_presentation_proof(
         private_key,
         public_key,
@@ -297,7 +310,7 @@ pub fn verify_presentation(
         &presentation.proof,
         limit,
     );
-    (valid, serialize_element(&presentation.tag))
+    valid.then(|| serialize_element(&presentation.tag))
 }
 
 /// A server-side store of spent presentation tags, for double-spend prevention

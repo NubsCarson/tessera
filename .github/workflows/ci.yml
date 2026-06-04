@@ -36,5 +36,35 @@ jobs:
       - name: Clippy (deny warnings)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Test (the IETF known-answer vectors live here)
+      - name: Test (the IETF known-answer vectors + robustness fuzzing live here)
         run: cargo test --workspace --all-features
+
+      - name: Benchmarks compile
+        run: cargo bench --workspace --no-run
+
+  fuzz:
+    name: fuzz build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        run: |
+          rustup toolchain install nightly
+          rustup default nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Build all fuzz targets
+        run: cargo fuzz build
+
+      - name: Smoke-run each target (short)
+        # LeakSanitizer needs ptrace, which GitHub runners restrict; disable it.
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          for t in $(cargo fuzz list); do
+            echo "== fuzzing $t =="
+            cargo fuzz run "$t" -- -max_total_time=30 -detect_leaks=0
+          done

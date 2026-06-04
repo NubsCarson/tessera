@@ -154,6 +154,11 @@ impl Presentation {
     /// out-of-band) to know how many `D` commitments and response scalars to
     /// expect — `k = len(ComputeBases(limit))`.
     pub fn from_bytes(buf: &[u8], limit: u64) -> Result<Self, DeserializeError> {
+        // A limit < 2 has no valid range-proof shape; reject rather than letting
+        // `compute_bases`'s internal invariant panic on caller-supplied input.
+        if limit < 2 {
+            return Err(DeserializeError::Element);
+        }
         let k = compute_bases(limit).len();
         let mut r = Reader::new(buf);
         let u = r.element()?;

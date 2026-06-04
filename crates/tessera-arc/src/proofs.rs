@@ -6,14 +6,12 @@
 //! Fiat-Shamir challenge) is identical on both sides. Variable allocation order
 //! mirrors the reference POC exactly.
 
-use crate::group::{generator_g, generator_h, scalar_invert};
+use crate::group::{generator_g, generator_h, scalar_invert, CONTEXT_STRING};
 use crate::keys::{ServerPrivateKey, ServerPublicKey};
 use crate::sigma::{prove, verify, LinearRelation};
 use p256::{ProjectivePoint, Scalar};
 use rand_core::RngCore;
-
-/// `contextString` for `ARC(P-256)` — the prefix of every proof session string.
-pub const CONTEXT_STRING: &[u8] = b"ARCV1-P256";
+use subtle::{ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater};
 
 fn session(suffix: &[u8]) -> Vec<u8> {
     [CONTEXT_STRING, suffix].concat()
@@ -323,12 +321,19 @@ pub fn prove_presentation<R: RngCore + ?Sized>(
     let bases = compute_bases(w.limit);
     let num_bits = bases.len();
 
-    // Bit decomposition of the nonce against the (descending) bases.
+    // Bit decomposition of the nonce against the (descending) bases. The nonce
+    // is secret, so the decomposition is computed branchlessly (spec §5.4.1 /
+    // §7.4: secret-dependent ops MUST be constant-time). `ct_gt`/`ct_eq` are
+    // well-defined here because nonce, limit, and every base stay well below
+    // 2^63 (they are presentation counts).
     let mut bits = Vec::with_capacity(num_bits);
     let mut remainder = w.nonce;
     for &base in &bases {
-        let bit = if remainder >= base { 1u64 } else { 0 };
-        remainder -= bit * base;
+        // ge == 1 iff remainder >= base, with no data-dependent branch.
+        let ge = remainder.ct_gt(&base) | remainder.ct_eq(&base);
+        let bit = u64::conditional_select(&0u64, &1u64, ge);
+        let to_sub = u64::conditional_select(&0u64, &base, ge);
+        remainder = remainder.wrapping_sub(to_sub);
         bits.push(bit);
     }
 
@@ -364,8 +369,10 @@ pub fn prove_presentation<R: RngCore + ?Sized>(
         limit: w.limit,
     });
 
-    // Witness order: [m1, z, -r, nonce, nonceBlinding] ++ b ++ s ++ s2
-    let mut witness = vec![w.m1, w.z, -w.r, Scalar::from(w.nonce), w.nonce_blinding];
+    // Witness order: [m1, z, -r, nonce, nonceBlinding] ++ b ++ s ++ s2.
+    // Pre-sized so the secret-path buffer never reallocates.
+    let mut witness = Vec::with_capacity(5 + 3 * num_bits);
+    witness.extend_from_slice(&[w.m1, w.z, -w.r, Scalar::from(w.nonce), w.nonce_blinding]);
     witness.extend(bits.iter().map(|&x| Scalar::from(x)));
     witness.extend(s_blind.iter().copied());
     witness.extend(s2.iter().copied());
@@ -392,6 +399,12 @@ pub fn verify_presentation_proof(
     limit: u64,
 ) -> bool {
     use crate::group::{hash_to_group, hash_to_scalar};
+
+    // A limit < 2 has no valid range proof; reject rather than letting the
+    // internal `compute_bases` invariant trip (defensive: limit is caller-supplied).
+    if limit < 2 {
+        return false;
+    }
 
     // V = x0*U + x1*m1Commit + x2*m2*U - UPrimeCommit
     let m2 = hash_to_scalar(request_context, b"requestContext");

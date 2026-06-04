@@ -1,0 +1,55 @@
+[package]
+name = "tessera-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hex = "0.4"
+tessera-arc = { path = "../crates/tessera-arc" }
+tessera-origin = { path = "../crates/tessera-origin" }
+
+# A separate, nightly-only workspace so it doesn't perturb the main build.
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "deserialize_element"
+path = "fuzz_targets/deserialize_element.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "deserialize_scalar"
+path = "fuzz_targets/deserialize_scalar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wire_from_bytes"
+path = "fuzz_targets/wire_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "presentation_verify"
+path = "fuzz_targets/presentation_verify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "origin_guard_check"
+path = "fuzz_targets/origin_guard_check.rs"
+test = false
+doc = false
+bench = false
