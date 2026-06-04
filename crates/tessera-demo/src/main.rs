@@ -34,7 +34,12 @@ fn issue_credential(sk: &ServerPrivateKey, pk: &ServerPublicKey, rng: &mut OsRng
 }
 
 fn main() {
-    let want_tor = std::env::args().any(|a| a == "--tor");
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--serve") {
+        serve_mode();
+        return;
+    }
+    let want_tor = args.iter().any(|a| a == "--tor");
     let mut rng = OsRng;
 
     ui::banner();
@@ -138,5 +143,75 @@ fn main() {
         }
     } else {
         ui::note("Re-run with `--tor` to additionally prove this over a real Tor onion circuit.");
+    }
+}
+
+/// `--serve`: stand up the guarded origin and leave it running so you can hit it
+/// from a browser. Prints the blocked URL plus a batch of single-use "admit"
+/// links (credential carried in a `?t=` query param for browser convenience).
+fn serve_mode() {
+    const SERVE_LIMIT: u64 = 24;
+    let mut rng = OsRng;
+
+    ui::banner();
+    let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+    let credential = issue_credential(&sk, &pk, &mut rng);
+
+    // Prefer a stable, shareable port; fall back to an ephemeral one if taken.
+    let listener = TcpListener::bind("127.0.0.1:8088")
+        .or_else(|_| TcpListener::bind("127.0.0.1:0"))
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let base = format!("http://{addr}");
+
+    let guard = Arc::new(OriginGuard::new(
+        sk,
+        pk,
+        REQUEST_CTX,
+        PRESENT_CTX,
+        SERVE_LIMIT,
+    ));
+    net::serve(listener, Arc::clone(&guard));
+
+    // Mint a batch of single-use admit links.
+    let mut client = TesseraClient::new(credential, PRESENT_CTX, SERVE_LIMIT);
+    let mut admit_links = Vec::new();
+    for _ in 0..SERVE_LIMIT {
+        if let Ok(header) = client.presentation_header(&mut rng) {
+            admit_links.push(format!("{base}/?t={header}"));
+        }
+    }
+
+    ui::step(
+        "Origin is live — open it in your browser",
+        &format!("it never reads your IP · serving on {base}"),
+    );
+    ui::section("Open these");
+    println!("   BLOCKED (no credential — what Tor gets today):");
+    println!("     {base}/");
+    println!();
+    println!("   ADMITTED (each link carries one anonymous credential — single-use):");
+    for link in admit_links.iter().take(6) {
+        println!("     {link}");
+    }
+    ui::note(&format!(
+        "{} admit links minted; each works once (reload an admitted page and you'll see the \
+         403 double-spend — that's the rate limit working). Ctrl-C to stop.",
+        admit_links.len()
+    ));
+    println!();
+    println!("   Or from the terminal:");
+    if let Some(link) = admit_links.last() {
+        let header = link.rsplit("/?t=").next().unwrap_or("");
+        println!("     curl -i {base}/                                  # 403 blocked");
+        println!(
+            "     curl -i -H 'Tessera-Presentation: {}…' {base}/   # 200 admitted",
+            &header[..header.len().min(24)]
+        );
+    }
+
+    // Keep the process (and the origin thread) alive.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
     }
 }
