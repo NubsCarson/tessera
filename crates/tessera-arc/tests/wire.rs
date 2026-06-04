@@ -64,9 +64,8 @@ fn presentation_roundtrips_and_still_verifies_after_transport() {
     // Deserialize on the "server side" and verify it still checks out — proves
     // the wire format preserves every field a verifier needs.
     let received = Presentation::from_bytes(&bytes, LIMIT).expect("decode");
-    let (valid, _tag) = verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &received, LIMIT);
     assert!(
-        valid,
+        verify_presentation(&sk, &pk, REQUEST_CTX, PRESENT_CTX, &received, LIMIT).is_some(),
         "presentation must verify after a serialize/deserialize round trip"
     );
 }

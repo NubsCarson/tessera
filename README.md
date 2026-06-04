@@ -69,7 +69,7 @@ vectors:
 | Full ARC API (issue / present / verify) + range proof + double-spend store | ✅ end-to-end round-trip proven |
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
-| Hardening (constant-time, fuzzing, audit) | ⬜ |
+| Hardening — CT fix, fuzzing, benches, threat model | ✅ internal audit applied ([`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md)); **not** third-party audited |
 
 † The ARC §10.2 *proof* blobs are not byte-reproducible from the pinned
 reference (an upstream vector inconsistency — the ARC *arithmetic* vectors all

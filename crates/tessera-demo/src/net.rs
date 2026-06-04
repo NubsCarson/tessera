@@ -54,10 +54,14 @@ pub fn serve(listener: TcpListener, guard: Arc<OriginGuard>) -> thread::JoinHand
 }
 
 fn handle_connection(mut stream: TcpStream, guard: &OriginGuard) {
-    let mut reader = BufReader::new(match stream.try_clone() {
-        Ok(s) => s,
-        Err(_) => return,
-    });
+    // Bound the request so a hostile client can't exhaust memory with endless headers.
+    let mut reader = BufReader::new(
+        match stream.try_clone() {
+            Ok(s) => s,
+            Err(_) => return,
+        }
+        .take(64 * 1024),
+    );
 
     // Read the request line + headers (we ignore the body; this is a GET demo).
     let mut presentation: Option<String> = None;
@@ -118,8 +122,11 @@ fn http_get(
     stream.write_all(req.as_bytes())?;
     stream.flush()?;
 
+    // Bound the response so a hostile peer can't exhaust memory.
     let mut raw = String::new();
-    BufReader::new(stream).read_to_string(&mut raw)?;
+    BufReader::new(stream)
+        .take(64 * 1024)
+        .read_to_string(&mut raw)?;
     parse_response(&raw)
 }
 

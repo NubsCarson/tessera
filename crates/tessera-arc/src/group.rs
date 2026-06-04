@@ -26,6 +26,10 @@ use subtle::ConstantTimeEq;
 /// Sample a uniformly random non-zero scalar from a CSPRNG (spec §6.1
 /// `RandomScalar`). `ff::Field::random` performs the rejection sampling; we
 /// additionally exclude zero (which it returns with negligible probability).
+///
+/// The loop's timing depends only on *discarded* draws, never on the returned
+/// scalar: under a `CryptoRng` each rejected sample is statistically independent
+/// of the accepted one, so this leaks nothing about the secret it produces.
 pub fn random_scalar<R: RngCore + ?Sized>(rng: &mut R) -> Scalar {
     let mut s = Scalar::random(&mut *rng);
     while bool::from(s.ct_eq(&Scalar::ZERO)) {
@@ -55,8 +59,16 @@ const ORDER_U512: U512 = U512::from_be_hex(
 ///
 /// This is the shared core of `HashToScalar` (48-byte input, RFC 9380) and the
 /// Fiat-Shamir `verifier_challenge` (64-byte squeeze, per the reference codec).
-pub fn reduce_mod_order(be: &[u8]) -> Scalar {
-    assert!(be.len() <= 64, "input wider than 512 bits");
+///
+/// Constant-time in `be`: the modulus is a fixed compile-time constant, so
+/// `crypto_bigint`'s reduction is data-independent w.r.t. the input. Crate-only:
+/// `be.len() <= 64` is an internal invariant of its two callers, not a check on
+/// untrusted input.
+pub(crate) fn reduce_mod_order(be: &[u8]) -> Scalar {
+    debug_assert!(
+        be.len() <= 64,
+        "reduce_mod_order: input wider than 512 bits"
+    );
     let mut buf = [0u8; 64];
     buf[64 - be.len()..].copy_from_slice(be);
     let wide = U512::from_be_slice(&buf);
@@ -75,6 +87,17 @@ pub enum DeserializeError {
     /// The bytes are not the canonical encoding of a scalar in `[0, p-1]`.
     Scalar,
 }
+
+impl core::fmt::Display for DeserializeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            DeserializeError::Element => "not a canonical, non-identity group element",
+            DeserializeError::Scalar => "not a canonical scalar in [0, p-1]",
+        })
+    }
+}
+
+impl std::error::Error for DeserializeError {}
 
 /// `G.GeneratorG()` — the fixed P-256 base point (spec §3.1).
 #[inline]

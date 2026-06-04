@@ -39,12 +39,9 @@ impl ServerPrivateKey {
         (sk, pk)
     }
 
-    /// Construct a private key from its four scalar components.
-    ///
-    /// (A randomized `SetupServer()` constructor will be added once the
-    /// spec-defined `RandomScalar` rejection sampler lands alongside the
-    /// proof layer; for now keys are supplied explicitly, which is exactly
-    /// what the test vectors require.)
+    /// Construct a private key from its four scalar components. This is the
+    /// explicit-key path the §10.2 test vectors require; for a fresh random
+    /// key pair use [`ServerPrivateKey::setup`] (the spec's `SetupServer()`).
     pub fn from_scalars(x0: Scalar, x1: Scalar, x2: Scalar, x0_blinding: Scalar) -> Self {
         Self {
             x0,
