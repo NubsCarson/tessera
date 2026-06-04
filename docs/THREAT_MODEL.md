@@ -276,12 +276,16 @@ These are **not** provided. Treating any of them as solved is a deployment error
    origin does. No effect on sites that don't verify ARC. (§1.)
 2. **Network-level anonymity.** Delegated to the transport (Tor). Tessera adds
    no IP/timing/volume protection of its own. (§3.3.)
-3. **Sybil resistance of issuance.** *Who is allowed to obtain a credential* is
-   an **application policy**, deliberately unspecified here. `create_credential_response`
-   issues to **anyone** whose request proof verifies. There is no proof-of-work,
-   payment, or rate cap on issuance in this codebase (the "earn your budget"
-   model is a `GOAL.md` stretch item). Without an issuance gate, one actor can
-   obtain unlimited credentials and the rate limit is meaningless — see §6.
+3. **Strong Sybil resistance of issuance.** *Who is allowed to obtain a
+   credential* is an **application policy**. `create_credential_response` itself
+   issues to **anyone** whose request proof verifies; without a gate in front of
+   it, one actor mints unlimited credentials and the rate limit is meaningless
+   (§6). The `tessera-issuer` crate provides a **proof-of-work cost gate** as the
+   simplest deployable mitigation — it makes each credential cost ~`2^difficulty`
+   hashes, throttling bulk minting — but PoW is a **cost knob, not strong Sybil
+   resistance**: an adversary with enough compute still scales, and it penalizes
+   low-power clients. Per-human guarantees (payment, attestation, a
+   one-per-person credential) are **not** provided and remain future work.
 4. **Post-quantum soundness/anonymity.** All security rests on the hardness of
    discrete log over P-256. **Shor's algorithm breaks that**, which (a) breaks
    credential unforgeability and proof soundness, and (b) enables the

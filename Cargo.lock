@@ -573,7 +573,17 @@ dependencies = [
  "rand_core",
  "tessera-arc",
  "tessera-client",
+ "tessera-issuer",
  "tessera-origin",
+]
+
+[[package]]
+name = "tessera-issuer"
+version = "0.0.1"
+dependencies = [
+ "hex",
+ "rand_core",
+ "sha2",
 ]
 
 [[package]]

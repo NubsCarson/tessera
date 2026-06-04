@@ -21,8 +21,12 @@ use rand_core::OsRng;
 use tessera_arc::arc::{create_credential_response, Credential};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 use tessera_client::{begin_issuance, TesseraClient};
+use tessera_issuer::{solve, ChallengeStore};
 use tessera_origin::OriginGuard;
 
+/// Proof-of-work difficulty (leading zero bits) the demo's issuer requires.
+/// 16 is sub-second to solve; a real deployment tunes this to its abuse model.
+const POW_DIFFICULTY: u32 = 16;
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
 const PRESENT_CTX: &[u8] = b"tessera://origin.demo/v1";
 const LIMIT: u64 = 3;
@@ -77,7 +81,20 @@ fn main() {
         &format!("public key fingerprint {fp}…  ·  presentation limit {LIMIT}"),
     );
 
-    // ---- 2. Issue a credential to the client ---------------------------
+    // ---- 2. Earn the right to be issued: proof-of-work gate ------------
+    ui::section("Earning a credential (issuance gate)");
+    let mut challenges = ChallengeStore::new();
+    let challenge = challenges.issue(&mut rng, POW_DIFFICULTY);
+    let solution = solve(&challenge); // the client pays CPU here
+    let earned = challenges.redeem(&challenge, &solution);
+    ui::result(
+        earned,
+        &format!("client solved a {POW_DIFFICULTY}-bit proof-of-work"),
+        if earned { 200 } else { 0 },
+        "makes bulk credential-minting cost CPU — the real abuse lever is issuance",
+    );
+
+    // ---- 3. Issue a credential to the client ---------------------------
     let credential = issue_credential(&sk, &pk, &mut rng);
     ui::step(
         "Client obtained an anonymous credential",

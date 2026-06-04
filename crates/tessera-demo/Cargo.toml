@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 tessera-arc = { path = "../tessera-arc" }
+tessera-issuer = { path = "../tessera-issuer" }
 tessera-origin = { path = "../tessera-origin" }
 tessera-client = { path = "../tessera-client" }
 rand_core.workspace = true
