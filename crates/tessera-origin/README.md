@@ -24,6 +24,44 @@ match guard.check(header) {
 }
 ```
 
+## `tower` middleware (optional feature)
+
+For a real HTTP service, enable the off-by-default `tower` feature to get a drop-in
+[`tower::Layer`] — `TesseraLayer` — that runs the guard for you. It reads the
+`Tessera-Presentation` header off each `http::Request`, calls `OriginGuard::check`,
+forwards admitted requests to the inner service, and short-circuits rejected ones
+with **`403 Forbidden`** (reason in the `Tessera-Reject` response header) *without
+ever polling the inner service*. The source IP is still never consulted. The core
+crate stays dependency-light; the feature only adds `tower` + `http` +
+`http-body-util` + `bytes`.
+
+```toml
+[dependencies]
+tessera-origin = { version = "0.0", features = ["tower"] }
+```
+
+```rust
+use std::sync::Arc;
+use tessera_origin::{OriginGuard, TesseraLayer};
+
+// `guard: OriginGuard` built as above; share it (and its spent-tag set).
+let guard = Arc::new(guard);
+
+// axum:
+//   let app = Router::new()
+//       .route("/", get(handler))
+//       .layer(TesseraLayer::new(guard));
+//
+// any tower stack:
+//   let svc = ServiceBuilder::new()
+//       .layer(TesseraLayer::new(guard))
+//       .service(inner);
+let _layer = TesseraLayer::new(guard);
+```
+
+Note: the feature's HTTP/async deps need a newer compiler than the crate's
+declared MSRV (1.74); the core guard (default features) still builds on 1.74.
+
 ## Status
 
 Research-grade and **unaudited**; do not use to protect real users. See [SECURITY](../../SECURITY.md) and the [threat model](../../docs/THREAT_MODEL.md). The spent-tag set is in-memory and per-process, not a durable or distributed double-spend store.

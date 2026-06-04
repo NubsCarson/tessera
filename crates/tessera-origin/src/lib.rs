@@ -10,7 +10,21 @@
 //! The guard is transport-agnostic: it operates on the value of a single
 //! request header (the hex-encoded presentation). Wire it into any HTTP stack
 //! by extracting that header and calling [`OriginGuard::check`].
-
+//!
+//! ## Optional `tower` middleware
+//!
+//! Enable the off-by-default `tower` feature to get a drop-in `tower::Layer`
+//! (`TesseraLayer`) that wraps any HTTP service: it pulls the
+//! [`PRESENTATION_HEADER`] off each `http::Request`, runs [`OriginGuard::check`],
+//! and short-circuits rejected requests with `403 Forbidden` before the inner
+//! service ever sees them. The layer is `axum`/`hyper`-compatible.
+// `TesseraLayer`/`tower_layer` only exist with the `tower` feature on, so the
+// intra-doc links to them are feature-gated. This keeps the default-feature
+// `cargo doc` gate (which runs without `--all-features`) free of broken links.
+#![cfg_attr(
+    feature = "tower",
+    doc = "See [`TesseraLayer`] and the [`tower_layer`] module for details."
+)]
 #![forbid(unsafe_code)]
 
 use std::collections::HashSet;
@@ -148,3 +162,9 @@ impl OriginGuard {
         }
     }
 }
+
+#[cfg(feature = "tower")]
+pub mod tower_layer;
+
+#[cfg(feature = "tower")]
+pub use tower_layer::{TesseraGuard, TesseraLayer};
