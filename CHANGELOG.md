@@ -35,6 +35,25 @@ The pre-1.0 development line. **Research-grade and unaudited** — see
   benches, `docs/THREAT_MODEL.md`, and CI (fmt, clippy `-D warnings`, tests,
   docs, MSRV 1.74, `cargo-audit`, nightly fuzz).
 
+#### Post-v0 frontier ([`docs/ROADMAP.md`](./docs/ROADMAP.md))
+- **Audit-readiness:** [`docs/SECURITY_ARGUMENT.md`](./docs/SECURITY_ARGUMENT.md)
+  — every security property as construction → assumption → gap, with `file:line`.
+- **Deployable middleware:** `tessera-origin`'s off-by-default `tower` feature —
+  `TesseraLayer`/`TesseraGuard`, a drop-in `tower::Layer` that runs the guard and
+  short-circuits rejects with `403` (`axum`/`hyper`-compatible). Lean deps
+  (`tower`+`http`+`http-body-util`+`bytes`; no `axum`/`tokio`), 1.74-clean.
+- **Pluggable spent-tag store:** the `SpentTagStore` trait + `OriginGuard::with_store`,
+  with `InMemoryTagStore` (default) and a durable single-process `FileTagStore`.
+  Double-spend enforcement is tested to survive a guard restart; a distributed
+  backend is the deployer's via the trait.
+- **WASM browser client:** `crates/tessera-wasm` (out-of-workspace, like `fuzz/`)
+  — `wasm-bindgen` `mint_local`/`present()`, headless mint→present test under
+  node, + a Manifest-V3 extension scaffold. In-browser use is a scaffold.
+- **Upstream:** filed [`ietf-wg-privacypass/draft-arc#68`](https://github.com/ietf-wg-privacypass/draft-arc/issues/68)
+  documenting the §10.2 proof-blob discrepancy; [`docs/POST_QUANTUM.md`](./docs/POST_QUANTUM.md)
+  scopes a PQ-sound path.
+- CI: a dedicated `wasm` job; GitHub Actions bumped to the Node-24 majors.
+
 ### Known issues
 - The ARC §10.2 **proof-blob** test vectors do not reconcile with the pinned
   reference (upstream skew); the proof layer is proven against the Sigma vectors

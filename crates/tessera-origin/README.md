@@ -65,6 +65,30 @@ bump of those crates may raise their own MSRV above 1.74, at which point pin the
 back or build the MSRV job without `--all-features` (the core guard always builds
 on 1.74).
 
+## Spent-tag store (pluggable, optionally durable)
+
+The guard rejects replays by recording every accepted presentation tag. *Which*
+store backs that set is a deployment choice — implement the
+[`SpentTagStore`](https://docs.rs/tessera-origin) trait and inject it with
+`OriginGuard::with_store`:
+
+```rust
+use tessera_origin::{FileTagStore, OriginGuard};
+
+// In-memory (the default; process-local, non-durable):
+let guard = OriginGuard::new(sk, pk, b"request-ctx", b"this-origin", 5);
+
+// Durable across restarts (append-only file, single-process):
+let store = Box::new(FileTagStore::open("/var/lib/tessera/spent.tags")?);
+let guard = OriginGuard::with_store(sk, pk, b"request-ctx", b"this-origin", 5, store);
+```
+
+Built-ins: `InMemoryTagStore` (default) and `FileTagStore` (durable, single-process —
+honest limits in its docs: not multi-process, unbounded growth, best-effort flush).
+**For multiple replicas or the edge, implement `SpentTagStore` over a shared
+backend** (Redis / Postgres / a Cloudflare Durable Object): a per-process set lets
+the same presentation be replayed against a different replica.
+
 ## Edge deployment (Cloudflare Worker / WASM) — sketch
 
 The guard is just "header in → `Decision` out", so it maps cleanly onto an edge
@@ -77,11 +101,12 @@ runtime. The shape, **not a shipped artifact**:
   `tower` layer, at the edge.
 - **Two real constraints, why this is a sketch and not shipped here:** (1) the
   Worker holds the **server secret key** — it must come from a Worker secret /
-  KMS, never the bundle; (2) the in-memory spent-tag set does **not** survive
-  across Worker isolates, so double-spend enforcement needs a shared store
-  (Durable Object / KV / D1) — i.e. the durable-`TagStore` work, which is not
-  done. Until both are addressed, an edge deploy weakens the replay guarantee.
+  KMS, never the bundle; (2) the spent-tag set must be **shared across isolates**,
+  so plug a `SpentTagStore` over a Durable Object / KV / D1 (the trait above is
+  the extension point; the default in-memory store is per-isolate and would let
+  the same presentation replay against another isolate). Address both before an
+  edge deploy preserves the replay guarantee.
 
 ## Status
 
-Research-grade and **unaudited**; do not use to protect real users. See [SECURITY](../../SECURITY.md) and the [threat model](../../docs/THREAT_MODEL.md). The spent-tag set is in-memory and per-process, not a durable or distributed double-spend store.
+Research-grade and **unaudited**; do not use to protect real users. See [SECURITY](../../SECURITY.md) and the [threat model](../../docs/THREAT_MODEL.md). The *default* spent-tag store is in-memory and per-process; `FileTagStore` adds single-process durability, and the `SpentTagStore` trait lets you plug a distributed backend — but none of this has been third-party audited.

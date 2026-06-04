@@ -27,11 +27,11 @@
 )]
 #![forbid(unsafe_code)]
 
-use std::collections::HashSet;
-use std::sync::Mutex;
-
 use tessera_arc::arc::{verify_presentation, Presentation};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
+
+pub mod store;
+pub use store::{FileTagStore, InMemoryTagStore, SpentTagStore};
 
 /// The HTTP header carrying a hex-encoded ARC presentation.
 pub const PRESENTATION_HEADER: &str = "Tessera-Presentation";
@@ -86,19 +86,26 @@ impl Decision {
 }
 
 /// A configured origin guard. Holds the server keys, the agreed request and
-/// presentation contexts, the presentation limit, and the spent-tag set.
+/// presentation contexts, the presentation limit, and the spent-tag store.
 pub struct OriginGuard {
     private_key: ServerPrivateKey,
     public_key: ServerPublicKey,
     request_context: Vec<u8>,
     presentation_context: Vec<u8>,
     limit: u64,
-    spent: Mutex<HashSet<[u8; 33]>>,
+    store: Box<dyn SpentTagStore>,
 }
 
 impl OriginGuard {
-    /// Build a guard. `request_context` must match what credentials were issued
-    /// against; `presentation_context` scopes presentations to this origin.
+    /// Build a guard backed by the default in-memory spent-tag store.
+    /// `request_context` must match what credentials were issued against;
+    /// `presentation_context` scopes presentations to this origin.
+    ///
+    /// The in-memory store is process-local and non-durable; for a durable or
+    /// shared spent-set (e.g. behind multiple replicas) use [`with_store`] with
+    /// a [`FileTagStore`] or your own [`SpentTagStore`].
+    ///
+    /// [`with_store`]: OriginGuard::with_store
     pub fn new(
         private_key: ServerPrivateKey,
         public_key: ServerPublicKey,
@@ -106,13 +113,35 @@ impl OriginGuard {
         presentation_context: &[u8],
         limit: u64,
     ) -> Self {
+        Self::with_store(
+            private_key,
+            public_key,
+            request_context,
+            presentation_context,
+            limit,
+            Box::new(InMemoryTagStore::new()),
+        )
+    }
+
+    /// Build a guard with a caller-supplied spent-tag store. Use this to plug a
+    /// durable ([`FileTagStore`]) or distributed (your own [`SpentTagStore`] over
+    /// Redis/Postgres/etc.) double-spend set. Everything else is identical to
+    /// [`new`](OriginGuard::new) — the source IP is still never consulted.
+    pub fn with_store(
+        private_key: ServerPrivateKey,
+        public_key: ServerPublicKey,
+        request_context: &[u8],
+        presentation_context: &[u8],
+        limit: u64,
+        store: Box<dyn SpentTagStore>,
+    ) -> Self {
         Self {
             private_key,
             public_key,
             request_context: request_context.to_vec(),
             presentation_context: presentation_context.to_vec(),
             limit,
-            spent: Mutex::new(HashSet::new()),
+            store,
         }
     }
 
@@ -152,9 +181,11 @@ impl OriginGuard {
             None => return Decision::Reject(RejectReason::InvalidProof),
         };
 
-        // Enforce single-use of each (credential, context, nonce) slot.
-        let mut spent = self.spent.lock().expect("tag store mutex poisoned");
-        if !spent.insert(tag) {
+        // Enforce single-use of each (credential, context, nonce) slot via the
+        // configured spent-tag store (in-memory by default; durable/shared if
+        // injected). `record_if_new` is atomic, so concurrent replays of one
+        // presentation yield exactly one admit.
+        if !self.store.record_if_new(tag) {
             return Decision::Reject(RejectReason::DoubleSpend);
         }
         Decision::Admit {

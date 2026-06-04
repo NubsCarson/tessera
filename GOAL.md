@@ -118,8 +118,13 @@ An adversarial review panel triaged the remaining ideas. These are intentionally
   no `axum`/`tokio` in the graph, 1.74-clean. (ROADMAP track 2.) The *Cloudflare
   Worker edge deploy* remains a documented sketch, not a compiled artifact — it
   needs the server secret at the edge and a durable cross-isolate tag store.
-- **Pluggable/durable `TagStore` backend** — the in-memory store is honestly
-  documented as non-durable; no concrete backend consumer yet.
+- **Pluggable/durable `TagStore` backend** — ✅ **shipped** as the
+  `SpentTagStore` trait on `tessera-origin` + `OriginGuard::with_store`: the
+  default `InMemoryTagStore`, a durable single-process `FileTagStore`, and an
+  injection point for a distributed backend (Redis/Postgres/Durable Object).
+  Double-spend enforcement is tested to survive a guard restart. (A *concrete*
+  distributed impl is intentionally left to the deployer — it depends on their
+  infra.)
 - **Tor↔LLM-API proxy** — ✅ **shipped** as `tessera-proxy`: a credential-gated
   `CONNECT` proxy that tunnels TLS end-to-end to any HTTPS site (e.g. the
   Anthropic API), optionally over Tor — admitting on the credential, never the
