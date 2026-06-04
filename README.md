@@ -5,26 +5,49 @@
 [![MSRV 1.74](https://img.shields.io/badge/MSRV-1.74-blue.svg)](#build)
 ![status: research-grade, unaudited](https://img.shields.io/badge/status-research--grade%20%C2%B7%20unaudited-orange.svg)
 
-**Private, uncensorable access to the clearnet — pay anonymously, per request, to reach any site without being blocked.**
+**Admit a web request on an unlinkable token it can prove — never on its IP.**
 
-Tessera began as a from-scratch, spec-faithful implementation of the IETF
-**Anonymous Rate-Limited Credentials (ARC)** protocol (a *trust layer for
-anonymous traffic*), and is **evolving** into a private, uncensorable
-clearnet-access network — admit a request on an anonymous credential/payment,
-**not** an IP. The proven ARC credential is now one component of that larger system.
+Tessera is a from-scratch, **IETF-vector-proven** implementation of *Anonymous
+Rate-Limited Credentials (ARC)* plus the tooling around it — including a
+self-hostable, credential-gated **`CONNECT` proxy you can run over Tor today**
+that admits traffic on a token, not an address. It is **research-grade and
+UNAUDITED**: a tested protocol artifact + runnable tool, **not yet** a deployed
+network.
 
-> **Direction (vNext):** the full design — a ZK payment-channel rail, a
-> mode-switched mixnet transport, a coherent-persona anti-fingerprint layer, and
-> clean residential egress — is in [`docs/DESIGN.md`](./docs/DESIGN.md). It is
-> **early/design-stage and research-grade**, honest about its limits (clean-IP
-> supply, the anti-bot arms race, no post-quantum, unaudited, ~85% prior art).
-> This direction pursues privacy-preserving **circumvention** — a deliberate
-> evolution beyond v0's "obsolescence, not evasion" framing.
+> **Where it's heading (vNext — a research-grade *direction*, not a delivered
+> property):** a private clearnet-*access* network that pays anonymously, per
+> request, to reach sites which blocklist Tor exit IPs — via a **clean
+> credentialed egress** + per-IP human-volume shaping, with anonymity provided by
+> Tor. The design is [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) (the leaner
+> ecash-token path) and [`docs/DESIGN.md`](./docs/DESIGN.md). Honest about its
+> limits: it removes the *IP/Tor-exit* block — it does **not** win the anti-bot
+> arms race or force a hostile site, and clean-IP supply + a Tor crowd + an audit
+> are external. ~85% prior art; the contribution is the composition + the candor.
 
 > A **tessera** was a small token used in ancient Rome as a ticket of
 > admission — proof you were allowed in, carried in the hand, tied to no name.
 > That is exactly what this is: a cryptographic token that admits a request on
 > its own merit, not on who or where it came from.
+
+## What this is / what it is NOT
+
+**It IS, today (tested, CI-green):**
+- a from-scratch **ARC (P-256)** anonymous-credential core, proven **byte-for-byte
+  against the IETF test vectors**;
+- a runnable, self-hostable **credential-gated proxy** — admit on a token, tunnel
+  TLS end-to-end, optionally over Tor — plus a narrated end-to-end demo;
+- a tested **2-hop split-trust access loop**, **per-IP human-volume shaping**, an
+  ETH-paid **token-mint rail**, and an **optional ZK payment-channel tier** (with
+  an EVM court), all CI-green;
+- **honest** — every limit and external hand-off is named, not hidden.
+
+**It is NOT (yet):**
+- a deployed, anonymous **network** a stranger can use — that needs clean
+  residential egress IPs at scale **+** a Tor/Nym anonymity crowd (external);
+- **audited** — no third-party review yet; do not protect real users or funds;
+- a way to defeat a determined anti-bot system or "reach any site" — it removes
+  the **IP / Tor-exit** block, not the arms race;
+- **post-quantum** — the discrete-log assumption is classical.
 
 ## See it
 
@@ -55,6 +78,14 @@ prints a ready-to-run `curl` for a sample HTTPS API. The result, end to end:
 anonymous, accountable, IP-blind access to the clearnet — admitted on a
 credential, not an address.
 
+> **"IP-blind" is about *admission*, not invisibility.** The proxy decides who to
+> admit on the token alone and never reads your source IP — but the destination
+> still sees the proxy's **egress** IP. Reaching sites that blocklist Tor exit IPs
+> therefore depends on a *clean* egress IP (and human-volume shaping to keep it
+> clean); it does **not** defeat a site determined to fingerprint/block you. See
+> [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) and
+> [`docs/IP_EGRESS_IDEAS.md`](./docs/IP_EGRESS_IDEAS.md).
+
 ## The problem it attacks
 
 The web decides whether to trust you by your **IP address**. Tor's exit relays
@@ -80,8 +111,12 @@ roadmap.
 
 ## Crates
 
-A Cargo workspace of eight crates — a verifiable crypto core plus the tooling
-around it:
+A Cargo workspace of **ten crates** (eight workspace members + two excluded,
+listed separately below) — a verifiable crypto core plus the tooling around it.
+Per [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) the **recommended default**
+is the token-gated path (ARC token + the 2-hop loop over Tor + shaping); the ZK
+payment **channel / EVM court are an optional-advanced tier**, kept and tested
+for when pay-as-you-go-with-refund is genuinely needed.
 
 | Crate | What it is |
 |-------|-----------|
@@ -90,9 +125,10 @@ around it:
 | [`tessera-origin`](./crates/tessera-origin) | Server-side `OriginGuard`: admit a request on a valid, in-budget, unspent presentation — **never** on the source IP. Transport-agnostic. |
 | [`tessera-client`](./crates/tessera-client) | Holds a credential and mints one fresh, unlinkable presentation per request. |
 | [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site, optionally over Tor. |
-| [`tessera-relay`](./crates/tessera-relay) | The first onion hop + the **channel payment gate**, forming the **2-hop split-trust loop**: the relay learns {client, exit} but never the destination, the exit learns {destination} but never the client; neither sees content. The loop now does **real per-request channel payments** (`tessera-channel` Phase 2a protocol): the relay is the **channel counterparty** — the client opens a channel and each request is a real `spend` the relay verify-and-co-signs *before* forwarding (sign-then-serve); a replayed/over-budget spend is refused and never reaches the destination. The relay thereby **links your in-channel requests** (the accepted within-session linkability, `DESIGN.md` §9). The legacy ARC-v0 spend stand-in is kept behind its own entry point. The **ZK settlement (Phase 2b-i)** + the **shielded funding pool** are separate, and clean egress is still a manual step. Tested end-to-end. |
-| [`tessera-channel`](./crates/tessera-channel) | The **ZK Spilman channel protocol state machine** (`DESIGN.md` §2): a unidirectional, monotone-decrementing, single-payee off-chain payment channel in plain Rust — user-signed states (so equivocation is attributable), sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute/settlement. Chain-facing signatures are **EVM-native secp256k1 over a recoverable keccak256 digest** (so the Phase 2c court verifies them with `ecrecover`) + a SHA-256 state commitment. **The ZK balance-privacy layer (Phase 2b) is NOT here yet.** |
-| [`contracts/`](./contracts) | The **Phase 2c EVM on-chain court** (`DESIGN.md` §6): a Foundry `ChannelRegistry.sol` mirroring `tessera-channel`'s settlement logic — escrow/open, cooperative & unilateral close + challenge, equivocation slash, refund-on-timeout — verifying the crate's secp256k1 states via `ecrecover`. Includes a **real Rust→Solidity cross-language signature vector** test. Testnet-only, UNAUDITED. |
+| [`tessera-relay`](./crates/tessera-relay) | The first onion hop, forming the **2-hop split-trust loop**: the relay learns {client, exit} but never the destination; the exit learns {destination + that a valid token was presented} but never the client; neither sees content. **Default (recommended): ARC-token mode** — the request is gated on an unlinkable, rate-limited token checked at the credential-gated exit (proven end-to-end, no channel). It *also* has an **optional channel-payment mode** (the relay as channel counterparty, `tessera-channel`) for pay-per-request with the advanced tier. Tested end-to-end. |
+| — *optional-advanced tier* — | *the ZK payment channel + on-chain court below; kept + tested, not on the default path (see `docs/ARCHITECTURE.md`).* |
+| [`tessera-channel`](./crates/tessera-channel) | **(optional-advanced)** The **ZK Spilman channel state machine** (`DESIGN.md` §2): a unidirectional, monotone-decrementing, single-payee off-chain payment channel — user-signed states (equivocation is attributable), sign-then-serve co-signing, HOPR-style proof-of-relay, a watchtower, and off-chain dispute/settlement. Chain-facing sigs are **EVM-native secp256k1 over a recoverable keccak256 digest** (`ecrecover`-verifiable) + a SHA-256 state commitment + a Poseidon commitment for the ZK path. |
+| [`contracts/`](./contracts) | The **Foundry on-chain rails**. `TokenMint.sol` is the **leaner default**: an ETH-paid mint (pay → token entitlement → the issuer blind-issues ARC tokens). `ChannelRegistry.sol` is the **optional-advanced** EVM court for the channel — open/close/dispute/slash/refund + a relayer bond + a ZK (`R_dec` Groth16) settlement path — with a **real Rust→Solidity cross-language vector** + a **pinned ZK proof** verified on-chain. Testnet-only, UNAUDITED. |
 | [`tessera-demo`](./crates/tessera-demo) | The runnable end-to-end demo: narrated CLI, a `--serve` browser hub, and a `--tor` onion-service path. |
 
 Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
@@ -100,7 +136,7 @@ Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
 | Crate | What it is |
 |-------|-----------|
 | [`tessera-wasm`](./crates/tessera-wasm) | `wasm-bindgen` browser bindings: real issuance (`prepare_issuance`) + `present()` in-browser. **Compiles to `wasm32`**, headless node tests pass, and a wasm-issued credential is **verified to interoperate with the Rust origin** (`examples/node-real-issuance.cjs`). Ships an MV3 [extension scaffold](./crates/tessera-wasm/extension) — loading it in an actual browser is the human final mile. |
-| [`tessera-tower-demo`](./crates/tessera-tower-demo) | A runnable **`axum` server** using the `tessera-origin` `tower` middleware. `cargo run` it and `curl` the printed commands; its end-to-end test drives a real server on a multi-threaded `tokio` runtime over a real socket (admit / malformed / replay / fresh). |
+| [`tessera-tower-demo`](./crates/tessera-tower-demo) | A runnable **`axum` server** using the `tessera-origin` `tower` middleware. Run it from its own dir — `cd crates/tessera-tower-demo && cargo run` (it's an excluded workspace, so `-p` from the root won't find it) — then `curl` the printed commands; its end-to-end test drives a real server on a multi-threaded `tokio` runtime over a real socket (admit / malformed / replay / fresh). |
 
 > Not yet published to crates.io — every crate is `publish = false` pending a
 > third-party security audit. Use it via a git or path dependency for now.
