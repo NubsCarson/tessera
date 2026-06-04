@@ -16,10 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (stable, with clippy + rustfmt)
-        run: |
-          rustup toolchain install stable --component clippy rustfmt
-          rustup default stable
+      - name: Rust toolchain (stable + clippy + rustfmt)
+        # The repo's rust-toolchain.toml already selects stable; just ensure the
+        # components are present on it (`component add` is variadic; the buggy
+        # `--component clippy rustfmt` parsed `rustfmt` as a toolchain name).
+        run: rustup component add clippy rustfmt
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -42,6 +43,11 @@ jobs:
       - name: Benchmarks compile
         run: cargo bench --workspace --no-run
 
+      - name: Docs (deny broken intra-doc links)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
+
   fuzz:
     name: fuzz build + smoke
     runs-on: ubuntu-latest
@@ -49,22 +55,22 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust nightly
-        run: |
-          rustup toolchain install nightly
-          rustup default nightly
+        run: rustup toolchain install nightly
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
 
+      # `+nightly` is required and overrides the repo's stable rust-toolchain.toml
+      # (cargo-fuzz needs the nightly-only `-Z sanitizer` flags).
       - name: Build all fuzz targets
-        run: cargo fuzz build
+        run: cargo +nightly fuzz build
 
       - name: Smoke-run each target (short)
         # LeakSanitizer needs ptrace, which GitHub runners restrict; disable it.
         env:
           ASAN_OPTIONS: detect_leaks=0
         run: |
-          for t in $(cargo fuzz list); do
+          for t in $(cargo +nightly fuzz list); do
             echo "== fuzzing $t =="
-            cargo fuzz run "$t" -- -max_total_time=30 -detect_leaks=0
+            cargo +nightly fuzz run "$t" -- -max_total_time=30 -detect_leaks=0
           done
