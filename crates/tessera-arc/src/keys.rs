@@ -5,17 +5,30 @@
 //! (committing to `x0` under both generators) is what gives ARC its issuance
 //! unlinkability property (spec §7.2).
 
-use crate::group::{self, generator_g, generator_h, random_scalar};
+use crate::group::{
+    self, deserialize_scalar, generator_g, generator_h, random_scalar, serialize_scalar,
+    DeserializeError,
+};
 use p256::{ProjectivePoint, Scalar};
 use rand_core::RngCore;
 
 /// `ServerPrivateKey` (spec §4.1).
-#[derive(Debug, Clone)]
+///
+/// `Debug` is deliberately redacted: the four secret scalars must never land in
+/// a log or panic message. Use [`ServerPrivateKey::serialize`] for deliberate,
+/// explicit persistence.
+#[derive(Clone)]
 pub struct ServerPrivateKey {
     pub x0: Scalar,
     pub x1: Scalar,
     pub x2: Scalar,
     pub x0_blinding: Scalar,
+}
+
+impl core::fmt::Debug for ServerPrivateKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ServerPrivateKey(<redacted>)")
+    }
 }
 
 /// `ServerPublicKey` (spec §4.1).
@@ -49,6 +62,32 @@ impl ServerPrivateKey {
             x2,
             x0_blinding,
         }
+    }
+
+    /// Serialize the private key as `4 * Ns = 128` bytes
+    /// (`x0 ‖ x1 ‖ x2 ‖ x0Blinding`, each a 32-byte big-endian scalar), for
+    /// persisting server keys across restarts. **Secret material** — store it
+    /// the way you would any MAC key.
+    pub fn serialize(&self) -> [u8; 4 * group::NS] {
+        let mut out = [0u8; 4 * group::NS];
+        out[..group::NS].copy_from_slice(&serialize_scalar(&self.x0));
+        out[group::NS..2 * group::NS].copy_from_slice(&serialize_scalar(&self.x1));
+        out[2 * group::NS..3 * group::NS].copy_from_slice(&serialize_scalar(&self.x2));
+        out[3 * group::NS..].copy_from_slice(&serialize_scalar(&self.x0_blinding));
+        out
+    }
+
+    /// Deserialize a private key from exactly `4 * Ns = 128` bytes.
+    pub fn from_bytes(buf: &[u8]) -> Result<Self, DeserializeError> {
+        if buf.len() != 4 * group::NS {
+            return Err(DeserializeError::Scalar);
+        }
+        Ok(Self::from_scalars(
+            deserialize_scalar(&buf[..group::NS])?,
+            deserialize_scalar(&buf[group::NS..2 * group::NS])?,
+            deserialize_scalar(&buf[2 * group::NS..3 * group::NS])?,
+            deserialize_scalar(&buf[3 * group::NS..])?,
+        ))
     }
 
     /// Derive the corresponding [`ServerPublicKey`] (spec §4.1):

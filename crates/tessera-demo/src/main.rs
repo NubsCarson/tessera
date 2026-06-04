@@ -36,6 +36,28 @@ fn issue_credential(sk: &ServerPrivateKey, pk: &ServerPublicKey, rng: &mut OsRng
     pending.finalize(&response).expect("response verifies")
 }
 
+/// Load the server key from a (0600) file so restarts keep the same identity,
+/// or generate + persist one on first run. Demonstrates `ServerPrivateKey`
+/// serialization; best-effort, demo-only persistence.
+fn load_or_create_server_key(rng: &mut OsRng) -> (ServerPrivateKey, ServerPublicKey, bool) {
+    let path = std::env::temp_dir().join("tessera-demo-server.key");
+    if let Ok(bytes) = std::fs::read(&path) {
+        if let Ok(sk) = ServerPrivateKey::from_bytes(&bytes) {
+            let pk = sk.public_key();
+            return (sk, pk, true);
+        }
+    }
+    let (sk, pk) = ServerPrivateKey::setup(rng);
+    if std::fs::write(&path, sk.serialize()).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    (sk, pk, false)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--serve") {
@@ -157,7 +179,15 @@ fn serve_mode() {
     let mut rng = OsRng;
 
     ui::banner();
-    let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+    let (sk, pk, loaded) = load_or_create_server_key(&mut rng);
+    ui::step(
+        if loaded {
+            "Server key loaded from disk (identity persists across restarts)"
+        } else {
+            "Server key generated and persisted (0600)"
+        },
+        "demonstrates ServerPrivateKey serialization; the key is secret material",
+    );
 
     // Prefer a stable, shareable port; fall back to an ephemeral one if taken.
     let listener = TcpListener::bind("127.0.0.1:8088")
