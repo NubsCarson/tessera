@@ -193,6 +193,12 @@ pub enum ChannelError {
     /// (the HOPR-style fair-exchange obligation), or the receipt does not bind
     /// the state being claimed.
     NoProofOfRelay,
+    /// The per-epoch request budget is full: the relayer has already accepted
+    /// the maximum number of distinct freshness nonces for this channel in the
+    /// current epoch (a memory-exhaustion bound — see [`RelayerChannel`]). The
+    /// client must wait for the relayer to advance the epoch (which resets the
+    /// budget).
+    EpochBudgetExhausted,
 }
 
 impl core::fmt::Display for ChannelError {
@@ -211,6 +217,9 @@ impl core::fmt::Display for ChannelError {
             }
             ChannelError::NoProofOfRelay => {
                 f.write_str("no valid proof-of-relay receipt for the claimed unit")
+            }
+            ChannelError::EpochBudgetExhausted => {
+                f.write_str("per-epoch request budget exhausted (await epoch advance)")
             }
         }
     }

@@ -378,3 +378,65 @@ fn underflow_is_rejected() {
     let drained = user.spend(B0, &fresh).expect("draining to zero is ok");
     assert_eq!(drained.signed.state.balance, 0);
 }
+
+/// 7. S3 — the per-epoch nonce budget is BOUNDED: after the max accepted spends
+///    the relayer rejects further distinct nonces (so `seen_nonces` cannot grow
+///    without bound — a memory-exhaustion bound), and `advance_epoch` resets the
+///    budget while preserving the monotone balance cursor.
+#[test]
+fn per_epoch_nonce_budget_is_bounded_and_resets() {
+    const MAX: u64 = 1024; // mirrors channel.rs MAX_NONCES_PER_EPOCH
+    let mut rng = OsRng;
+    let uk = KeyPair::generate(&mut rng);
+    let rk = KeyPair::generate(&mut rng);
+    // B0 > MAX so the *budget* (not the balance) is what bites.
+    let chan = Channel::open(
+        CHAN_ID,
+        MAX + 100,
+        SALT,
+        uk.verifying_key(),
+        rk.verifying_key(),
+    );
+    let mut user = UserChannel::new(uk.clone(), chan.clone());
+    let mut relayer = RelayerChannel::new(rk.clone(), chan.clone(), EPOCH);
+
+    // Accept exactly MAX distinct-nonce unit spends.
+    for nonce in 0..MAX {
+        let fresh = relayer.issue_challenge(nonce, b"x");
+        let spend = user.spend(1, &fresh).unwrap();
+        let cosigned = relayer.verify_and_cosign(&spend, &fresh).unwrap();
+        user.accept_cosigned(&cosigned).unwrap();
+    }
+
+    // The next distinct nonce is rejected — the per-epoch budget is full.
+    let fresh = relayer.issue_challenge(MAX, b"x");
+    let spend = user.spend(1, &fresh).unwrap();
+    assert_eq!(
+        relayer.verify_and_cosign(&spend, &fresh),
+        Err(ChannelError::EpochBudgetExhausted),
+        "a flood of distinct nonces must be bounded"
+    );
+
+    // Advancing the epoch resets the budget AND preserves the balance cursor.
+    let bal_before = relayer.latest().balance;
+    relayer.advance_epoch(EPOCH + 1).unwrap();
+    assert_eq!(
+        relayer.latest().balance,
+        bal_before,
+        "cursor preserved across the epoch boundary"
+    );
+
+    // A spend in the new epoch (nonce 0 reused) is accepted again — budget reset.
+    let fresh2 = relayer.issue_challenge(0, b"x");
+    let spend2 = user.spend(1, &fresh2).unwrap();
+    assert!(
+        relayer.verify_and_cosign(&spend2, &fresh2).is_ok(),
+        "the per-epoch budget resets after advance_epoch"
+    );
+
+    // advance_epoch rejects a non-increasing epoch.
+    assert_eq!(
+        relayer.advance_epoch(EPOCH + 1),
+        Err(ChannelError::StaleFreshness)
+    );
+}

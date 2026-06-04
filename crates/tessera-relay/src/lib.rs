@@ -55,8 +55,28 @@ pub mod channel;
 
 use std::io::{BufRead, BufReader, Read, Result, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
+
+/// Hard cap on simultaneously-handled connections at the relay hop (S3 DoS
+/// bound): an unauthenticated flood cannot spawn unbounded OS threads. Excess
+/// connections are dropped on the accept thread before a worker is spawned.
+const MAX_INFLIGHT: usize = 1024;
+
+/// Read/write timeout on a tunnel socket (S3): a slow-roll / idle peer unblocks
+/// the blocking copy loops instead of pinning a worker + fd forever.
+const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// RAII permit for the [`MAX_INFLIGHT`] cap — decrements the active counter when
+/// the handler thread returns, on every path.
+struct InflightGuard(Arc<AtomicUsize>);
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 use tessera_channel::{Channel, ChannelError, RelayerChannel, SignedState, Spend, VerifyingKey};
 // The relay reuses tessera-proxy's byte-pump (`pipe`) verbatim — the exact same
@@ -123,11 +143,21 @@ pub fn serve(
     exit_addr: SocketAddr,
     observer: Option<Observer>,
 ) -> thread::JoinHandle<()> {
+    let inflight = Arc::new(AtomicUsize::new(0));
     thread::spawn(move || {
         for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
+            let Ok(mut stream) = stream else { continue };
+            let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));
+            let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+                inflight.fetch_sub(1, Ordering::AcqRel);
+                write_status(&mut stream, "503 Service Unavailable");
+                continue;
+            }
+            let permit = InflightGuard(Arc::clone(&inflight));
             let observer = observer.clone();
             thread::spawn(move || {
+                let _permit = permit;
                 let _ = handle(stream, exit_addr, observer.as_ref());
             });
         }
@@ -193,7 +223,12 @@ fn handle(mut stream: TcpStream, exit_addr: SocketAddr, observer: Option<&Observ
     }
 
     let upstream = match TcpStream::connect(exit_addr) {
-        Ok(c) => c,
+        Ok(c) => {
+            // S3: bound the upstream too, so a stalled exit can't pin this tunnel.
+            let _ = c.set_read_timeout(Some(SOCKET_TIMEOUT));
+            let _ = c.set_write_timeout(Some(SOCKET_TIMEOUT));
+            c
+        }
         Err(_) => {
             write_status(&mut stream, "502 Bad Gateway");
             return Ok(());
@@ -334,12 +369,22 @@ pub fn serve_channel(
     gate: RelayGate,
     observer: Option<Observer>,
 ) -> thread::JoinHandle<()> {
+    let inflight = Arc::new(AtomicUsize::new(0));
     thread::spawn(move || {
         for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
+            let Ok(mut stream) = stream else { continue };
+            let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));
+            let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+                inflight.fetch_sub(1, Ordering::AcqRel);
+                write_status(&mut stream, "503 Service Unavailable");
+                continue;
+            }
+            let permit = InflightGuard(Arc::clone(&inflight));
             let gate = gate.clone();
             let observer = observer.clone();
             thread::spawn(move || {
+                let _permit = permit;
                 let _ = handle_channel(stream, exit_addr, &gate, observer.as_ref());
             });
         }
@@ -429,7 +474,12 @@ fn handle_channel(
 
     // sign-then-serve: only NOW (after co-signing) do we open the byte tunnel.
     let upstream = match TcpStream::connect(exit_addr) {
-        Ok(c) => c,
+        Ok(c) => {
+            // S3: bound the upstream too, so a stalled exit can't pin this tunnel.
+            let _ = c.set_read_timeout(Some(SOCKET_TIMEOUT));
+            let _ = c.set_write_timeout(Some(SOCKET_TIMEOUT));
+            c
+        }
         Err(_) => {
             write_status(&mut stream, "502 Bad Gateway");
             return Ok(());

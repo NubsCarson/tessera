@@ -18,13 +18,36 @@
 
 use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use tessera_origin::{Decision, OriginGuard, PRESENTATION_HEADER};
 
 pub mod shaping;
 pub use shaping::{ShapingConfig, ShapingDecision, VolumeShaper};
+
+/// Hard cap on simultaneously-handled connections (S3 DoS bound). This is a
+/// *transport* backstop distinct from the [`VolumeShaper`]'s *soft* per-egress
+/// concurrency pacing: the shaper paces a paying user's tunnels to look human,
+/// whereas this prevents an unauthenticated flood from spawning unbounded OS
+/// threads (each ~MiBs of stack) and exhausting the node. Excess connections get
+/// `503` on the accept thread and are dropped *before* a worker is spawned.
+const MAX_INFLIGHT: usize = 1024;
+
+/// Read/write timeout on a tunnel socket (S3): a slow-roll / idle peer cannot pin
+/// a worker thread + fd forever — the blocking copy/parse loops unblock on it.
+const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// RAII permit for the [`MAX_INFLIGHT`] concurrency cap: decrements the active
+/// counter when the handler thread returns, on every path.
+struct InflightGuard(Arc<AtomicUsize>);
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// A per-egress-IP human-volume shaper shared across the proxy's connection
 /// threads. See [`shaping`].
@@ -97,14 +120,29 @@ pub fn serve_observed_shaped(
     observer: Option<ExitObserver>,
     shaper: Option<SharedShaper>,
 ) -> thread::JoinHandle<()> {
+    let inflight = Arc::new(AtomicUsize::new(0));
     thread::spawn(move || {
         for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
+            let Ok(mut stream) = stream else { continue };
+            // Idle/slow-roll defense: a peer that never finishes the request (or a
+            // stalled tunnel) unblocks on these timeouts instead of pinning the
+            // worker forever. Inherited by the try_clone'd fd in the handler.
+            let _ = stream.set_read_timeout(Some(SOCKET_TIMEOUT));
+            let _ = stream.set_write_timeout(Some(SOCKET_TIMEOUT));
+            // Hard concurrency cap: reject (and drop) on the accept thread BEFORE
+            // spawning a worker, so a flood can't exhaust threads/memory.
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+                inflight.fetch_sub(1, Ordering::AcqRel);
+                write_status(&mut stream, "503 Service Unavailable");
+                continue;
+            }
+            let permit = InflightGuard(Arc::clone(&inflight));
             let guard = Arc::clone(&guard);
             let upstream = upstream.clone();
             let observer = observer.clone();
             let shaper = shaper.clone();
             thread::spawn(move || {
+                let _permit = permit; // released when this handler thread returns
                 let _ = handle_connect(
                     stream,
                     &guard,

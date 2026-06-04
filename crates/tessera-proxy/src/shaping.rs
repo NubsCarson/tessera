@@ -61,6 +61,13 @@ pub struct ShapingConfig {
     /// Ceiling on the throttle delay — keeps it *graceful* (a bounded pause),
     /// never an effective block. Jitter is added on top of this.
     pub max_throttle: Duration,
+    /// Hard cap on the number of distinct destinations retained in the window
+    /// (S3 DoS bound). The window-based prune only shrinks `seen` once entries
+    /// *age out*, so a burst of distinct hosts within one window could otherwise
+    /// grow it without bound; at this size the oldest entry is evicted to make
+    /// room. Must be `>= max_distinct_destinations` so the throttle envelope still
+    /// functions (the cap is a memory backstop, well above the human envelope).
+    pub max_distinct_destinations_stored: usize,
 }
 
 impl Default for ShapingConfig {
@@ -72,6 +79,7 @@ impl Default for ShapingConfig {
             jitter: Duration::from_millis(150),
             throttle_step: Duration::from_millis(250),
             max_throttle: Duration::from_secs(10),
+            max_distinct_destinations_stored: 10_000, // memory backstop ≫ envelope
         }
     }
 }
@@ -172,6 +180,19 @@ impl VolumeShaper {
         let delay = throttle + self.next_jitter();
 
         // Record the visit (new or refreshed) — the request always proceeds.
+        // Memory backstop (S3): if adding a NEW host would exceed the hard store
+        // cap, evict the oldest-timestamp entry first, so a within-window flood of
+        // distinct destinations can't grow `seen` without bound between prunes.
+        if !sticky && self.seen.len() >= self.cfg.max_distinct_destinations_stored {
+            if let Some(oldest) = self
+                .seen
+                .iter()
+                .min_by_key(|(_, &ts)| ts)
+                .map(|(k, _)| k.clone())
+            {
+                self.seen.remove(&oldest);
+            }
+        }
         self.seen.insert(dest_host.to_string(), now_ms);
 
         ShapingDecision {
@@ -238,6 +259,7 @@ mod tests {
             jitter: Duration::ZERO, // isolate throttle behavior
             throttle_step: Duration::from_millis(100),
             max_throttle: Duration::from_secs(5),
+            max_distinct_destinations_stored: 100_000, // effectively unbounded for these tests
         }
     }
 
@@ -382,5 +404,26 @@ mod tests {
         assert_eq!(sh.in_flight(), 0);
         let cfg = ShapingConfig::default();
         assert!(cfg.max_distinct_destinations > 0 && cfg.max_concurrency > 0);
+        assert!(cfg.max_distinct_destinations_stored >= cfg.max_distinct_destinations);
+    }
+
+    /// S3 memory backstop: a within-window flood of distinct destinations never
+    /// grows `seen` past the hard store cap (oldest entries are evicted), even
+    /// though the window itself hasn't expired any of them.
+    #[test]
+    fn distinct_destination_flood_is_memory_bounded() {
+        let mut cfg = cfg_no_jitter(10, 10_000);
+        cfg.max_distinct_destinations_stored = 50; // hard cap well above the envelope
+        let mut sh = VolumeShaper::new(cfg, 1);
+        // Same instant (nothing ages out of the window) → only the cap can bound it.
+        for i in 0..5000 {
+            sh.decide(&format!("flood-{i}.example"), 0);
+            assert!(
+                sh.distinct_destinations() <= 50,
+                "seen must never exceed the hard store cap (was {})",
+                sh.distinct_destinations()
+            );
+        }
+        assert_eq!(sh.distinct_destinations(), 50, "cap is reached and held");
     }
 }

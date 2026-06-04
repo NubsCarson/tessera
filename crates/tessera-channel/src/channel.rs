@@ -15,6 +15,14 @@ use crate::relay::{spend_message, RelayRequest};
 use crate::state::{ChanId, ChannelState, Salt, SignedState};
 use crate::ChannelError;
 
+/// Per-epoch, per-channel cap on accepted freshness nonces (S3 memory bound).
+/// Mirrors the circuit's `nf_rate` `idx ∈ [0, 1024)` per-epoch budget
+/// (`docs/EPOCH_AUTHORITY.md`): a relayer accepts at most this many distinct
+/// nonces for a channel before the epoch must advance, so the `seen_nonces` set
+/// cannot grow without bound and an attacker cannot exhaust relayer memory by
+/// flooding distinct nonces. Resets on [`RelayerChannel::advance_epoch`].
+const MAX_NONCES_PER_EPOCH: usize = 1024;
+
 /// Shared, public channel parameters both sides agree on at open: the channel
 /// id, the funding balance `B0`, the salt, and both public keys.
 ///
@@ -301,6 +309,14 @@ impl RelayerChannel {
             return Err(ChannelError::StaleFreshness);
         }
 
+        // (2b) per-epoch budget: bound `seen_nonces` so a flood of distinct
+        // nonces can't exhaust relayer memory. The nonce here is new (the
+        // contains() check above passed), so a full set means the budget for this
+        // epoch is spent — the client must wait for the relayer to advance it.
+        if self.seen_nonces.len() >= MAX_NONCES_PER_EPOCH {
+            return Err(ChannelError::EpochBudgetExhausted);
+        }
+
         // (3) the user must have signed this exact state (durable unit of truth).
         if !proposed.user_sig_valid(&self.params.user_pk) {
             return Err(ChannelError::BadSignature);
@@ -334,5 +350,23 @@ impl RelayerChannel {
     /// after actually forwarding. See [`RelayAck::issue`](crate::RelayAck::issue).
     pub fn issue_relay_ack(&self, state: &ChannelState) -> crate::RelayAck {
         crate::RelayAck::issue(&self.keys, state.commitment())
+    }
+
+    /// Advance the relayer's freshness epoch in place, resetting the per-epoch
+    /// replay budget (clears `seen_nonces`) while **preserving** the channel's
+    /// monotone balance cursor (`latest`) — so a balance rollback across the
+    /// boundary is still rejected by the successor check. This is the in-place
+    /// epoch authority of `docs/EPOCH_AUTHORITY.md`: the relayer advances on its
+    /// own schedule and re-advertises the new epoch in subsequent challenges. It
+    /// also bounds memory — `seen_nonces` is freed each epoch rather than growing
+    /// for the channel's lifetime. Rejects a non-increasing `new_epoch`.
+    pub fn advance_epoch(&mut self, new_epoch: u64) -> Result<(), ChannelError> {
+        if new_epoch <= self.epoch {
+            return Err(ChannelError::StaleFreshness);
+        }
+        self.epoch = new_epoch;
+        self.seen_nonces.clear();
+        self.seen_nonces.shrink_to_fit();
+        Ok(())
     }
 }
