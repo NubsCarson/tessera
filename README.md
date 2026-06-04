@@ -31,6 +31,19 @@ a `tessera-client`, and makes **real HTTP requests**: no credential → `403`
 unlinkable tag each time; over the limit → the client refuses; a replay → `403`
 double-spend. The origin never reads the source IP. See [`DEMO.md`](./DEMO.md).
 
+### Use Claude (or any HTTPS site) through Tor, gated on a credential
+
+```sh
+cargo run -p tessera-proxy            # or: -- --tor  (tunnel via Tor at :9050)
+```
+
+`tessera-proxy` is a forward **`CONNECT`** proxy that admits a request only if it
+carries a valid Tessera credential — **never on its IP** — then tunnels it to any
+HTTPS endpoint (your TLS stays end-to-end; the proxy never sees plaintext),
+optionally over Tor. Point a normal client at it; no credential → `407`. It
+prints a ready-to-run `curl` for the Anthropic API. This is the original goal,
+end to end: anonymous, accountable, IP-blind access to Claude over Tor.
+
 ## The problem it attacks
 
 The web decides whether to trust you by your **IP address**. Tor's exit relays
@@ -73,6 +86,7 @@ vectors:
 | Fiat-Shamir + Sigma proofs | ✅ verifier proven against authoritative Sigma vectors; prover exercised via end-to-end round-trip † |
 | Full ARC API (issue / present / verify) + range proof + double-spend store | ✅ end-to-end round-trip proven |
 | `tessera-issuer` — proof-of-work issuance gate ("earn your budget") | ✅ cost-gate (not strong Sybil resistance — see threat model) |
+| `tessera-proxy` — credential-gated CONNECT proxy (use Claude/any HTTPS through Tor) | ✅ admit on credential not IP; TLS tunneled end-to-end |
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
 | Hardening — CT fix, fuzzing, benches, threat model | ✅ internal audit applied ([`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md)); **not** third-party audited |

@@ -25,6 +25,9 @@ The pre-1.0 development line. **Research-grade and unaudited** — see
 - `tessera-issuer` — a **proof-of-work issuance gate** (hashcash challenge /
   solve / verify + one-time `ChallengeStore`). A cost gate, **not** strong Sybil
   resistance.
+- `tessera-proxy` — a credential-gated forward `CONNECT` proxy: admit on a
+  Tessera credential (never the IP) and tunnel TLS **end-to-end** to any HTTPS
+  site (e.g. the Anthropic API), optionally over Tor. "Use Claude through Tor."
 - `tessera-demo` — a real std-only HTTP origin + client; a narrated terminal
   walkthrough, a `--serve` browser hub (auto-opens; `/enter` mints fresh
   credentials), and a `--tor` onion-service path.
