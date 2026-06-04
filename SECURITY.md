@@ -39,9 +39,11 @@ please allow reasonable time for a fix before any public disclosure.
     forge a co-signature / proof-of-relay receipt.
   - `contracts/` (`ChannelRegistry.sol`, `RDecVerifier.sol`) — any way to
     **drain escrow**, settle at a wrong balance, slash an honest party, bypass
-    the dispute window, reenter a fund path, or accept an invalid Groth16 proof.
-    *(Known gap, already disclosed: the relayer currently posts no separate
-    on-chain bond — see `docs/DESIGN.md`; tracked, not a finding.)*
+    the dispute window, reenter a fund path, accept an invalid Groth16 proof, or
+    abuse the relayer bond (`fundRelayerBond` / `slashRelayerEquivocation`): e.g.
+    strand or double-claim the bond, fabricate relayer equivocation against an
+    honest relayer, or recover the bond on a path where it should be slashed. The
+    bond's incentive model is `docs/ECONOMICS.md`.
   - `circuits/R_dec.circom` — any way the decrement circuit admits an unsound
     witness (e.g. a wrap-around `cost`, an unbound `chan_id`/`K_chan`, a missing
     range check). The trusted setup is **TEST-ONLY** (forgeable by design until a
