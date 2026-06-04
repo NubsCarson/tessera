@@ -41,7 +41,7 @@ pub struct ClientSecrets {
 }
 
 /// A credential request sent to the server (spec §4.2.1).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CredentialRequest {
     pub m1_enc: ProjectivePoint,
     pub m2_enc: ProjectivePoint,

@@ -1,0 +1,18 @@
+[package]
+name = "tessera-origin"
+version = "0.0.1"
+description = "Server-side ARC presentation guard: admit anonymous requests on a credential, not on IP."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tessera-arc = { path = "../tessera-arc" }
+p256.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tessera-client = { path = "../tessera-client" }
+rand_core.workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "tessera-client"
+version = "0.0.1"
+description = "Client-side ARC credential holder: attaches an unlinkable presentation to each request."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tessera-arc = { path = "../tessera-arc" }
+rand_core.workspace = true
+hex.workspace = true
