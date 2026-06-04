@@ -103,10 +103,13 @@ and CI-gated.** No overclaiming.
 An adversarial review panel triaged the remaining ideas. These are intentionally
 **not** done pre-1.0, with reasons — so their absence is a decision, not a gap:
 
-- **Proof-of-work / payment issuance gate** ("earn your budget") — the real
-  Sybil lever (THREAT_MODEL §4.3/§6.3), but a naive PoW gives weak Sybil
-  resistance and it's a genuine protocol-design effort, not a quick win. Future
-  research, not a half-baked add.
+- **Proof-of-work issuance gate** — ✅ **shipped** as `tessera-issuer`
+  (hashcash-style challenge/solve/verify + a one-time `ChallengeStore`, wired
+  into the narrated demo). It makes minting a credential *cost CPU*, throttling
+  bulk/Sybil minting. Honestly scoped: it is a **cost knob, not strong Sybil
+  resistance** (enough compute still scales; unfair to low-power clients) — for
+  per-human guarantees, gate on payment / attestation / a one-per-person
+  credential instead. *That* stronger gate remains future research.
 - **`axum`/`tower` middleware** — valuable for adoption but pulls a heavy async
   dependency tree; belongs behind an optional feature, post-1.0. The guard is
   already framework-agnostic.
