@@ -158,6 +158,42 @@ contract RDecVerifierTest is Test {
         assertTrue(status == ChannelRegistry.Status.Closed, "channel must be Closed");
     }
 
+    /// (4b) The ZK close path also returns the relayer's bond (M1): the relayer
+    ///      co-signed, so it was honest — escrow re-mints privately and the bond
+    ///      comes back to the relayer, revealing nothing about the hidden balance.
+    function testCooperativeCloseZkReturnsRelayerBond() public {
+        bytes32 channelId = keccak256("zk-channel-bonded");
+        address relayer = vm.addr(RELAYER_PK);
+        address reMintTo = address(0xBEEF);
+        uint256 b0 = 1000;
+        uint256 bond = 777;
+
+        (uint8 rv, bytes32 rr, bytes32 rs) = vm.sign(RELAYER_PK, ZK_DIGEST);
+
+        vm.deal(address(this), b0);
+        reg.open{value: b0}(channelId, USER_ADDR, relayer, block.timestamp + 1 days);
+
+        // Relayer funds its bond.
+        vm.deal(relayer, bond);
+        vm.prank(relayer);
+        reg.fundRelayerBond{value: bond}(channelId);
+
+        uint256 reMintBefore = reMintTo.balance;
+        uint256 relayerBefore = relayer.balance;
+        reg.cooperativeCloseZK(
+            channelId,
+            _pub(),
+            ChannelRegistry.Proof({a: _a(), b: _b(), c: _c()}),
+            ChannelRegistry.RecSig({r: USER_R, s: USER_S, v: USER_V}),
+            ChannelRegistry.RecSig({r: rr, s: rs, v: rv}),
+            reMintTo
+        );
+
+        assertEq(reMintTo.balance - reMintBefore, b0, "escrow re-minted privately");
+        assertEq(relayer.balance - relayerBefore, bond, "relayer bond returned");
+        assertEq(address(reg).balance, 0, "nothing stranded");
+    }
+
     /// (5) A tampered public signal (wrong C_next) must make the proof fail —
     ///     guards against a verifier that accepts arbitrary inputs.
     function testTamperedPublicSignalFails() public view {

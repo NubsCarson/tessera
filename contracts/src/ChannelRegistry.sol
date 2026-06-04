@@ -86,8 +86,13 @@ contract ChannelRegistry {
     struct Channel {
         address user; // the payer; equivocation is attributed to this address
         address relayer; // the single payee / counterparty
-        uint128 b0; // funded escrow B0 (== msg.value at open)
-        uint128 bond; // slashable user stake (this model: == B0)
+        uint128 b0; // funded escrow B0 (== msg.value at open). Also the USER's
+            // slashable stake: provable user equivocation forfeits it to the relayer.
+        uint128 relayerBond; // the RELAYER's separately-funded slashable collateral.
+            // 0 until the relayer calls {fundRelayerBond}. Returned to the relayer on
+            // every honest close; forfeited to the user on provable relayer
+            // equivocation ({slashRelayerEquivocation}). This is the on-chain teeth
+            // behind DESIGN calling the relayer "bonded" — see {fundRelayerBond}.
         uint64 timeout; // refund-on-timeout deadline (unix seconds)
         Status status;
         // dispute bookkeeping (only meaningful while Disputing):
@@ -135,6 +140,11 @@ contract ChannelRegistry {
         bytes32 indexed channelId, uint64 seq, uint256 relayerPayout, uint256 userRefund
     );
     event Slashed(bytes32 indexed channelId, uint64 seq, uint256 toRelayer);
+    /// The relayer funded (or topped up) its slashable collateral for a channel.
+    event RelayerBonded(bytes32 indexed channelId, address relayer, uint256 amount, uint256 totalBond);
+    /// Provable RELAYER equivocation: the relayer's bond AND the full escrow are
+    /// awarded to the user (the relayer forfeits everything and is made to pay).
+    event RelayerSlashed(bytes32 indexed channelId, uint64 seq, uint256 toUser);
     event RefundedOnTimeout(bytes32 indexed channelId, uint256 userRefund);
     /// A ZK cooperative close: NO cleartext balance is logged — only the opaque
     /// Poseidon settlement commitment `cNext` and the re-mint recipient. The
@@ -242,10 +252,15 @@ contract ChannelRegistry {
 
     /// @notice Open a channel, escrowing `B0 = msg.value`.
     /// @dev    Stores the genesis parameters, both participant keys (addresses),
-    ///         the refund-on-timeout deadline, and a user bond. In this model the
-    ///         escrow doubles as the slashable bond (`bond == B0`): the user's
-    ///         at-risk stake IS its escrowed balance, so provable equivocation
-    ///         forfeits it to the counterparty (see {slashEquivocation}).
+    ///         and the refund-on-timeout deadline. The escrowed `B0` is also the
+    ///         USER's slashable stake: provable user equivocation forfeits it to
+    ///         the counterparty (see {slashEquivocation}). The RELAYER's stake is
+    ///         separate and is funded after open via {fundRelayerBond} — it starts
+    ///         at 0 here. A client SHOULD read `channels[id].relayerBond` and refuse
+    ///         to route value through a channel whose relayer is under-bonded for
+    ///         the amount it intends to spend; the court holds and adjudicates the
+    ///         bond but does not (and cannot) mandate a minimum — that sizing is a
+    ///         client/economic policy (see `docs/ECONOMICS.md`).
     /// @param  channelId opaque 32-byte channel id (pool-derived in the full design)
     /// @param  user      the payer address (equivocation is attributed here)
     /// @param  relayer   the single payee / counterparty
@@ -267,8 +282,7 @@ contract ChannelRegistry {
             relayer: relayer,
             // forge-lint: disable-next-line(unsafe-typecast)
             b0: uint128(msg.value),
-            // forge-lint: disable-next-line(unsafe-typecast)
-            bond: uint128(msg.value),
+            relayerBond: 0, // funded separately by the relayer via {fundRelayerBond}
             // forge-lint: disable-next-line(unsafe-typecast)
             timeout: uint64(timeout),
             status: Status.Open,
@@ -279,6 +293,39 @@ contract ChannelRegistry {
 
         // forge-lint: disable-next-line(unsafe-typecast)
         emit Opened(channelId, user, relayer, msg.value, uint64(timeout));
+    }
+
+    // ---------------------------------------------------------------------
+    // fundRelayerBond — the relayer's slashable on-chain collateral
+    // ---------------------------------------------------------------------
+
+    /// @notice Deposit (or top up) the relayer's slashable bond for a channel.
+    ///         Callable only by the channel's registered relayer, only while Open.
+    /// @dev    This is the on-chain teeth behind DESIGN's "bonded relayer": the
+    ///         deposit is the relayer's OWN funds, held separately from the user
+    ///         escrow `b0`. It is returned to the relayer on every honest terminal
+    ///         path (cooperative/dispute close, ZK close, timeout refund, and even a
+    ///         user-equivocation slash — the relayer was not at fault there), and is
+    ///         forfeited to the user ONLY on provable relayer equivocation
+    ///         ({slashRelayerEquivocation}).
+    ///
+    ///         Liveness is deliberately NOT slashable: a relayer that simply goes
+    ///         dark cannot be proven faulty on-chain (you cannot prove a missing
+    ///         relay), so {refundOnTimeout} returns the user's escrow AND the
+    ///         relayer's bond — the relayer's punishment for going dark is losing
+    ///         future fees, not its collateral. Only cryptographically-provable
+    ///         equivocation burns the bond.
+    /// @param  channelId the channel to bond (must be Open; caller must be relayer)
+    function fundRelayerBond(bytes32 channelId) external payable {
+        Channel storage ch = channels[channelId];
+        require(ch.status == Status.Open, "NOT_OPEN");
+        require(msg.sender == ch.relayer, "NOT_RELAYER");
+        require(msg.value > 0, "ZERO_BOND");
+        uint256 newTotal = uint256(ch.relayerBond) + msg.value;
+        require(newTotal <= type(uint128).max, "BOND_TOO_LARGE");
+        // forge-lint: disable-next-line(unsafe-typecast)
+        ch.relayerBond = uint128(newTotal);
+        emit RelayerBonded(channelId, msg.sender, msg.value, newTotal);
     }
 
     // ---------------------------------------------------------------------
@@ -312,6 +359,8 @@ contract ChannelRegistry {
 
         uint256 relayerPayout = uint256(ch.b0) - uint256(state.balance);
         uint256 userRefund = uint256(state.balance);
+        // The relayer was honest (it co-signed this close) → return its bond.
+        uint256 relayerBond = uint256(ch.relayerBond);
         address user = ch.user;
         address relayer = ch.relayer;
 
@@ -319,7 +368,7 @@ contract ChannelRegistry {
         ch.status = Status.Closed;
 
         // Interactions.
-        _pay(relayer, relayerPayout);
+        _pay(relayer, relayerPayout + relayerBond);
         _pay(user, userRefund);
 
         emit CooperativeClosed(state.chanId, state.seq, relayerPayout, userRefund);
@@ -406,12 +455,20 @@ contract ChannelRegistry {
             "BAD_RELAYER_SIG"
         );
 
+        // The relayer co-signed this ZK close → it was honest; return its bond.
+        uint256 relayerBond = uint256(ch.relayerBond);
+        address relayer = ch.relayer;
+
         // Effects: terminal before value transfer.
         ch.status = Status.Closed;
 
-        // Interactions: move the full escrow to the private re-mint target. The
-        // split is settled privately downstream (pool); nothing leaks on-chain.
+        // Interactions: move the full escrow to the private re-mint target (the
+        // split is settled privately downstream in the pool; nothing leaks
+        // on-chain) and return the relayer's own bond to it directly. The bond is
+        // the relayer's collateral, not part of the hidden balance, so returning
+        // it on-chain reveals nothing about the user's spending.
         _pay(reMintTo, uint256(ch.b0));
+        _pay(relayer, relayerBond);
 
         emit CooperativeClosedZK(channelId, cNext, reMintTo);
     }
@@ -485,13 +542,17 @@ contract ChannelRegistry {
 
         uint256 relayerPayout = uint256(ch.b0) - uint256(ch.bestBalance);
         uint256 userRefund = uint256(ch.bestBalance);
+        // Settling at the highest doubly-signed state is the honest dispute
+        // outcome; the relayer's bond is not at stake here → return it. (Relayer
+        // equivocation is punished by {slashRelayerEquivocation}, a separate path.)
+        uint256 relayerBond = uint256(ch.relayerBond);
         address user = ch.user;
         address relayer = ch.relayer;
         uint64 seq = ch.bestSeq;
 
         ch.status = Status.Closed;
 
-        _pay(relayer, relayerPayout);
+        _pay(relayer, relayerPayout + relayerBond);
         _pay(user, userRefund);
 
         emit DisputeSettled(channelId, seq, relayerPayout, userRefund);
@@ -533,7 +594,9 @@ contract ChannelRegistry {
         require(recoverSigner(stateA, userRA, userSA, userVA) == ch.user, "BAD_USER_SIG_A");
         require(recoverSigner(stateB, userRB, userSB, userVB) == ch.user, "BAD_USER_SIG_B");
 
-        uint256 toRelayer = uint256(ch.b0); // escrow doubles as the bond here
+        // The user equivocated → forfeit the user's escrow to the relayer. The
+        // relayer was not at fault, so its own bond is returned to it as well.
+        uint256 toRelayer = uint256(ch.b0) + uint256(ch.relayerBond);
         address relayer = ch.relayer;
         uint64 seq = stateA.seq;
 
@@ -545,6 +608,73 @@ contract ChannelRegistry {
     }
 
     // ---------------------------------------------------------------------
+    // slashRelayerEquivocation — the symmetric RELAYER-fault path (M1 keystone)
+    // ---------------------------------------------------------------------
+
+    /// @notice Slash provable RELAYER equivocation: two states at the SAME seq with
+    ///         DIFFERENT commitments, both carrying the RELAYER's valid secp256k1
+    ///         signature. An honest relayer co-signs exactly one state per seq (it
+    ///         counter-signs the user's monotone decrement once), so two distinct
+    ///         relayer-signed states at one seq are an attributable protocol
+    ///         violation — the symmetric mirror of {slashEquivocation}.
+    ///
+    /// @dev    This is what makes the relayer genuinely *bonded*: the relayer
+    ///         forfeits its entire on-chain stake. Because the relayer cheated, the
+    ///         user is made whole on BOTH sides — it recovers the full escrow `b0`
+    ///         AND is awarded the relayer's bond. (We deliberately do not try to
+    ///         honour the relayer's partial earnings: under equivocation the "true"
+    ///         balance is exactly what the relayer made ambiguous, so the safe,
+    ///         maximally-deterrent rule is relayer-gets-nothing / user-made-whole.)
+    ///
+    ///         Only the relayer's signatures are needed — the fault is provable from
+    ///         the relayer's key alone. A malicious user cannot fabricate this: it
+    ///         cannot produce the relayer's signature, so it can only ever present
+    ///         states the relayer actually signed. The signed digest folds in
+    ///         `chanId` (via {commitment}), so a relayer signature from another
+    ///         channel cannot be replayed here. CEI + nonReentrant.
+    /// @param  stateA / stateB the two conflicting states (same chanId, same seq)
+    /// @param  relayerRA/SA/VA the relayer's signature over `stateA`
+    /// @param  relayerRB/SB/VB the relayer's signature over `stateB`
+    function slashRelayerEquivocation(
+        State calldata stateA,
+        State calldata stateB,
+        bytes32 relayerRA,
+        bytes32 relayerSA,
+        uint8 relayerVA,
+        bytes32 relayerRB,
+        bytes32 relayerSB,
+        uint8 relayerVB
+    ) external nonReentrant {
+        require(stateA.chanId == stateB.chanId, "DIFFERENT_CHANNEL");
+        Channel storage ch = channels[stateA.chanId];
+        require(ch.status == Status.Open || ch.status == Status.Disputing, "NOT_SLASHABLE");
+
+        require(stateA.seq == stateB.seq, "SEQ_MISMATCH");
+        bytes32 cA = commitment(stateA);
+        bytes32 cB = commitment(stateB);
+        require(cA != cB, "SAME_COMMITMENT"); // must actually conflict
+
+        // Both conflicting states must bear the RELAYER's valid signature.
+        require(
+            recoverSigner(stateA, relayerRA, relayerSA, relayerVA) == ch.relayer, "BAD_RELAYER_SIG_A"
+        );
+        require(
+            recoverSigner(stateB, relayerRB, relayerSB, relayerVB) == ch.relayer, "BAD_RELAYER_SIG_B"
+        );
+
+        // Relayer cheated → user recovers the full escrow AND takes the bond.
+        uint256 toUser = uint256(ch.b0) + uint256(ch.relayerBond);
+        address user = ch.user;
+        uint64 seq = stateA.seq;
+
+        ch.status = Status.Closed;
+
+        _pay(user, toUser);
+
+        emit RelayerSlashed(stateA.chanId, seq, toUser);
+    }
+
+    // ---------------------------------------------------------------------
     // refundOnTimeout
     // ---------------------------------------------------------------------
 
@@ -552,17 +682,23 @@ contract ChannelRegistry {
     ///         the full escrow B0. Mirrors `Verdict::RefundUser`. CEI + nonReentrant.
     /// @dev    Callable only while still `Open` (no cooperative/unilateral close
     ///         has happened). The refund branch is the payer-safety backstop.
+    ///         Going dark is NOT provable equivocation, so the relayer's bond is
+    ///         returned to it (not slashed) — see {fundRelayerBond}; the relayer's
+    ///         penalty for unresponsiveness is lost future fees, not its collateral.
     function refundOnTimeout(bytes32 channelId) external nonReentrant {
         Channel storage ch = channels[channelId];
         require(ch.status == Status.Open, "NOT_OPEN");
         require(block.timestamp >= ch.timeout, "BEFORE_TIMEOUT");
 
         uint256 userRefund = uint256(ch.b0);
+        uint256 relayerBond = uint256(ch.relayerBond);
         address user = ch.user;
+        address relayer = ch.relayer;
 
         ch.status = Status.Closed;
 
         _pay(user, userRefund);
+        _pay(relayer, relayerBond);
 
         emit RefundedOnTimeout(channelId, userRefund);
     }

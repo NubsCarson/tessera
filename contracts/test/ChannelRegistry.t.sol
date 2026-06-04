@@ -70,14 +70,14 @@ contract ChannelRegistryTest is Test {
             address u,
             address rl,
             uint128 b0,
-            uint128 bond,
+            uint128 relayerBond,
             uint64 timeout,
             ChannelRegistry.Status status,,,
         ) = reg.channels(CHAN);
         assertEq(u, user, "user");
         assertEq(rl, relayer, "relayer");
         assertEq(uint256(b0), B0, "b0");
-        assertEq(uint256(bond), B0, "bond == b0");
+        assertEq(uint256(relayerBond), 0, "relayer bond starts unfunded");
         assertTrue(timeout > block.timestamp, "timeout future");
         assertEq(uint256(uint8(status)), uint256(uint8(ChannelRegistry.Status.Open)), "open");
         assertEq(address(reg).balance, B0, "escrow held");
@@ -191,8 +191,9 @@ contract ChannelRegistryTest is Test {
         uint256 r0 = relayer.balance;
         reg.slashEquivocation(a, b, ar, as_, av, br, bs, bv);
 
-        // The user's bond (== B0) is forfeited to the relayer.
-        assertEq(relayer.balance - r0, B0, "relayer gets slashed bond");
+        // The user's escrow (== B0) is forfeited to the relayer (no relayer bond
+        // funded here → relayer receives exactly B0).
+        assertEq(relayer.balance - r0, B0, "relayer gets forfeited user escrow");
         assertEq(address(reg).balance, 0, "escrow drained on slash");
     }
 
@@ -258,5 +259,178 @@ contract ChannelRegistryTest is Test {
         // Looked up under `other`, which was never opened → NOT_OPEN.
         vm.expectRevert(bytes("NOT_OPEN"));
         reg.cooperativeClose(s, ur, us, uv, rr, rs, rv);
+    }
+
+    // ----- M1: relayer on-chain bond + slashing ---------------------------
+
+    uint256 constant BOND = 2 ether;
+
+    /// Fund the channel's relayer bond as the relayer.
+    function _fundBond(uint256 amount) internal {
+        vm.deal(relayer, amount);
+        vm.prank(relayer);
+        reg.fundRelayerBond{value: amount}(CHAN);
+    }
+
+    // Getter order: user(0) relayer(1) b0(2) relayerBond(3) timeout(4)
+    // status(5) bestSeq(6) bestBalance(7) challengeEnd(8). Capture index 3 only.
+    function _relayerBond(bytes32 id) internal view returns (uint128 rb) {
+        (,,, rb,,,,,) = reg.channels(id);
+    }
+
+    function testFundRelayerBondAccumulates() public {
+        _open();
+        _fundBond(BOND);
+        _fundBond(1 ether); // top-ups accumulate
+        assertEq(uint256(_relayerBond(CHAN)), BOND + 1 ether, "bond accrues");
+        assertEq(address(reg).balance, B0 + BOND + 1 ether, "contract holds escrow + bond");
+    }
+
+    function test_RevertWhen_NonRelayerFundsBond() public {
+        _open();
+        vm.deal(mallory, BOND);
+        vm.prank(mallory);
+        vm.expectRevert(bytes("NOT_RELAYER"));
+        reg.fundRelayerBond{value: BOND}(CHAN);
+    }
+
+    function test_RevertWhen_FundZeroBond() public {
+        _open();
+        vm.prank(relayer);
+        vm.expectRevert(bytes("ZERO_BOND"));
+        reg.fundRelayerBond{value: 0}(CHAN);
+    }
+
+    function test_RevertWhen_FundBondAfterClose() public {
+        _open();
+        vm.warp(block.timestamp + 7 days + 1);
+        reg.refundOnTimeout(CHAN); // channel now Closed
+        vm.deal(relayer, BOND);
+        vm.prank(relayer);
+        vm.expectRevert(bytes("NOT_OPEN"));
+        reg.fundRelayerBond{value: BOND}(CHAN);
+    }
+
+    /// Honest cooperative close returns the relayer's bond on top of its payout.
+    function testCooperativeCloseReturnsRelayerBond() public {
+        _open();
+        _fundBond(BOND);
+        ChannelRegistry.State memory s = _state(6 ether, 5); // relayer owed 4
+        (bytes32 ur, bytes32 us, uint8 uv) = _sign(USER_PK, s);
+        (bytes32 rr, bytes32 rs, uint8 rv) = _sign(RELAYER_PK, s);
+
+        uint256 u0 = user.balance;
+        uint256 r0 = relayer.balance;
+        reg.cooperativeClose(s, ur, us, uv, rr, rs, rv);
+
+        assertEq(relayer.balance - r0, 4 ether + BOND, "relayer paid B0-balance + bond back");
+        assertEq(user.balance - u0, 6 ether, "user refunded balance");
+        assertEq(address(reg).balance, 0, "escrow + bond fully distributed");
+    }
+
+    /// Honest dispute settlement returns the relayer's bond too.
+    function testSettleDisputeReturnsRelayerBond() public {
+        _open();
+        _fundBond(BOND);
+        ChannelRegistry.State memory s = _state(3 ether, 9); // relayer owed 7
+        (bytes32 ur, bytes32 us, uint8 uv) = _sign(USER_PK, s);
+        (bytes32 rr, bytes32 rs, uint8 rv) = _sign(RELAYER_PK, s);
+        reg.unilateralClose(s, ur, us, uv, rr, rs, rv);
+        vm.warp(block.timestamp + reg.CHALLENGE_WINDOW() + 1);
+
+        uint256 r0 = relayer.balance;
+        reg.settleDispute(CHAN);
+        assertEq(relayer.balance - r0, 7 ether + BOND, "relayer paid B0-best + bond back");
+        assertEq(address(reg).balance, 0, "nothing stranded");
+    }
+
+    /// On timeout the user gets the escrow AND the relayer gets its bond back
+    /// (going dark is not slashable — only provable equivocation burns the bond).
+    function testRefundOnTimeoutReturnsRelayerBondToRelayer() public {
+        _open();
+        _fundBond(BOND);
+        vm.warp(block.timestamp + 7 days + 1);
+        uint256 u0 = user.balance;
+        uint256 r0 = relayer.balance;
+        reg.refundOnTimeout(CHAN);
+        assertEq(user.balance - u0, B0, "user refunded full escrow");
+        assertEq(relayer.balance - r0, BOND, "relayer bond returned, not slashed");
+        assertEq(address(reg).balance, 0, "nothing stranded");
+    }
+
+    /// User equivocation: relayer takes the user's escrow AND its own bond back.
+    function testSlashEquivocationAlsoReturnsRelayerBond() public {
+        _open();
+        _fundBond(BOND);
+        ChannelRegistry.State memory a = _state(5 ether, 4);
+        ChannelRegistry.State memory b = _state(7 ether, 4);
+        (bytes32 ar, bytes32 as_, uint8 av) = _sign(USER_PK, a);
+        (bytes32 br, bytes32 bs, uint8 bv) = _sign(USER_PK, b);
+
+        uint256 r0 = relayer.balance;
+        reg.slashEquivocation(a, b, ar, as_, av, br, bs, bv);
+        assertEq(relayer.balance - r0, B0 + BOND, "relayer gets escrow + own bond");
+        assertEq(address(reg).balance, 0, "nothing stranded");
+    }
+
+    /// THE M1 KEYSTONE: provable relayer equivocation forfeits the relayer's bond
+    /// AND the full escrow to the user; the relayer receives nothing.
+    function testSlashRelayerEquivocationPaysUserEscrowPlusBond() public {
+        _open();
+        _fundBond(BOND);
+        // Two DIFFERENT states at the SAME seq, both validly signed by the RELAYER.
+        ChannelRegistry.State memory a = _state(5 ether, 4);
+        ChannelRegistry.State memory b = _state(7 ether, 4);
+        (bytes32 ar, bytes32 as_, uint8 av) = _sign(RELAYER_PK, a);
+        (bytes32 br, bytes32 bs, uint8 bv) = _sign(RELAYER_PK, b);
+
+        uint256 u0 = user.balance;
+        uint256 r0 = relayer.balance;
+        reg.slashRelayerEquivocation(a, b, ar, as_, av, br, bs, bv);
+
+        assertEq(user.balance - u0, B0 + BOND, "user made whole: full escrow + bond");
+        assertEq(relayer.balance, r0, "equivocating relayer gets nothing");
+        assertEq(address(reg).balance, 0, "escrow + bond fully paid out");
+
+        (,,,,, ChannelRegistry.Status status,,,) = reg.channels(CHAN);
+        assertEq(
+            uint256(uint8(status)), uint256(uint8(ChannelRegistry.Status.Closed)), "terminal"
+        );
+    }
+
+    /// Identical state at the same seq is not relayer equivocation.
+    function test_RevertWhen_SlashRelayerSameCommitment() public {
+        _open();
+        _fundBond(BOND);
+        ChannelRegistry.State memory a = _state(5 ether, 4);
+        (bytes32 ar, bytes32 as_, uint8 av) = _sign(RELAYER_PK, a);
+        vm.expectRevert(bytes("SAME_COMMITMENT"));
+        reg.slashRelayerEquivocation(a, a, ar, as_, av, ar, as_, av);
+    }
+
+    /// Different seqs is a linear advance, not relayer equivocation.
+    function test_RevertWhen_SlashRelayerDifferentSeq() public {
+        _open();
+        _fundBond(BOND);
+        ChannelRegistry.State memory a = _state(5 ether, 4);
+        ChannelRegistry.State memory b = _state(5 ether, 5);
+        (bytes32 ar, bytes32 as_, uint8 av) = _sign(RELAYER_PK, a);
+        (bytes32 br, bytes32 bs, uint8 bv) = _sign(RELAYER_PK, b);
+        vm.expectRevert(bytes("SEQ_MISMATCH"));
+        reg.slashRelayerEquivocation(a, b, ar, as_, av, br, bs, bv);
+    }
+
+    /// A conflicting pair where the second state is NOT the relayer's signature
+    /// (here it is the USER's) cannot slash the relayer — no fabrication possible.
+    function test_RevertWhen_SlashRelayerWithoutRelayerSig() public {
+        _open();
+        _fundBond(BOND);
+        ChannelRegistry.State memory a = _state(5 ether, 4);
+        ChannelRegistry.State memory b = _state(7 ether, 4);
+        (bytes32 ar, bytes32 as_, uint8 av) = _sign(RELAYER_PK, a);
+        // second sig is the USER's, not the relayer's → BAD_RELAYER_SIG_B.
+        (bytes32 br, bytes32 bs, uint8 bv) = _sign(USER_PK, b);
+        vm.expectRevert(bytes("BAD_RELAYER_SIG_B"));
+        reg.slashRelayerEquivocation(a, b, ar, as_, av, br, bs, bv);
     }
 }

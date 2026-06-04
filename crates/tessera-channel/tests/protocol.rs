@@ -179,6 +179,52 @@ fn equivocation_is_slashed() {
     }
 }
 
+/// 2b. The symmetric mirror of the on-chain `slashRelayerEquivocation`
+///     (`contracts/ChannelRegistry.sol`, the M1 keystone): an honest relayer can
+///     **never** co-sign two distinct states at the SAME seq, so it can never be
+///     slashed for equivocation. After co-signing seq N its cursor sits at N, and
+///     `is_successor_of` demands exactly N+1 — a second, conflicting seq-N state is
+///     rejected as a non-monotone transition. This is what makes the relayer's bond
+///     safe under honest operation: only a relayer that abandons this cursor
+///     discipline (e.g. a non-durable restart that re-signs an old seq) can produce
+///     the two-signatures-at-one-seq object the court slashes.
+#[test]
+fn relayer_refuses_to_cosign_two_states_at_same_seq() {
+    use tessera_channel::state::StateError;
+
+    let (uk, _rk, _chan, user, mut relayer) = setup();
+
+    // First seq-1 spend, co-signed → the relayer's cursor advances to seq 1.
+    let fresh_a = relayer.issue_challenge(0, b"req-a");
+    let branch_a = user.spend(30, &fresh_a).unwrap();
+    let cosig_a = relayer.verify_and_cosign(&branch_a, &fresh_a).unwrap();
+    assert_eq!(cosig_a.state.seq, 1);
+
+    // The user never accepted `cosig_a`, so its cursor is still at genesis; it
+    // forks a SECOND, conflicting seq-1 state with a different cost.
+    let fresh_b = relayer.issue_challenge(1, b"req-b");
+    let branch_b = user.spend(70, &fresh_b).unwrap();
+    assert_eq!(branch_b.signed.state.seq, 1, "still seq 1");
+    assert_ne!(
+        branch_a.signed.state.commitment(),
+        branch_b.signed.state.commitment(),
+        "genuinely conflicting states at one seq"
+    );
+    assert!(
+        branch_b.signed.user_sig_valid(&uk.verifying_key()),
+        "the second branch is validly user-signed — only the relayer's refusal stops it"
+    );
+
+    // The honest relayer REFUSES: its cursor is at seq 1, so a seq-1 successor is
+    // non-monotone. It therefore produces no second relayer signature at seq 1,
+    // and the on-chain `slashRelayerEquivocation` can never be triggered against it.
+    let err = relayer.verify_and_cosign(&branch_b, &fresh_b).unwrap_err();
+    assert!(
+        matches!(err, ChannelError::BadTransition(StateError::NonMonotoneSeq)),
+        "expected a non-monotone-seq refusal, got {err:?}"
+    );
+}
+
 /// 3. Relayer refusal / withholding: without a proof-of-relay receipt the relayer
 ///    cannot claim the unit; refund-on-timeout returns the user's last balance.
 #[test]
