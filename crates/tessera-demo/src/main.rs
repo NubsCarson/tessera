@@ -69,7 +69,7 @@ fn main() {
         PRESENT_CTX,
         LIMIT,
     ));
-    net::serve(listener, Arc::clone(&guard));
+    net::serve(listener, Arc::clone(&guard), None);
     ui::step(
         "Origin is live",
         &format!("listening on http://{addr}  ·  it will NEVER inspect your IP address"),
@@ -171,44 +171,52 @@ fn serve_mode() {
         PRESENT_CTX,
         SERVE_LIMIT,
     ));
-    net::serve(listener, Arc::clone(&guard));
 
-    // Mint a batch of single-use admit links.
+    // Mint a batch of single-use "enter with a credential" links.
     let mut client = TesseraClient::new(credential, PRESENT_CTX, SERVE_LIMIT);
-    let mut admit_links = Vec::new();
-    for _ in 0..SERVE_LIMIT {
-        if let Ok(header) = client.presentation_header(&mut rng) {
-            admit_links.push(format!("{base}/?t={header}"));
-        }
+    let mut buttons = String::new();
+    let mut n = 0;
+    while let Ok(header) = client.presentation_header(&mut rng) {
+        n += 1;
+        buttons.push_str(&format!(
+            "<a href='/?t={header}' style='display:inline-block;margin:.35rem;padding:.7rem 1.1rem;\
+             background:#9ece6a;color:#1a1b26;border-radius:9px;text-decoration:none;font-weight:600'>\
+             🔓 Enter with credential #{n}</a>"
+        ));
     }
+
+    // The origin serves this self-explanatory hub at `/`.
+    let landing = format!(
+        "<!doctype html><meta charset=utf-8><title>Tessera — live demo</title>\
+         <body style='font:17px/1.65 system-ui;max-width:46rem;margin:3rem auto;\
+         background:#24283b;color:#c0caf5;padding:0 1.25rem'>\
+         <h1 style='color:#7dcfff'>Tessera — live demo</h1>\
+         <p>This is a real web origin. It decides whether to let you in <b>purely from a \
+         cryptographic credential</b> — it never looks at your IP address. Click a button and \
+         watch the page.</p>\
+         <h3 style='color:#9ece6a'>1 · Enter carrying an anonymous credential</h3>\
+         <p style='color:#565f89'>Each button is one credential. You'll be admitted, and shown a \
+         tag the server can't link to any other visit. <b>Reload</b> an admitted page → blocked \
+         for double-spend (the rate limit).</p>\
+         <div>{buttons}</div>\
+         <h3 style='color:#f7768e;margin-top:2rem'>2 · Enter with no credential (what Tor gets today)</h3>\
+         <p><a href='/blocked' style='display:inline-block;padding:.7rem 1.1rem;background:#f7768e;\
+         color:#1a1b26;border-radius:9px;text-decoration:none;font-weight:600'>🔒 Enter with NO credential</a></p>\
+         <p style='color:#565f89;margin-top:2rem'>{n} credentials minted for this session. The whole \
+         point: a cooperating site can safely admit anonymous traffic, so it has no reason to block Tor.</p>\
+         </body>"
+    );
+
+    net::serve(listener, guard, Some(landing));
 
     ui::step(
-        "Origin is live — open it in your browser",
-        &format!("it never reads your IP · serving on {base}"),
+        "Origin is LIVE — your browser should open automatically",
+        &format!("serving on {base}  ·  it never reads your IP  ·  Ctrl-C here to stop"),
     );
-    ui::section("Open these");
-    println!("   BLOCKED (no credential — what Tor gets today):");
-    println!("     {base}/");
-    println!();
-    println!("   ADMITTED (each link carries one anonymous credential — single-use):");
-    for link in admit_links.iter().take(6) {
-        println!("     {link}");
-    }
-    ui::note(&format!(
-        "{} admit links minted; each works once (reload an admitted page and you'll see the \
-         403 double-spend — that's the rate limit working). Ctrl-C to stop.",
-        admit_links.len()
-    ));
-    println!();
-    println!("   Or from the terminal:");
-    if let Some(link) = admit_links.last() {
-        let header = link.rsplit("/?t=").next().unwrap_or("");
-        println!("     curl -i {base}/                                  # 403 blocked");
-        println!(
-            "     curl -i -H 'Tessera-Presentation: {}…' {base}/   # 200 admitted",
-            &header[..header.len().min(24)]
-        );
-    }
+    ui::note(&format!("If the browser didn't open, go to:  {base}"));
+
+    // Best-effort: open the user's browser straight to the hub page.
+    let _ = std::process::Command::new("xdg-open").arg(&base).spawn();
 
     // Keep the process (and the origin thread) alive.
     loop {
