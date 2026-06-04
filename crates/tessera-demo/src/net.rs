@@ -48,6 +48,11 @@ pub struct HttpResult {
     pub result: String,
 }
 
+/// A thread-safe source of fresh, hex-encoded presentations. `--serve` uses this
+/// so the `/enter` route always mints a *new* single-use credential (re-issuing
+/// as needed), instead of handing out fixed links that get spent and confuse.
+pub type Minter = Arc<dyn Fn() -> String + Send + Sync>;
+
 /// Start the origin HTTP server on an already-bound listener, in a background
 /// thread. Each connection is handled by [`OriginGuard::check`] on the
 /// `Tessera-Presentation` header — the source IP is never examined.
@@ -58,6 +63,7 @@ pub fn serve(
     listener: TcpListener,
     guard: Arc<OriginGuard>,
     landing: Option<String>,
+    minter: Option<Minter>,
 ) -> thread::JoinHandle<()> {
     let landing = Arc::new(landing);
     thread::spawn(move || {
@@ -65,13 +71,19 @@ pub fn serve(
             let Ok(stream) = stream else { continue };
             let guard = Arc::clone(&guard);
             let landing = Arc::clone(&landing);
+            let minter = minter.clone();
             // One thread per connection is plenty for a demo.
-            thread::spawn(move || handle_connection(stream, &guard, &landing));
+            thread::spawn(move || handle_connection(stream, &guard, &landing, minter.as_ref()));
         }
     })
 }
 
-fn handle_connection(mut stream: TcpStream, guard: &OriginGuard, landing: &Option<String>) {
+fn handle_connection(
+    mut stream: TcpStream,
+    guard: &OriginGuard,
+    landing: &Option<String>,
+    minter: Option<&Minter>,
+) {
     // Bound the request so a hostile client can't exhaust memory with endless headers.
     let mut reader = BufReader::new(
         match stream.try_clone() {
@@ -110,6 +122,23 @@ fn handle_connection(mut stream: TcpStream, guard: &OriginGuard, landing: &Optio
     }
 
     let target = request_line.split_whitespace().nth(1).unwrap_or("");
+    let path = target.split('?').next().unwrap_or("");
+
+    // `/enter`: mint a FRESH single-use credential and redirect to it, so every
+    // click admits (and the user only hits double-spend by deliberately reloading
+    // an already-admitted page).
+    if path == "/enter" {
+        if let Some(mint) = minter {
+            let t = mint();
+            let redirect = format!(
+                "HTTP/1.1 302 Found\r\nLocation: /?t={t}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            let _ = stream.write_all(redirect.as_bytes());
+            let _ = stream.flush();
+            return;
+        }
+    }
+
     let (status_line, result, body) =
         if presentation.is_none() && target == "/" && landing.is_some() {
             // The friendly hub page (no credential, bare root).

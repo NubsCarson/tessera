@@ -15,7 +15,7 @@ mod tor;
 mod ui;
 
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rand_core::OsRng;
 use tessera_arc::arc::{create_credential_response, Credential};
@@ -26,6 +26,9 @@ use tessera_origin::OriginGuard;
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
 const PRESENT_CTX: &[u8] = b"tessera://origin.demo/v1";
 const LIMIT: u64 = 3;
+/// Per-credential presentation budget in `--serve` mode (the minter re-issues
+/// when it runs out, so this is just how often a fresh credential is minted).
+const SERVE_LIMIT: u64 = 1000;
 
 fn issue_credential(sk: &ServerPrivateKey, pk: &ServerPublicKey, rng: &mut OsRng) -> Credential {
     let (pending, request) = begin_issuance(REQUEST_CTX, *pk, rng);
@@ -69,7 +72,7 @@ fn main() {
         PRESENT_CTX,
         LIMIT,
     ));
-    net::serve(listener, Arc::clone(&guard), None);
+    net::serve(listener, Arc::clone(&guard), None, None);
     ui::step(
         "Origin is live",
         &format!("listening on http://{addr}  ·  it will NEVER inspect your IP address"),
@@ -147,15 +150,14 @@ fn main() {
 }
 
 /// `--serve`: stand up the guarded origin and leave it running so you can hit it
-/// from a browser. Prints the blocked URL plus a batch of single-use "admit"
-/// links (credential carried in a `?t=` query param for browser convenience).
+/// from a browser, and auto-open it. Each click of "Enter" mints a *fresh*
+/// single-use credential via the `/enter` route, so the demo never gets "used
+/// up" — you only see a double-spend by deliberately reloading an admitted page.
 fn serve_mode() {
-    const SERVE_LIMIT: u64 = 24;
     let mut rng = OsRng;
 
     ui::banner();
     let (sk, pk) = ServerPrivateKey::setup(&mut rng);
-    let credential = issue_credential(&sk, &pk, &mut rng);
 
     // Prefer a stable, shareable port; fall back to an ephemeral one if taken.
     let listener = TcpListener::bind("127.0.0.1:8088")
@@ -165,49 +167,48 @@ fn serve_mode() {
     let base = format!("http://{addr}");
 
     let guard = Arc::new(OriginGuard::new(
-        sk,
+        sk.clone(),
         pk,
         REQUEST_CTX,
         PRESENT_CTX,
         SERVE_LIMIT,
     ));
 
-    // Mint a batch of single-use "enter with a credential" links.
-    let mut client = TesseraClient::new(credential, PRESENT_CTX, SERVE_LIMIT);
-    let mut buttons = String::new();
-    let mut n = 0;
-    while let Ok(header) = client.presentation_header(&mut rng) {
-        n += 1;
-        buttons.push_str(&format!(
-            "<a href='/?t={header}' style='display:inline-block;margin:.35rem;padding:.7rem 1.1rem;\
-             background:#9ece6a;color:#1a1b26;border-radius:9px;text-decoration:none;font-weight:600'>\
-             🔓 Enter with credential #{n}</a>"
-        ));
-    }
+    // A self-refilling minter: hands out a fresh presentation on each `/enter`,
+    // transparently re-issuing a new credential when the budget runs out, so the
+    // demo can be clicked indefinitely.
+    let initial = issue_credential(&sk, &pk, &mut rng);
+    let minter_state = Mutex::new(MinterState {
+        sk,
+        pk,
+        client: TesseraClient::new(initial, PRESENT_CTX, SERVE_LIMIT),
+    });
+    let minter: net::Minter = Arc::new(move || minter_state.lock().expect("minter mutex").fresh());
 
-    // The origin serves this self-explanatory hub at `/`.
-    let landing = format!(
-        "<!doctype html><meta charset=utf-8><title>Tessera — live demo</title>\
+    // One green button (always works) + one red button (no credential).
+    let landing = "<!doctype html><meta charset=utf-8><title>Tessera — live demo</title>\
          <body style='font:17px/1.65 system-ui;max-width:46rem;margin:3rem auto;\
          background:#24283b;color:#c0caf5;padding:0 1.25rem'>\
          <h1 style='color:#7dcfff'>Tessera — live demo</h1>\
          <p>This is a real web origin. It decides whether to let you in <b>purely from a \
-         cryptographic credential</b> — it never looks at your IP address. Click a button and \
-         watch the page.</p>\
-         <h3 style='color:#9ece6a'>1 · Enter carrying an anonymous credential</h3>\
-         <p style='color:#565f89'>Each button is one credential. You'll be admitted, and shown a \
-         tag the server can't link to any other visit. <b>Reload</b> an admitted page → blocked \
-         for double-spend (the rate limit).</p>\
-         <div>{buttons}</div>\
-         <h3 style='color:#f7768e;margin-top:2rem'>2 · Enter with no credential (what Tor gets today)</h3>\
-         <p><a href='/blocked' style='display:inline-block;padding:.7rem 1.1rem;background:#f7768e;\
-         color:#1a1b26;border-radius:9px;text-decoration:none;font-weight:600'>🔒 Enter with NO credential</a></p>\
-         <p style='color:#565f89;margin-top:2rem'>{n} credentials minted for this session. The whole \
-         point: a cooperating site can safely admit anonymous traffic, so it has no reason to block Tor.</p>\
+         cryptographic credential</b> — it never looks at your IP address. Click a button:</p>\
+         <p style='margin:1.5rem 0'>\
+         <a href='/enter' style='display:inline-block;padding:.8rem 1.3rem;background:#9ece6a;\
+         color:#1a1b26;border-radius:10px;text-decoration:none;font-weight:700;font-size:1.05rem'>\
+         🔓 Enter with an anonymous credential</a></p>\
+         <p style='margin:1.5rem 0'>\
+         <a href='/blocked' style='display:inline-block;padding:.8rem 1.3rem;background:#f7768e;\
+         color:#1a1b26;border-radius:10px;text-decoration:none;font-weight:700;font-size:1.05rem'>\
+         🔒 Enter with NO credential</a>\
+         <span style='color:#565f89'> &nbsp;— what every Tor user gets today</span></p>\
+         <p style='color:#565f89;margin-top:1.5rem'>Green admits you and shows an unlinkable tag; \
+         the server can't tie it to any other visit. On the admitted page, <b>reload</b> to watch \
+         the same credential get rejected for double-spend — that's the rate limit. Each green \
+         click mints a brand-new credential, so it always works.</p>\
          </body>"
-    );
+        .to_string();
 
-    net::serve(listener, guard, Some(landing));
+    net::serve(listener, guard, Some(landing), Some(minter));
 
     ui::step(
         "Origin is LIVE — your browser should open automatically",
@@ -221,5 +222,30 @@ fn serve_mode() {
     // Keep the process (and the origin thread) alive.
     loop {
         std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
+}
+
+/// Holds the issuer keys + a client, and mints a fresh presentation on demand,
+/// re-issuing a new credential whenever the current one's budget is exhausted.
+struct MinterState {
+    sk: ServerPrivateKey,
+    pk: ServerPublicKey,
+    client: TesseraClient,
+}
+
+impl MinterState {
+    /// A fresh, hex-encoded presentation — never fails, never runs dry.
+    fn fresh(&mut self) -> String {
+        let mut rng = OsRng;
+        loop {
+            match self.client.presentation_header(&mut rng) {
+                Ok(header) => return header,
+                Err(_) => {
+                    // Budget exhausted: issue a new credential and keep going.
+                    let cred = issue_credential(&self.sk, &self.pk, &mut rng);
+                    self.client = TesseraClient::new(cred, PRESENT_CTX, SERVE_LIMIT);
+                }
+            }
+        }
     }
 }
