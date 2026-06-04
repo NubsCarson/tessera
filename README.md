@@ -67,6 +67,7 @@ vectors:
 | Issuance & presentation arithmetic | ✅ proven against IETF vectors |
 | Fiat-Shamir + Sigma proofs | ✅ verifier proven against authoritative Sigma vectors; prover exercised via end-to-end round-trip † |
 | Full ARC API (issue / present / verify) + range proof + double-spend store | ✅ end-to-end round-trip proven |
+| `tessera-issuer` — proof-of-work issuance gate ("earn your budget") | ✅ cost-gate (not strong Sybil resistance — see threat model) |
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
 | Hardening — CT fix, fuzzing, benches, threat model | ✅ internal audit applied ([`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md)); **not** third-party audited |

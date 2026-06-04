@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/tessera-arc",
+    "crates/tessera-issuer",
     "crates/tessera-origin",
     "crates/tessera-client",
     "crates/tessera-demo",

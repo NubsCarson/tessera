@@ -1,0 +1,18 @@
+[package]
+name = "tessera-issuer"
+version = "0.0.1"
+description = "Proof-of-work issuance gate for Tessera ARC credentials — make obtaining a credential cost something."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sha2.workspace = true
+rand_core.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
