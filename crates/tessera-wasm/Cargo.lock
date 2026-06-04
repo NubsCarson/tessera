@@ -479,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-arc"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "crypto-bigint",
  "elliptic-curve",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-client"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "hex",
  "rand_core",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-wasm"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "getrandom",
  "hex",

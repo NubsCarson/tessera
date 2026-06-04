@@ -1,6 +1,6 @@
 [package]
 name = "tessera-arc"
-version = "0.0.1"
+version = "0.1.0"
 description = "Anonymous Rate-Limited Credentials (IETF ARC) over P-256 — the cryptographic core of Tessera."
 readme = "README.md"
 publish = false # not published yet — flip after a third-party security audit

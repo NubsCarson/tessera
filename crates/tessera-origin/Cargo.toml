@@ -1,6 +1,6 @@
 [package]
 name = "tessera-origin"
-version = "0.0.1"
+version = "0.1.0"
 description = "Server-side ARC presentation guard: admit anonymous requests on a credential, not on IP."
 readme = "README.md"
 publish = false # not published yet — flip after a third-party security audit

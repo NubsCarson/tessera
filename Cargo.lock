@@ -932,7 +932,7 @@ checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
 name = "tessera-arc"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "crypto-bigint",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-channel"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "ark-bn254",
  "ark-ff",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-client"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "hex",
  "rand_core",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-demo"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "hex",
  "rand_core",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-issuer"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "hex",
  "rand_core",
@@ -992,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-origin"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-executor",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-proxy"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "hex",
  "rand_core",
@@ -1020,7 +1020,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-relay"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "hex",
  "rand_core",

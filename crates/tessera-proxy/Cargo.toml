@@ -1,6 +1,6 @@
 [package]
 name = "tessera-proxy"
-version = "0.0.1"
+version = "0.1.0"
 description = "A credential-gated HTTP CONNECT proxy: admit on a Tessera credential (not an IP), tunnel TLS through Tor."
 readme = "README.md"
 publish = false

@@ -1,6 +1,6 @@
 [package]
 name = "tessera-tower-demo"
-version = "0.0.1"
+version = "0.1.0"
 description = "Runnable axum server using the tessera-origin tower middleware (TesseraLayer): a real HTTP origin that admits requests on an ARC credential, never an IP."
 publish = false # research-grade; a deployable example + end-to-end test, not a product
 edition = "2021"

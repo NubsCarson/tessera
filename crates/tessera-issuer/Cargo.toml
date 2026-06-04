@@ -1,6 +1,6 @@
 [package]
 name = "tessera-issuer"
-version = "0.0.1"
+version = "0.1.0"
 description = "Proof-of-work issuance gate for Tessera ARC credentials — make obtaining a credential cost something."
 readme = "README.md"
 publish = false # not published yet — flip after a third-party security audit

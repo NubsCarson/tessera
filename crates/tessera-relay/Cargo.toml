@@ -1,6 +1,6 @@
 [package]
 name = "tessera-relay"
-version = "0.0.1"
+version = "0.1.0"
 description = "The first onion hop: a credential-blind relay that forwards a nested CONNECT to the credential-gated exit (tessera-proxy) without ever learning the final destination — the 2-hop split-trust loop."
 readme = "README.md"
 publish = false

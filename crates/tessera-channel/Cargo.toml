@@ -1,6 +1,6 @@
 [package]
 name = "tessera-channel"
-version = "0.0.1"
+version = "0.1.0"
 description = "The ZK Spilman channel PROTOCOL state machine: a unidirectional, monotone-decrementing, single-payee off-chain payment channel with user-signed states, sign-then-serve co-signing, HOPR-style proof-of-relay, and off-chain dispute resolution. Plain crypto: EVM-native secp256k1 ECDSA over a recoverable keccak256 digest (so the Phase 2c on-chain court verifies states with `ecrecover`) + a SHA-256 state commitment. The ZK balance-privacy (Phase 2b) is NOT here; the EVM ChannelRegistry court (Phase 2c) lives in contracts/."
 readme = "README.md"
 publish = false # not published yet — flip after a third-party security audit

@@ -1,6 +1,6 @@
 [package]
 name = "tessera-client"
-version = "0.0.1"
+version = "0.1.0"
 description = "Client-side ARC credential holder: attaches an unlinkable presentation to each request."
 readme = "README.md"
 publish = false # not published yet — flip after a third-party security audit

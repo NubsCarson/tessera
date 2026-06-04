@@ -1,6 +1,6 @@
 [package]
 name = "tessera-wasm"
-version = "0.0.1"
+version = "0.1.0"
 description = "wasm-bindgen browser bindings for the Tessera ARC client: mint a credential and produce a `Tessera-Presentation` header in-browser."
 publish = false # not published; research-grade, and the in-browser path is a scaffold
 edition = "2021"

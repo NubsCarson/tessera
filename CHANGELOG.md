@@ -6,8 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-The pre-1.0 development line. **Research-grade and unaudited** — see
+Nothing yet — see the live [`docs/CEILING_PROGRESS.md`](./docs/CEILING_PROGRESS.md).
+
+## [0.1.0] - 2026-06-04
+
+First tagged release of the pre-1.0 line. **Research-grade and UNAUDITED** — see
 [`SECURITY.md`](./SECURITY.md) and [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md).
+It tags the artifact in [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md): an
+IETF-vector-proven **ARC** core + a self-hostable **credential-gated proxy**, the
+**2-hop split-trust loop**, **per-IP human-volume shaping**, the ETH-paid
+**`TokenMint` rail**, and an **optional ZK payment-channel tier** (EVM court +
+`R_dec` Groth16 settlement) — all CI-green. It is **not** a deployed network: a
+clean egress IP, a Tor/Nym crowd, a client UX, and an audit are external. See
+[`README.md`](./README.md) "What this is / what it is NOT".
 
 ### Added
 - `tessera-arc` — the IETF ARC(P-256) credential: P-256 group/hashing layer,
