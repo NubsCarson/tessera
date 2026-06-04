@@ -15,7 +15,7 @@
 ## Status snapshot
 
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
-- **SHOULD tier: 6/34** — hardening + completeness; in progress (S1, S4, S5, S6, S7, S8).
+- **SHOULD tier: 7/34** — hardening + completeness; in progress (S1, S2, S4, S5, S6, S7, S8).
 - **NICE tier: 0/15** — polish; pending.
 - **Verification:** ~70 Rust workspace tests + 48 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
 
@@ -41,7 +41,7 @@
 | S7 | RDecVerifier malformed-proof negative tests | ✅ | (this commit) |
 | S6 | Wire-codec fuzz harnesses (relay header decoders) | ✅ | (this commit) |
 | S1 | Cross-layer epoch-clock authority spec (`docs/EPOCH_AUTHORITY.md`) | ✅ | (this commit) |
-| S2 | Cross-epoch nullifier-clash / replay integration test | ⬜ | |
+| S2 | Cross-epoch nullifier-clash / replay integration test | ✅ | (this commit) |
 | S3 | Abuse/DoS model beyond rate-limit (+ bounded buffers) | ⬜ | |
 | S8 | Reentrancy interaction-matrix fuzz | ✅ (subsumed by S5) | `74b3acd` |
 | S9 | Adversarial-caller / cross-contract court tests | ⬜ | |
