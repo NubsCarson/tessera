@@ -31,6 +31,19 @@ impl core::fmt::Debug for ServerPrivateKey {
     }
 }
 
+/// Wipe the secret scalars from memory when the key is dropped (best-effort
+/// defense against later memory/swap disclosure). Each `Scalar` zeroizes via
+/// the `p256`/`zeroize` integration.
+impl Drop for ServerPrivateKey {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.x0.zeroize();
+        self.x1.zeroize();
+        self.x2.zeroize();
+        self.x0_blinding.zeroize();
+    }
+}
+
 /// `ServerPublicKey` (spec §4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServerPublicKey {
