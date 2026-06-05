@@ -205,6 +205,11 @@ jobs:
 
       - name: Install Foundry (forge + cast)
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Pin to a channel so the installer fetches a known release instead of
+          # listing all tags — that "list tags" call intermittently 403s on the
+          # GitHub API (unauthenticated rate limit), flaking this job.
+          version: stable
 
       - name: Show toolchain versions
         run: forge --version && cast --version
@@ -224,6 +229,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
       - name: Install slither + solc 0.8.24
         run: |
           pipx install slither-analyzer || pip install --user slither-analyzer
