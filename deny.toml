@@ -1,0 +1,54 @@
+# cargo-deny configuration — supply-chain gates for the Tessera workspace.
+# Run: `cargo deny check`. Wired into CI (the `cargo-deny` job).
+
+[advisories]
+# RustSec advisory database: fail on a known vulnerability or a yanked crate.
+# (cargo-audit also runs in CI; this adds licenses/bans/sources on top.)
+version = 2
+yanked = "deny"
+# Explicitly acknowledged, NOT blanket-disabled. Both are *unmaintained* (not
+# vulnerable) transitive dependencies of `arkworks` (ark-bn254/ark-ff), which
+# power the OPTIONAL ZK payment-channel tier (circuits/R_dec settlement). They
+# carry no known vulnerability; we name them here rather than hide them.
+ignore = [
+    "RUSTSEC-2024-0388", # `derivative` unmaintained (via arkworks)
+    "RUSTSEC-2024-0436", # `paste` unmaintained (via arkworks)
+]
+
+[licenses]
+version = 2
+# Permissive, OSI-approved licenses only — matching what the dependency tree
+# actually uses. Add to this list (don't relax the gate) if a new dep needs one.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "Zlib",
+    "CC0-1.0",
+]
+confidence-threshold = 0.9
+# Allowing a license no current dep uses isn't an error (it's headroom for
+# future deps); don't warn about it.
+unused-allowed-license = "allow"
+
+[bans]
+# A duplicate (multiple-versions) dep is a warning, not a hard failure — common
+# and not a security issue. A wildcard `*` version requirement is denied (it
+# would let an unexpected major version in) — EXCEPT the intra-workspace `path`
+# dependencies between our own crates, which are local and intentionally
+# unversioned.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# Only the canonical crates.io registry; no unknown registries or git sources.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

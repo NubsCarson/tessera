@@ -48,8 +48,9 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 **Ship-polish (post-v0.1.0):**
 - ✅ **S27 `#![deny(missing_docs)]`** on all 8 library crates — public API fully
   documented (56 items via an 8-agent pass + stragglers by hand), commit `e1076ef`.
-- 🔨 **cargo-deny** (supply-chain advisories/licenses/sources) — being added the
-  verified way (install → tune `deny.toml` → run locally → then the CI job).
+- ✅ **cargo-deny** (supply-chain advisories/licenses/sources/bans) — `deny.toml`
+  + a pinned CI job; `cargo deny check` passes locally (the two unmaintained
+  arkworks transitive deps are explicitly acknowledged, not hidden).
 - ⬜ remaining (lower-value / locally-unverifiable): `cargo llvm-cov` coverage,
   Slither, a `forge fmt --check` gate (would reformat the generated verifier,
   which we deliberately leave matching snarkjs), pinning CI `cargo install`

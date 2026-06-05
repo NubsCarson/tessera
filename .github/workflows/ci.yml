@@ -72,6 +72,20 @@ jobs:
       - name: Audit the dependency graph
         run: cargo audit
 
+  deny:
+    name: cargo-deny (advisories + licenses + sources + bans)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Pinned (version-reproducible) — the gate must not silently change with a
+      # new cargo-deny release. The `deny.toml` at the repo root is the policy:
+      # vulnerability/yanked deny, a permissive-license allow-list, crates.io-only
+      # sources, and wildcards denied (except our intra-workspace path deps).
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.19.8 --locked
+      - name: Check advisories, licenses, bans, sources
+        run: cargo deny check
+
   wasm:
     name: wasm browser client
     runs-on: ubuntu-latest
