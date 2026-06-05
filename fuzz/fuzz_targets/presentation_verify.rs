@@ -26,6 +26,9 @@ fuzz_target!(|data: &[u8]| {
     if let Ok(p) = Presentation::from_bytes(data, LIMIT) {
         let outcome = verify_presentation(&sk, &pk, b"req", b"ctx", &p, LIMIT);
         // Random bytes can never produce a valid proof.
-        assert!(outcome.is_none(), "random bytes verified as a valid presentation");
+        assert!(
+            outcome.is_none(),
+            "random bytes verified as a valid presentation"
+        );
     }
 });

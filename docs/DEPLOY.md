@@ -58,7 +58,10 @@ the local `cargo run` demos):
 (`contracts/src/TokenMint.sol`) with the issuer's Ethereum address; a buyer calls
 `purchase()` with ETH to earn `entitled[buyer]` tokens. Run the issuer with
 `TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT` set (it reads the live entitlement via
-`eth_call`); run the client with `TESSERA_BUYER_KEY` set to the buyer's secret. The
+`eth_call`); run the client with `TESSERA_BUYER_KEY` set to the buyer's secret **and
+`TESSERA_ISSUER_PK` set** (the issuer's pk fingerprint — **required** in paid mode:
+it pins the issuer so the control signature can't be wormholed to another issuer;
+the client refuses to start without it). The
 client proves control of its address (`ecrecover` over a fresh challenge) and the
 issuer issues a credential against the on-chain balance, charging
 `TOKENS_PER_CREDENTIAL` (64) tokens, tracked durably so an entitlement becomes
@@ -112,14 +115,16 @@ docker build -t ghcr.io/<you>/tessera-node:0.1.0 .
 docker push  ghcr.io/<you>/tessera-node:0.1.0
 
 # b) Generate the deployment manifest (registers a gateway + KMS attestation),
-#    from the TEE-flavoured compose that mounts /var/run/dstack.sock:
-./vmm-cli.py compose \
+#    from the TEE-flavoured compose that mounts /var/run/dstack.sock.
+#    NOTE: vmm-cli.py ships with the dstack distribution (see the dstack repo) —
+#    it is NOT in this tree; invoke it from your dstack install.
+vmm-cli.py compose \
   --docker-compose deploy/dstack/docker-compose.yaml \
   --name tessera --kms --gateway --public-logs \
   --output app-compose.json
 
 # c) Deploy into a TDX confidential VM:
-./vmm-cli.py deploy --name tessera --compose app-compose.json --vcpu 2 --memory 2G
+vmm-cli.py deploy --name tessera --compose app-compose.json --vcpu 2 --memory 2G
 ```
 
 `--public-logs` + `public_tcbinfo` make the node's measurement and logs publicly

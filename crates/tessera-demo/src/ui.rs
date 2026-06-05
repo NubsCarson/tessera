@@ -2,8 +2,6 @@
 //! Colors degrade gracefully: if stdout is not a TTY (e.g. piped to a file),
 //! escapes are still emitted but remain readable.
 
-#![allow(dead_code)]
-
 fn c(rgb: (u8, u8, u8), s: &str) -> String {
     format!("\x1b[38;2;{};{};{}m{s}\x1b[0m", rgb.0, rgb.1, rgb.2)
 }

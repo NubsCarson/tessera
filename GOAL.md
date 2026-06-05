@@ -84,9 +84,11 @@ host. The credential check is byte-identical on either transport, so the
 localhost flow fully establishes correctness; Tor just proves it survives a real
 anonymous transport.
 
-**Stretch / research frontier:** an issuer that mints credentials against a
-proof-of-work or a one-time payment (the "earn your budget" model), and a study
-of the anonymity-set dynamics when ARC rides over Tor.
+**Stretch / research frontier:** a study of the anonymity-set dynamics when ARC
+rides over Tor (now also covering the client→issuer hop). *(The issuer that mints
+credentials against a proof-of-work **or a one-time payment** — the "earn your
+budget" model — is no longer a frontier: both shipped; see "Deliberately
+deferred" below.)*
 
 ---
 
@@ -115,8 +117,18 @@ An adversarial review panel triaged the remaining ideas. These are intentionally
   into the narrated demo). It makes minting a credential *cost CPU*, throttling
   bulk/Sybil minting. Honestly scoped: it is a **cost knob, not strong Sybil
   resistance** (enough compute still scales; unfair to low-power clients) — for
-  per-human guarantees, gate on payment / attestation / a one-per-person
-  credential instead. *That* stronger gate remains future research.
+  per-human guarantees, gate on payment (✅ shipped, next bullet), attestation, or
+  a one-per-person credential; the attestation / one-per-person variants remain
+  future research.
+- **Payment-gated issuance (ETH-paid mint)** — ✅ **shipped**: `tessera-issuer`'s
+  paid mode issues credentials against an on-chain `TokenMint` purchase. The buyer
+  proves control of its Ethereum address (`ecrecover` over an issuer-bound
+  challenge); the issuer reads the live `entitled(buyer)` via a std-only `eth_call`
+  and gates issuance durably (refundable; single-issuer double-issue guard).
+  Std-only (`k256`+`sha3`, no `alloy`/`tokio`, MSRV 1.74), proven against a real
+  local anvil chain (`tests/anvil_entitled.rs`). Consuming the entitlement on-chain
+  (`TokenMint.redeem`) is an operator step. Testnet-only, UNAUDITED. (See
+  `docs/ARCHITECTURE.md` step 1.)
 - **`axum`/`tower` middleware** — ✅ **shipped** as the off-by-default `tower`
   feature on `tessera-origin` (`TesseraLayer`/`TesseraGuard`): a drop-in
   `tower::Layer` that runs the guard and short-circuits rejects with `403`,

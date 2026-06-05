@@ -15,9 +15,9 @@
 ## Status snapshot
 
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
-- **SHOULD tier: 8/34** — hardening + completeness; in progress (S1, S2, S3, S4, S5, S6, S7, S8).
+- **SHOULD tier: 12/34** — hardening + completeness; in progress (S1–S8 + the CI hardening S23, S25, S26, S27).
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** ~70 Rust workspace tests + 48 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
+- **Verification:** ~138 Rust workspace tests + 61 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
 
 ## MUST — done
 
@@ -103,11 +103,11 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | S20 | Anonymity-set sparse-deployment warnings | ⬜ | |
 | S21 | ARC lifecycle + cross-crate fuzz | ⬜ | |
 | S22 | Honest-relayer atomicity spec (doc) | ⬜ | |
-| S23 | CI: cargo-deny | ⬜ | |
+| S23 | CI: cargo-deny | ✅ | `deny.toml` + the `deny` CI job (advisories/bans/licenses/sources) |
 | S24 | CI: deeper fuzz (300s/target) | ⬜ | |
-| S25 | CI: Slither static analysis | ⬜ | |
-| S26 | CI: coverage report | ⬜ | |
-| S27 | `#![deny(missing_docs)]` all crates | ⬜ | |
+| S25 | CI: Slither static analysis | ✅ | the `contracts` CI job (Slither, fails on High/Medium) |
+| S26 | CI: coverage report | ✅ | the `coverage` CI job (cargo-llvm-cov) |
+| S27 | `#![deny(missing_docs)]` all crates | ✅ | all 8 library crates; `cargo doc -D warnings` clean |
 | S28 | Known-limitations + claim-boundary in README | ⬜ | |
 | S29 | Phase-status consistency table | ⬜ | |
 | S30 | `docs/SAFETY.md` (abuse handling) | ⬜ | |
@@ -139,4 +139,4 @@ soundness proof / full CT audit.
 
 All commits are authored `NubsCarson <192162056+NubsCarson@users.noreply.github.com>`
 (the canonical GitHub-credit address). On 2026-06-04 the repo's local git config had
-leaked `shawgotbags@gmail.com`; it was corrected and main's full history re-authored.
+leaked a contributor's personal email; it was corrected and main's full history re-authored.

@@ -10,9 +10,17 @@
 
 Tessera lets a client pay anonymously, per request, to reach any clearnet site
 through a relayer it does not have to trust with its identity, destination, or
-content. The money rail is a **unidirectional, monotone-decrementing ZK Spilman
-channel**: one payer (the **user**), one payee (the **relayer**). This doc is the
-"who can lose what, and why misbehavior doesn't pay" analysis.
+content.
+
+> **Scope note.** This prices the **optional-advanced** ZK Spilman channel tier.
+> Per [`ARCHITECTURE.md`](./ARCHITECTURE.md), the leaner **default** rail is the
+> ETH-paid `TokenMint` → blind-issued ARC tokens (`tessera-issuer`'s paid mode),
+> which needs no channel or bond; the analysis below covers the channel for when
+> pay-as-you-go *with on-chain refund/dispute* is genuinely required.
+
+For that channel tier, the money rail is a **unidirectional, monotone-decrementing
+ZK Spilman channel**: one payer (the **user**), one payee (the **relayer**). This
+doc is the "who can lose what, and why misbehavior doesn't pay" analysis.
 
 ## 1. The two stakes
 

@@ -1004,7 +1004,6 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "p256",
  "rand_core",
  "tessera-arc",
  "tessera-client",
@@ -1015,7 +1014,6 @@ dependencies = [
 name = "tessera-proxy"
 version = "0.1.0"
 dependencies = [
- "hex",
  "rand_core",
  "tessera-arc",
  "tessera-client",

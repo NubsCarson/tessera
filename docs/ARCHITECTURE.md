@@ -72,7 +72,7 @@ The leaner architecture is **largely v0**:
 |---|---|
 | Unlinkable, rate-limited token (= an ARC presentation) | ✅ built + tested (`tessera-arc`) |
 | Token earned via a cost gate (PoW issuance) | ✅ built (`tessera-issuer`) |
-| Per-request token-gated access (checked at the exit) | ✅ built + tested (`tessera-proxy` / the relay's `serve()` ARC mode) |
+| Per-request token-gated access (checked at the exit) | ✅ built + tested (`tessera-proxy` — the credential-gated exit, via `OriginGuard`) |
 | Reached over Tor | ✅ built + proven (`--tor`, the `tor-test`) |
 | Per-IP human-volume shaping | ✅ built + tested (`VolumeShaper`, M5) |
 | DoS-bounded accept layer | ✅ built (S3) |

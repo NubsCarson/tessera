@@ -266,6 +266,30 @@ What a malicious origin operator **can** do (and Tessera does not prevent):
 - **Correlate with HTTP/transport metadata** they collect — out of scope (§4).
 - **Mismanage the tag store** to allow over-presentation (their own loss) — §6.
 
+### 3.5 Issuer node (networked issuance)
+
+The deployment is now **four roles** — client, **issuer** (authority), relay,
+exit — once credentials are obtained over the wire (`tessera-issuer`,
+`serve_issuance` / `serve_issuance_paid`). The issuer holds the ARC server key
+(shared with the exit — keyed verification) and gates minting on proof-of-work or
+an on-chain `TokenMint` payment.
+
+What the issuer **sees**, stated bluntly: obtaining a credential is a **direct
+client→issuer connection**, so the issuer learns the **client's source IP and the
+time of issuance**. ARC issuance unlinkability (§(b)) still holds — the issuer
+**cannot** tie a credential it signs to any later presentation/browsing — but the
+*act* of issuance is not hidden by this protocol. A client wanting that hidden too
+must reach the issuer over an anonymity transport (e.g. Tor); `obtain_credential`
+is transport-agnostic. The local demo runs all nodes on `127.0.0.1`, where this is
+moot, but it matters in a real deployment.
+
+Additional issuer trust notes: a *malicious* issuer is just the malicious origin
+operator of §3.4 (it is the keyed verifier). The **paid** issuer additionally
+trusts its **configured** Ethereum RPC endpoint to report `entitled(buyer)`
+honestly (operator's own infra); and a control signature is **bound to the issuer
+pk** + the client must **pin** it (paid mode requires `TESSERA_ISSUER_PK`), so a
+relay/MITM cannot wormhole a buyer's entitlement to a different issuer.
+
 ---
 
 ## 4. Non-goals / out of scope

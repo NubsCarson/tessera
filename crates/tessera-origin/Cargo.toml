@@ -21,7 +21,6 @@ tower = ["dep:tower", "dep:http", "dep:http-body", "dep:http-body-util", "dep:by
 
 [dependencies]
 tessera-arc = { path = "../tessera-arc" }
-p256.workspace = true
 hex.workspace = true
 
 # Optional, behind the `tower` feature.

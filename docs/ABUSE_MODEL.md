@@ -1,7 +1,7 @@
 # Tessera — abuse / DoS model (S3)
 
 > Resource-exhaustion and griefing surface, from a 25-agent adversarial sweep of
-> the actual code (relay, exit, court, proof-verification, tag stores). Each
+> the actual code (relay, exit, issuer, court, proof-verification, tag stores). Each
 > vector is code-cited and marked **FIXED here** or **deploy-tier / operational**
 > with the honest reason. Companion to [`THREAT_MODEL.md`](./THREAT_MODEL.md)
 > (which covers confidentiality/integrity) and [`SECURITY.md`](../SECURITY.md).
@@ -26,8 +26,9 @@ which we document rather than ship.
 | 2 | relay + exit | **No socket timeout** — a slow-roll / idle peer pins a worker thread + fd forever (slowloris on the CONNECT line, or a stalled tunnel). | A 30s read+write timeout set on the accepted stream **before** spawning the handler, and on the upstream socket before `pipe()`, so the blocking parse/copy loops unblock on idleness. |
 | 3 | exit | **`VolumeShaper.seen` unbounded growth** — the window-prune only shrinks the map once entries *age out*, so a within-window flood of distinct destinations grows it without bound. | A hard `max_distinct_destinations_stored` cap (default 10 000, ≫ the human envelope); when full, the oldest-timestamp entry is evicted before inserting a new host. Tested with a 5 000-host flood. |
 | 4 | relay (channel) | **`seen_nonces` unbounded growth** — the relayer's per-channel freshness set grew once per accepted spend with no cap and no in-place epoch reset, so a long-lived channel accumulated nonces for its lifetime. | A per-epoch budget `MAX_NONCES_PER_EPOCH` (1024, mirroring the circuit's `idx ∈ [0,1024)`): a new nonce past the cap is rejected `EpochBudgetExhausted`. New `RelayerChannel::advance_epoch` resets the set in place (preserving the balance cursor), so memory is freed each epoch instead of growing forever (see [`EPOCH_AUTHORITY.md`](./EPOCH_AUTHORITY.md)). |
+| 5 | issuer | **Unbounded thread spawn + slow-roll on the networked issuer** (`serve_issuance`/`serve_issuance_paid`) — one OS thread per issuance connection, and the PoW/eth_call work happens after accept. | Same accept-before-cost shape as the relay/exit: a `MAX_INFLIGHT` cap (256 — the issuer's per-credential work is heavier, so a lower bound) enforced on the accept thread before spawning, an `InflightGuard` RAII, and a 30s read/write timeout on the issuance socket; the `eth_call` reply is length-capped (64 KiB). The cap differs from the relay/exit's 1024 by design (cost-per-connection, not an oversight). |
 
-All four are tested (proxy shaping suite, channel protocol suite) and CI-green.
+All five are tested (proxy shaping suite, channel protocol suite, issuance/network tests) and CI-green.
 
 ## Deploy-tier / operational (documented, NOT shipped — and why a naive fix backfires)
 

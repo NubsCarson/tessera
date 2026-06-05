@@ -23,6 +23,5 @@ tessera-client = { path = "../tessera-client" }
 # For the exit binary's convergent shared-key bootstrap (issuer↔exit ARC key).
 tessera-issuer = { path = "../tessera-issuer" }
 rand_core.workspace = true
-hex.workspace = true
 
 [dev-dependencies]
