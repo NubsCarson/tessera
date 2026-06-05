@@ -70,6 +70,15 @@ an operator submit step (calldata from `mint::encode_redeem`); the single-issuer
 durable ledger is the default double-issue guard. Verified end to end against a
 local **anvil** chain (`crates/tessera-issuer/tests/anvil_entitled.rs`, opt-in).
 
+**Preflight (`--check`).** Every node binary accepts `--check`: it validates all
+config and binds its listener (then drops it) **without serving** — printing
+`tessera-<role>: config OK` + a one-line summary and exiting `0`, or a specific
+`config error:` / `could not bind` and a non-zero code. Use it in CI or before a
+deploy to catch a typo'd address / bad upstream / missing pin early. (It is a
+*preflight*, not a liveness probe — it binds the port, so don't run it against an
+already-serving node.) Misconfiguration now fails fast: a bad value exits `2`, a
+bind failure exits `1` — no node silently falls back to a random ephemeral port.
+
 ## 1. Local Docker — the whole network
 
 ```sh
