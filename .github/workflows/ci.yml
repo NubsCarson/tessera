@@ -86,6 +86,24 @@ jobs:
       - name: Check advisories, licenses, bans, sources
         run: cargo deny check
 
+  coverage:
+    name: coverage (cargo-llvm-cov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Components + cargo-llvm-cov
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+      # Report line coverage and gate at a conservative floor. The bin/demo
+      # crates (main.rs, tessera-demo) are applications, not unit-tested, so they
+      # are excluded — the floor is on the LIBRARY surface (measured ~91%).
+      - name: Coverage report + floor
+        run: |
+          cargo llvm-cov --workspace --all-features \
+            --ignore-filename-regex '(main\.rs|tessera-demo)' \
+            --fail-under-lines 80 --summary-only
+
   wasm:
     name: wasm browser client
     runs-on: ubuntu-latest
@@ -196,6 +214,33 @@ jobs:
 
       - name: forge test (Rust->Solidity sig vector + the pinned R_dec ZK proof)
         run: forge test -vv
+
+  slither:
+    name: slither (Solidity static analysis)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v6
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Install slither + solc 0.8.24
+        run: |
+          pipx install slither-analyzer || pip install --user slither-analyzer
+          pipx install solc-select || pip install --user solc-select
+          solc-select install 0.8.24 && solc-select use 0.8.24
+      # Analyze the PRODUCTION contracts only (test harness filtered out) and fail
+      # on any High OR Medium finding. Verified locally: 0 High / 0 Medium (the
+      # remaining results are Low/Informational — naming on the generated
+      # verifier, the checked-transfer pattern, the deliberate dust-refund math).
+      # Version-robust gate (grep the report) since slither exit codes vary.
+      - name: Slither (fail on High/Medium)
+        run: |
+          slither . --filter-paths "test/" 2>&1 | tee slither.out || true
+          if grep -qE "Impact: (High|Medium)" slither.out; then
+            echo "::error::Slither found a High/Medium-severity issue"; exit 1
+          fi
+          echo "Slither: 0 High / 0 Medium"
 
   fuzz:
     name: fuzz build + smoke

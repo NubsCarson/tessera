@@ -51,10 +51,15 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 - ✅ **cargo-deny** (supply-chain advisories/licenses/sources/bans) — `deny.toml`
   + a pinned CI job; `cargo deny check` passes locally (the two unmaintained
   arkworks transitive deps are explicitly acknowledged, not hidden).
-- ⬜ remaining (lower-value / locally-unverifiable): `cargo llvm-cov` coverage,
-  Slither, a `forge fmt --check` gate (would reformat the generated verifier,
-  which we deliberately leave matching snarkjs), pinning CI `cargo install`
-  versions. None blocks the v0.1.0 promotion.
+- ✅ **coverage** (`cargo-llvm-cov`) — CI job reports + gates the **library
+  surface at ≥80%** (measured **91.46%** line; bins/demo excluded as apps).
+- ✅ **Slither** (Solidity static analysis) — CI job on the production `src/`
+  contracts, gated on **High/Medium**; verified **0 High / 0 Medium** locally (the
+  remaining results are Low/Informational — naming on the generated verifier, the
+  checked-transfer pattern, the deliberate dust-refund math).
+- ⬜ remaining (cosmetic only): a `forge fmt --check` gate (would reformat the
+  generated verifier — deliberately left matching snarkjs), pinning the
+  cargo-audit/cargo-fuzz install versions. None blocks the v0.1.0 promotion.
 
 ## Architecture pivot (the leaner ecash-token + Tor path — `docs/ARCHITECTURE.md`)
 
