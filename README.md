@@ -86,6 +86,19 @@ credential, not an address.
 > [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) and
 > [`docs/IP_EGRESS_IDEAS.md`](./docs/IP_EGRESS_IDEAS.md).
 
+### Run it as real nodes (Docker / TEE)
+
+```sh
+docker compose -f deploy/docker-compose.yaml up --build   # the 2-hop relay+exit loop
+```
+
+The relay + exit run as containers (verified: a request with a token tunnels to a
+real site; a replay is rejected). For a **verifiable, non-logging relay**, deploy
+it into an Intel TDX **TEE via dstack** — a client can then *attest* that the node
+runs this exact open-source image and physically can't log. That nails the
+**trust** axis; the **clean-IP** axis stays external. See
+[`docs/DEPLOY.md`](./docs/DEPLOY.md).
+
 ## The problem it attacks
 
 The web decides whether to trust you by your **IP address**. Tor's exit relays

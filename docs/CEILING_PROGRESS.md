@@ -71,7 +71,8 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | Leaner-default e2e proof (token + 2-hop loop + M5 shaping, no channel) | ✅ | (this commit) |
 | Channel/ZK/court demoted to optional-advanced tier (documented, kept) | ✅ | `dc56d41` |
 | Off-chain issuer integration (watch Purchased → blind-issue → redeem) | 🔒 | operational (reuses ARC) |
-| Paid-mint client UX + deployed clean-IP exit + crowd | 🔒 | external/frontend |
+| Containerized relay+exit nodes + dstack TEE deploy path (`docs/DEPLOY.md`) | ✅ | `f462be3` (verified in Docker: token→200, replay→407) |
+| Paid-mint client UX + deployed **clean-IP** exit + crowd | 🔒 | external/frontend (the clean IP is the one irreducible piece) |
 
 ## SHOULD — in progress
 
