@@ -15,9 +15,9 @@
 ## Status snapshot
 
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
-- **SHOULD tier: 22/34** — hardening + completeness (S1–S8, the CI hardening S23/S25/S26/S27, and the spec/audit docs S12–S14, S16, S19, S20, S22, S29–S31).
+- **SHOULD tier: 28/34** — hardening + completeness (S1–S8; CI hardening S23/S25/S26/S27; spec/audit docs S12–S14, S16, S19, S20, S22, S29–S31; the hardening tests S9–S11, S17, S18, S32).
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** ~138 Rust workspace tests + 61 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
+- **Verification:** ~158 Rust workspace tests + 78 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
 
 ## MUST — done
 
@@ -89,16 +89,16 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | S2 | Cross-epoch nullifier-clash / replay integration test | ✅ | (this commit) |
 | S3 | Abuse/DoS model + bounded buffers (`docs/ABUSE_MODEL.md`) | ✅ | (this commit) |
 | S8 | Reentrancy interaction-matrix fuzz | ✅ (subsumed by S5) | `74b3acd` |
-| S9 | Adversarial-caller / cross-contract court tests | ⬜ | |
-| S10 | Negative channel-protocol tests | ⬜ | |
-| S11 | 3-language Poseidon/witness regression test | ⬜ | |
+| S9 | Adversarial-caller / cross-contract court tests | ✅ | `contracts/test/CourtAdversarial.t.sol` (17 tests: attacker can't fund/close/dispute/slash/reenter) |
+| S10 | Negative channel-protocol tests | ✅ | `tessera-channel/tests/negative_protocol.rs` (non-monotone/bad-sig/replay/over-budget/malformed all rejected) |
+| S11 | 3-language Poseidon/witness regression test | ✅ | `tessera-channel/tests/poseidon_regression.rs` (pinned BE bytes vs circomlib-verified decimals) |
 | S12 | Channel-state durability/recovery model (doc) | ✅ | [`docs/CHANNEL_RECOVERY.md`](./CHANNEL_RECOVERY.md) |
 | S13 | Deployment topology / trust-boundary spec (doc) | ✅ | [`docs/DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) |
 | S14 | System key-management lifecycle (doc) | ✅ | [`docs/KEY_MANAGEMENT.md`](./KEY_MANAGEMENT.md) |
 | S15 | Cross-layer protocol versioning | ⬜ | |
 | S16 | Observability/metrics spec + privacy review (doc) | ✅ | [`docs/OBSERVABILITY.md`](./OBSERVABILITY.md) |
-| S17 | Concurrency double-spend tests for tag stores | ⬜ | |
-| S18 | `FileTagStore` durability tests | ⬜ | |
+| S17 | Concurrency double-spend tests for tag stores | ✅ | `tessera-origin/tests/concurrency_double_spend.rs` (Barrier-raced threads, exactly-one-wins; in-mem + file) |
+| S18 | `FileTagStore` durability tests | ✅ | `tessera-origin/tests/filetagstore_durability.rs` (spent tags survive store drop+reopen) |
 | S19 | Relayer-cheat matrix (doc, reconcile w/ M1) | ✅ | [`docs/RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) |
 | S20 | Anonymity-set sparse-deployment warnings | ✅ | [`docs/SAFETY.md`](./SAFETY.md) (sparse-deployment §) |
 | S21 | ARC lifecycle + cross-crate fuzz | ⬜ | |
@@ -112,7 +112,7 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | S29 | Phase-status consistency table | ✅ | [`docs/STATUS.md`](./STATUS.md) |
 | S30 | `docs/SAFETY.md` (abuse handling) | ✅ | [`docs/SAFETY.md`](./SAFETY.md) |
 | S31 | Audit-prep packet (`AUDIT.md`) | ✅ | [`AUDIT.md`](../AUDIT.md) |
-| S32 | Multi-spend channel integration test | ⬜ | |
+| S32 | Multi-spend channel integration test | ✅ | `tessera-channel/tests/multi_spend.rs` (40 round trips + settlement + non-destructive over-budget reject) |
 | S33 | PoW honest-difficulty analysis + benches | ⬜ | |
 | S34 | PIR / green-routing / x402 egress lanes (code parts) | ⬜ | |
 
