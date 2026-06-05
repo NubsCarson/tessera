@@ -23,10 +23,18 @@ If you read nothing else, read the **honest status** at the bottom.
 | What's confidential vs. delegated to Tor; the trust model | [`THREAT_MODEL.md`](./THREAT_MODEL.md) |
 | Per-property security argument (construction→assumption→gap) | [`SECURITY_ARGUMENT.md`](./SECURITY_ARGUMENT.md) |
 | DoS / abuse surface + the bounds we added | [`ABUSE_MODEL.md`](./ABUSE_MODEL.md) |
+| Deployment topology + per-node trust boundaries | [`DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) |
+| The ARC server-key lifecycle (bootstrap / sharing / rotation / leak) | [`KEY_MANAGEMENT.md`](./KEY_MANAGEMENT.md) |
+| What's safe to log (observability + privacy review) | [`OBSERVABILITY.md`](./OBSERVABILITY.md) |
+| Relayer misbehavior → defense + honest-relayer atomicity | [`RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) |
+| Channel durability / crash-recovery (optional-advanced tier) | [`CHANNEL_RECOVERY.md`](./CHANNEL_RECOVERY.md) |
+| Responsible use + sparse-deployment anonymity warning | [`SAFETY.md`](./SAFETY.md) |
 | Who owns the `epoch` clock + the skew/rejection rules | [`EPOCH_AUTHORITY.md`](./EPOCH_AUTHORITY.md) |
 | The clean-egress portfolio (the hardest, no-silver-bullet part) | [`IP_EGRESS_IDEAS.md`](./IP_EGRESS_IDEAS.md) |
 | Post-quantum terrain | [`POST_QUANTUM.md`](./POST_QUANTUM.md) |
 | The roadmap | [`ROADMAP.md`](./ROADMAP.md) |
+| **One status table for the whole system** | [`STATUS.md`](./STATUS.md) |
+| **The audit-prep packet** (the map an auditor reads first) | [`../AUDIT.md`](../AUDIT.md) |
 | **Live progress / the 99-item Definition-of-Done** | [`CEILING_PROGRESS.md`](./CEILING_PROGRESS.md) |
 | The ZK circuit (optional-advanced tier) | [`../circuits/README.md`](../circuits/README.md) |
 | The ARC §10.2 vector discrepancy (a known upstream skew) | [`ARC_PROOF_VECTOR_DISCREPANCY.md`](./ARC_PROOF_VECTOR_DISCREPANCY.md) |

@@ -15,7 +15,7 @@
 ## Status snapshot
 
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
-- **SHOULD tier: 12/34** — hardening + completeness; in progress (S1–S8 + the CI hardening S23, S25, S26, S27).
+- **SHOULD tier: 22/34** — hardening + completeness (S1–S8, the CI hardening S23/S25/S26/S27, and the spec/audit docs S12–S14, S16, S19, S20, S22, S29–S31).
 - **NICE tier: 0/15** — polish; pending.
 - **Verification:** ~138 Rust workspace tests + 61 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
 
@@ -92,26 +92,26 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | S9 | Adversarial-caller / cross-contract court tests | ⬜ | |
 | S10 | Negative channel-protocol tests | ⬜ | |
 | S11 | 3-language Poseidon/witness regression test | ⬜ | |
-| S12 | Channel-state durability/recovery model (doc) | ⬜ | |
-| S13 | Deployment topology / trust-boundary spec (doc) | ⬜ | |
-| S14 | System key-management lifecycle (doc) | ⬜ | |
+| S12 | Channel-state durability/recovery model (doc) | ✅ | [`docs/CHANNEL_RECOVERY.md`](./CHANNEL_RECOVERY.md) |
+| S13 | Deployment topology / trust-boundary spec (doc) | ✅ | [`docs/DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) |
+| S14 | System key-management lifecycle (doc) | ✅ | [`docs/KEY_MANAGEMENT.md`](./KEY_MANAGEMENT.md) |
 | S15 | Cross-layer protocol versioning | ⬜ | |
-| S16 | Observability/metrics spec + privacy review (doc) | ⬜ | |
+| S16 | Observability/metrics spec + privacy review (doc) | ✅ | [`docs/OBSERVABILITY.md`](./OBSERVABILITY.md) |
 | S17 | Concurrency double-spend tests for tag stores | ⬜ | |
 | S18 | `FileTagStore` durability tests | ⬜ | |
-| S19 | Relayer-cheat matrix (doc, reconcile w/ M1) | ⬜ | |
-| S20 | Anonymity-set sparse-deployment warnings | ⬜ | |
+| S19 | Relayer-cheat matrix (doc, reconcile w/ M1) | ✅ | [`docs/RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) |
+| S20 | Anonymity-set sparse-deployment warnings | ✅ | [`docs/SAFETY.md`](./SAFETY.md) (sparse-deployment §) |
 | S21 | ARC lifecycle + cross-crate fuzz | ⬜ | |
-| S22 | Honest-relayer atomicity spec (doc) | ⬜ | |
+| S22 | Honest-relayer atomicity spec (doc) | ✅ | [`docs/RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) (atomicity §) |
 | S23 | CI: cargo-deny | ✅ | `deny.toml` + the `deny` CI job (advisories/bans/licenses/sources) |
 | S24 | CI: deeper fuzz (300s/target) | ⬜ | |
 | S25 | CI: Slither static analysis | ✅ | the `contracts` CI job (Slither, fails on High/Medium) |
 | S26 | CI: coverage report | ✅ | the `coverage` CI job (cargo-llvm-cov) |
 | S27 | `#![deny(missing_docs)]` all crates | ✅ | all 8 library crates; `cargo doc -D warnings` clean |
 | S28 | Known-limitations + claim-boundary in README | ⬜ | |
-| S29 | Phase-status consistency table | ⬜ | |
-| S30 | `docs/SAFETY.md` (abuse handling) | ⬜ | |
-| S31 | Audit-prep packet (`AUDIT.md`) | ⬜ | |
+| S29 | Phase-status consistency table | ✅ | [`docs/STATUS.md`](./STATUS.md) |
+| S30 | `docs/SAFETY.md` (abuse handling) | ✅ | [`docs/SAFETY.md`](./SAFETY.md) |
+| S31 | Audit-prep packet (`AUDIT.md`) | ✅ | [`AUDIT.md`](../AUDIT.md) |
 | S32 | Multi-spend channel integration test | ⬜ | |
 | S33 | PoW honest-difficulty analysis + benches | ⬜ | |
 | S34 | PIR / green-routing / x402 egress lanes (code parts) | ⬜ | |
