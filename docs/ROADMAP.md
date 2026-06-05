@@ -1,8 +1,9 @@
 # Tessera — Roadmap (post-v0 frontier)
 
-The v0 implementation is complete: all of `GOAL.md`'s milestones, six crates,
-CI-green, fuzzed, internally audited, honest about its limits. This doc plans
-the genuinely-meaningful work *beyond* polish. Four tracks, each a real effort.
+The v0 implementation is complete: all of `GOAL.md`'s milestones, eight workspace
+crates (plus two excluded), CI-green, fuzzed, internally audited, honest about its
+limits. This doc plans the genuinely-meaningful work *beyond* polish. Four tracks,
+each a real effort.
 
 For every track: **Goal · Approach · Done-when · Risks / external dependency · Status.**
 
@@ -110,3 +111,53 @@ is filed. The only remaining human-gated miles are genuinely physical/account
 ones, never faked: a live **Cloudflare** deploy (track 2 ships a documented
 sketch, not a deploy) and loading the **MV3 extension in a real browser** against
 a live origin (track 3 ships a compiling, headless-tested wasm core + scaffold).
+
+---
+
+## Exploratory ideas (parked — NOT committed, NOT planned work)
+
+> Captured so they aren't lost, **deliberately off the roadmap above**. Each is
+> premature for the current state (no deployed multi-operator network, no ecosystem
+> interop demand) and would only be built if a concrete need forces it — not
+> speculatively. Listed with the honest "why not yet."
+
+### E-a. ERC-8004 Validation Registry for attested-non-logging-relay discovery
+
+Tessera's single best trust claim is "run the relay in a TEE and a client can
+*cryptographically attest* it runs the exact non-logging open-source image — it
+physically can't keep logs." Today there's no standard place to publish or find
+that attestation; it's bespoke. [ERC-8004](https://ethereum-magicians.org/t/erc-8004-trustless-agents/25098)'s
+**Validation Registry** is, by design, "records verifiable evidence that a node
+met a constraint" and is *method-agnostic*. So a relay's TDX attestation ("I'm
+running commit X, can't log") becomes a Validation entry, and a client/agent
+queries the registry to find provably-non-logging relays **without trusting a
+central directory**. It reuses work Tessera already has (dstack TEE) and positions
+Tessera as the privacy layer ERC-8004 deliberately omits (8004 has *no* privacy).
+**Why not yet:** purely an operator-*discovery* layer — it does nothing for the
+actual hard problem (clean egress IP, anonymity crowd, audit), and "discovery"
+is meaningless until there's more than one relay to choose between. Strictly an
+operator/node-layer idea: **never** put a Tessera *user* on a persistent ERC-8004
+identity — that destroys the unlinkability that is the whole point.
+
+### E-b. Privacy Pass standard issuance transport (replace the bespoke wire framing)
+
+Tessera *is* a Privacy Pass scheme (ARC is the IETF Privacy Pass
+[`draft-arc`](https://github.com/ietf-wg-privacypass/draft-arc); the crypto is
+proven against its vectors), but the issuance *transport* is a bespoke TCP framing
+(`tessera://issue-net/v1`). Adopting the standard Privacy Pass **HTTP issuance +
+redemption** architecture ([RFC 9576](https://www.rfc-editor.org/info/rfc9576/) /
+[9577](https://www.rfc-editor.org/rfc/rfc9577.html) /
+[9578](https://datatracker.ietf.org/doc/html/rfc9578)) as that transport would
+drop bespoke code and let **open** Privacy Pass tooling interoperate with Tessera,
+in ARC's natural standardized home. **Decentralization is preserved:** the trust
+model lives in *policy* (Tessera's "attester" is permissionless PoW / pay-ETH, not
+a Big-Tech device gate), not the wire format; the architecture's
+attester/issuer/origin role-split is itself decentralization-friendly and an open,
+multi-implementer standard (not Cloudflare-owned). **Honest scope:** this means
+speaking an open *format*, **not** "Cloudflare/Apple accept our tokens" — those are
+centralized, gatekept trust roots (Apple PAT = genuine-Apple-device attestation),
+and ARC is a *different token type* than their deployed ones, so we would neither
+be drop-in accepted nor want to be. It also doesn't, by itself, harden the
+issuer-as-chokepoint (that still needs the issuer reachable over Tor / multiple
+issuers — same as today). **Why not yet:** non-trivial implementation; only worth
+it if interop with the open Privacy Pass ecosystem becomes a goal.
