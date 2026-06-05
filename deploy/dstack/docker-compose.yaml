@@ -1,0 +1,40 @@
+# Tessera nodes for a dstack (Phala/Flashbots-style) Intel TDX TEE deployment.
+# See docs/DEPLOY.md. This differs from ../docker-compose.yaml in two ways:
+#   1. it uses a PUBLISHED image (a TEE pulls from a registry; build + push first),
+#   2. it mounts /var/run/dstack.sock — the dstack guest-agent socket — into each
+#      node, giving it TDX remote-attestation quotes + KMS key derivation.
+#
+# Why a TEE here (the trust axis, not the clean-IP axis): the RELAY sees
+# {client, exit} and must not log or collude. In an attested enclave a client can
+# VERIFY the running node is exactly this open-source image before trusting it —
+# it physically cannot be modified to log. The ARC server key can also be DERIVED
+# from the dstack KMS and sealed to the enclave (never leaves it). The egress IP
+# is still the TEE host's (a datacenter IP) — TEE does NOT solve clean egress.
+#
+# Generate the deployment manifest + deploy (dstack VMM CLI):
+#   ./vmm-cli.py compose --docker-compose deploy/dstack/docker-compose.yaml \
+#       --name tessera --kms --gateway --public-logs --output app-compose.json
+#   ./vmm-cli.py deploy --name tessera --compose app-compose.json --vcpu 2 --memory 2G
+
+services:
+  exit:
+    image: ${TESSERA_IMAGE:-ghcr.io/nubscarson/tessera-node:0.1.0}
+    command: ["tessera-proxy"]
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    environment:
+      TESSERA_LISTEN: "0.0.0.0:8118"
+      TESSERA_UPSTREAM: "direct"
+    restart: unless-stopped
+
+  relay:
+    image: ${TESSERA_IMAGE:-ghcr.io/nubscarson/tessera-node:0.1.0}
+    command: ["tessera-relay"]
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    environment:
+      TESSERA_RELAY_LISTEN: "0.0.0.0:8119"
+      TESSERA_EXIT_ADDR: "exit:8118"
+    depends_on:
+      - exit
+    restart: unless-stopped

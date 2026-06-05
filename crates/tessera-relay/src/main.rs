@@ -13,7 +13,7 @@
 //! Run:  `cargo run -p tessera-relay`            (exit egresses directly)
 //!       `cargo run -p tessera-relay -- --tor`   (exit egresses via Tor :9050)
 
-use std::net::TcpListener;
+use std::net::{TcpListener, ToSocketAddrs};
 use std::sync::Arc;
 
 use rand_core::OsRng;
@@ -35,6 +35,29 @@ fn issue(sk: &ServerPrivateKey, pk: &ServerPublicKey, rng: &mut OsRng) -> Creden
 }
 
 fn main() {
+    // Deploy mode (env): run JUST the relay first hop, forwarding to an EXTERNAL
+    // exit — for a containerized/TEE node (see docs/DEPLOY.md). When both are set
+    // we skip the all-in-one local demo below. The exit address is resolved once
+    // at startup (a hostname like `exit:8118` resolves via the container DNS).
+    if let (Ok(listen), Ok(exit)) = (
+        std::env::var("TESSERA_RELAY_LISTEN"),
+        std::env::var("TESSERA_EXIT_ADDR"),
+    ) {
+        let exit_addr = exit
+            .to_socket_addrs()
+            .expect("TESSERA_EXIT_ADDR must be HOST:PORT")
+            .next()
+            .expect("TESSERA_EXIT_ADDR did not resolve");
+        let listener = TcpListener::bind(&listen).expect("bind relay");
+        let addr = listener.local_addr().expect("relay addr");
+        println!(
+            "Tessera RELAY node live on {addr} -> exit {exit_addr} \
+             (credential-blind first hop; learns {{client, exit}}, never the destination)"
+        );
+        let _ = serve_relay(listener, exit_addr, None).join();
+        return;
+    }
+
     let tor = std::env::args().any(|a| a == "--tor");
     let mut rng = OsRng;
 

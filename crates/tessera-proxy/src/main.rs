@@ -26,23 +26,33 @@ fn issue(sk: &ServerPrivateKey, pk: &ServerPublicKey, rng: &mut OsRng) -> Creden
 }
 
 fn main() {
-    let tor = std::env::args().any(|a| a == "--tor");
     let mut rng = OsRng;
+
+    // Deploy config via env (ADDITIVE — the defaults preserve the local demo, so
+    // `cargo run -p tessera-proxy` is unchanged; a containerized/TEE node sets
+    // these — see docs/DEPLOY.md):
+    //   TESSERA_LISTEN   bind address (default 127.0.0.1:8118; a node sets 0.0.0.0:PORT)
+    //   TESSERA_UPSTREAM "direct" | "tor" | "tor:HOST:PORT" (default direct; `--tor` => tor)
+    let tor_arg = std::env::args().any(|a| a == "--tor");
+    let listen = std::env::var("TESSERA_LISTEN").unwrap_or_else(|_| "127.0.0.1:8118".into());
+    let upstream = match std::env::var("TESSERA_UPSTREAM").ok().as_deref() {
+        Some("direct") => Upstream::Direct,
+        Some("tor") => Upstream::Tor("127.0.0.1:9050".into()),
+        Some(s) if s.starts_with("tor:") => Upstream::Tor(s[4..].to_string()),
+        _ if tor_arg => Upstream::Tor("127.0.0.1:9050".into()),
+        _ => Upstream::Direct,
+    };
+    let tor = matches!(upstream, Upstream::Tor(_));
 
     let (sk, pk) = ServerPrivateKey::setup(&mut rng);
     let credential = issue(&sk, &pk, &mut rng);
 
-    let listener = TcpListener::bind("127.0.0.1:8118")
+    let listener = TcpListener::bind(&listen)
         .or_else(|_| TcpListener::bind("127.0.0.1:0"))
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
 
     let guard = Arc::new(OriginGuard::new(sk, pk, REQUEST_CTX, PRESENT_CTX, LIMIT));
-    let upstream = if tor {
-        Upstream::Tor("127.0.0.1:9050".to_string())
-    } else {
-        Upstream::Direct
-    };
     // Per-egress-IP human-volume shaping (M5): keep this egress IP's outbound
     // traffic within a human-plausible envelope (bounded distinct destinations,
     // concurrency, jitter, sticky sessions) so a clean IP is not burned by

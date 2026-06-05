@@ -1,0 +1,10 @@
+# Keep the Docker build context small + reproducible.
+target/
+**/target/
+.git/
+docs/
+*.md
+!Cargo.toml
+.github/
+deploy/
+crates/tessera-wasm/extension/

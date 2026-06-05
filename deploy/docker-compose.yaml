@@ -1,0 +1,42 @@
+# The Tessera 2-hop split-trust loop, containerized. See docs/DEPLOY.md.
+#
+#   client --(Tor)--> RELAY --(internal)--> EXIT --(its egress IP)--> destination
+#
+# The RELAY is the credential-blind first hop (learns {client, exit}, never the
+# destination); the EXIT is credential-gated (learns {destination, a valid token},
+# never the client). The client reaches the RELAY anonymously over Tor (front it
+# with a Tor onion service in production — DEPLOY.md). The EXIT egresses from its
+# own IP, which the destination sees and which MUST be clean (the external piece
+# Tessera cannot manufacture).
+#
+# Run locally:   docker compose -f deploy/docker-compose.yaml up --build
+# Deploy in a TEE: see deploy/dstack/app-compose.json + docs/DEPLOY.md.
+
+services:
+  exit:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: tessera-node:0.1.0
+    command: ["tessera-proxy"]
+    environment:
+      # Bind on all interfaces inside the container; the exit's own IP is the
+      # egress the destination sees (set TESSERA_UPSTREAM=tor:HOST:PORT to egress
+      # via a Tor SOCKS proxy instead — but then the destination sees a Tor exit).
+      TESSERA_LISTEN: "0.0.0.0:8118"
+      TESSERA_UPSTREAM: "direct"
+    restart: unless-stopped
+
+  relay:
+    image: tessera-node:0.1.0
+    command: ["tessera-relay"]
+    environment:
+      TESSERA_RELAY_LISTEN: "0.0.0.0:8119"
+      TESSERA_EXIT_ADDR: "exit:8118"
+    depends_on:
+      - exit
+    ports:
+      # The client entry point. In production this sits behind a Tor onion service
+      # (or a gateway), so clients reach it anonymously rather than on a public IP.
+      - "127.0.0.1:8119:8119"
+    restart: unless-stopped
