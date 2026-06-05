@@ -19,9 +19,14 @@ use rand_core::RngCore;
 /// explicit persistence.
 #[derive(Clone)]
 pub struct ServerPrivateKey {
+    /// MAC key for the constant term (committed under `G` in `X0`).
     pub x0: Scalar,
+    /// MAC key for the `m1` attribute.
     pub x1: Scalar,
+    /// MAC key for the `m2` (request-context) attribute.
     pub x2: Scalar,
+    /// Blinding of `x0` (committed under `H` in `X0`); supplies issuance
+    /// unlinkability (spec §7.2).
     pub x0_blinding: Scalar,
 }
 
@@ -47,8 +52,11 @@ impl Drop for ServerPrivateKey {
 /// `ServerPublicKey` (spec §4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServerPublicKey {
+    /// `X0 = x0*G + x0Blinding*H` (the blinded constant-term commitment).
     pub x0: ProjectivePoint,
+    /// `X1 = x1*H`.
     pub x1: ProjectivePoint,
+    /// `X2 = x2*H`.
     pub x2: ProjectivePoint,
 }
 

@@ -35,6 +35,7 @@
 //! as a thrown [`JsError`] rather than a panic/abort.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 use rand_core::OsRng;
 use tessera_arc::arc::{

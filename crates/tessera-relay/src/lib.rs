@@ -51,6 +51,7 @@
 //! direction), demo/example tooling — not a hardened production relay.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 pub mod channel;
 

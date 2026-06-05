@@ -74,6 +74,8 @@ impl CredentialRequest {
         out
     }
 
+    /// Parse a request from exactly `2*Ne + 5*Ns` bytes; errors if the buffer
+    /// is the wrong length or any element fails to decode.
     pub fn from_bytes(buf: &[u8]) -> Result<Self, DeserializeError> {
         let mut r = Reader::new(buf);
         let m1_enc = r.element()?;
@@ -106,6 +108,8 @@ impl CredentialResponse {
         out
     }
 
+    /// Parse a response from exactly `6*Ne + 8*Ns` bytes; errors if the buffer
+    /// is the wrong length or any element fails to decode.
     pub fn from_bytes(buf: &[u8]) -> Result<Self, DeserializeError> {
         let mut r = Reader::new(buf);
         let u = r.element()?;

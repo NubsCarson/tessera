@@ -123,6 +123,7 @@ impl Default for LinearRelation {
 }
 
 impl LinearRelation {
+    /// Create an empty relation with no scalars, elements, or constraints.
     pub fn new() -> Self {
         Self {
             num_scalars: 0,

@@ -6,6 +6,7 @@
 //! whether it is sent over plain TCP, TLS, or a Tor circuit is up to the caller.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 use rand_core::RngCore;
 use tessera_arc::arc::{

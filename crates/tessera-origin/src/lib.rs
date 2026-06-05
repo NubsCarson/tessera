@@ -26,6 +26,7 @@
     doc = "See [`TesseraLayer`] and the [`tower_layer`] module for details."
 )]
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 use tessera_arc::arc::{verify_presentation, Presentation};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
@@ -74,12 +75,17 @@ impl std::error::Error for RejectReason {}
 pub enum Decision {
     /// Admit the request. Carries the hex presentation tag (the rate-limiting
     /// handle the server just recorded) for logging/observability.
-    Admit { tag: String },
+    Admit {
+        /// The hex presentation tag just recorded — the per-request rate-limit
+        /// handle. Carries no IP or identity, so it is safe to log.
+        tag: String,
+    },
     /// Refuse the request, with a reason.
     Reject(RejectReason),
 }
 
 impl Decision {
+    /// Whether this verdict admits the request (`false` means it was rejected).
     pub fn is_admit(&self) -> bool {
         matches!(self, Decision::Admit { .. })
     }

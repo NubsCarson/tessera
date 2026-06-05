@@ -65,6 +65,7 @@
 //! users yet. See `GOAL.md` for the path to production readiness.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 pub mod arc;
 pub mod group;

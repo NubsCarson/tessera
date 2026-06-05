@@ -15,6 +15,7 @@
 //! Demo/example tooling — std-only, not a hardened production proxy.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
 use std::net::{TcpListener, TcpStream};

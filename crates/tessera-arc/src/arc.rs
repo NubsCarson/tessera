@@ -55,50 +55,82 @@ impl std::error::Error for ArcError {}
 /// The client secrets retained between request creation and finalization.
 #[derive(Debug)]
 pub struct ClientSecrets {
+    /// The random credential attribute; the client's long-lived secret that
+    /// later anchors the presentation tag.
     pub m1: Scalar,
+    /// The request-context attribute, derived as `hash_to_scalar(requestContext)`
+    /// so the server can recompute and bind it.
     pub m2: Scalar,
+    /// Blinding for the `m1` encryption (`m1Enc = m1*G + r1*H`).
     pub r1: Scalar,
+    /// Blinding for the `m2` encryption (`m2Enc = m2*G + r2*H`).
     pub r2: Scalar,
 }
 
 /// A credential request sent to the server (spec §4.2.1).
 #[derive(Debug, Clone)]
 pub struct CredentialRequest {
+    /// Pedersen encryption of `m1`: `m1Enc = m1*G + r1*H`.
     pub m1_enc: ProjectivePoint,
+    /// Pedersen encryption of `m2`: `m2Enc = m2*G + r2*H`.
     pub m2_enc: ProjectivePoint,
+    /// Proof that the client knows the openings of `m1Enc`/`m2Enc`
+    /// (`challenge ‖ responses`).
     pub proof: Vec<u8>,
 }
 
 /// A credential response returned by the server (spec §4.2.2).
 #[derive(Debug)]
 pub struct CredentialResponse {
+    /// The MAC base `U = b*G` for a fresh per-issuance blind `b`.
     pub u: ProjectivePoint,
+    /// The blinded MAC value `encUPrime`; the client unblinds it with `r1`/`r2`
+    /// to recover `U'`.
     pub enc_u_prime: ProjectivePoint,
+    /// `x0Blinding` contribution `H*(b*x0Blinding)`, removed during unblinding.
     pub x0_aux: ProjectivePoint,
+    /// `b`-scaled `X1` (`X1*b`), used to strip the `r1` blinding from `encUPrime`.
     pub x1_aux: ProjectivePoint,
+    /// `b`-scaled `X2` (`X2*b`), used to strip the `r2` blinding from `encUPrime`.
     pub x2_aux: ProjectivePoint,
+    /// `b`-scaled generator `H*b`, the base the auxiliary points are proven against.
     pub h_aux: ProjectivePoint,
+    /// Proof that the response was computed with the server's secret key
+    /// (`challenge ‖ responses`).
     pub proof: Vec<u8>,
 }
 
 /// A finalized credential the client can present (spec §4.2.3).
 #[derive(Debug, Clone)]
 pub struct Credential {
+    /// The client's secret attribute, re-randomized into every presentation tag.
     pub m1: Scalar,
+    /// The MAC base `U`.
     pub u: ProjectivePoint,
+    /// The unblinded MAC value `U'` recovered from the response.
     pub u_prime: ProjectivePoint,
+    /// The server's public `X1`, retained so the client can build presentations
+    /// without holding the full public key.
     pub x1: ProjectivePoint,
 }
 
 /// A single presentation of a credential (spec §4.3.2).
 #[derive(Debug)]
 pub struct Presentation {
+    /// Re-randomized MAC base `U = a*U` for a fresh per-presentation blind `a`.
     pub u: ProjectivePoint,
+    /// Commitment to the re-randomized MAC value `U'` (`a*U' + r*G`).
     pub u_prime_commit: ProjectivePoint,
+    /// Commitment to `m1` against the presentation base (`m1*U + z*H`).
     pub m1_commit: ProjectivePoint,
+    /// The double-spend tag `generatorT * (m1 + nonce)⁻¹`; constant for a given
+    /// (credential, context, nonce), which is how reuse is detected.
     pub tag: ProjectivePoint,
+    /// Pedersen commitment to the presentation nonce (`nonce*G + nonceBlinding*H`).
     pub nonce_commit: ProjectivePoint,
+    /// Bit-commitment elements of the range proof showing `0 <= nonce < limit`.
     pub d: Vec<ProjectivePoint>,
+    /// The combined presentation + range proof (`challenge ‖ responses`).
     pub proof: Vec<u8>,
 }
 
@@ -337,6 +369,7 @@ pub struct TagStore {
 }
 
 impl TagStore {
+    /// Create an empty tag store.
     pub fn new() -> Self {
         Self::default()
     }

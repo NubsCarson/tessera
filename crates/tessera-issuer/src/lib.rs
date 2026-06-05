@@ -28,6 +28,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 use rand_core::RngCore;
 use sha2::{Digest, Sha256};
@@ -43,13 +44,20 @@ const POW_DST: &[u8] = b"tessera-pow-v1";
 /// number of leading zero bits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PowChallenge {
+    /// Random challenge nonce; the client searches for a counter whose digest
+    /// over this nonce clears `difficulty`. Also the store key that makes a
+    /// solved challenge single-use.
     pub nonce: [u8; CHALLENGE_LEN],
+    /// Required leading zero bits of the solution digest — the server's cost
+    /// dial (clamped to `0..=64` at mint time).
     pub difficulty: u32,
 }
 
 /// A client's solution: the counter whose hash meets the difficulty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PowSolution {
+    /// The counter the client found: its digest over the challenge nonce has
+    /// `difficulty` leading zero bits.
     pub counter: u64,
 }
 
@@ -115,6 +123,7 @@ pub struct ChallengeStore {
 }
 
 impl ChallengeStore {
+    /// Create an empty challenge store.
     pub fn new() -> Self {
         Self::default()
     }

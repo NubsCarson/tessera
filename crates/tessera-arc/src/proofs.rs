@@ -295,19 +295,33 @@ pub struct PresentationProof {
 /// `Present`).
 #[allow(clippy::too_many_arguments)]
 pub struct PresentationWitness {
+    /// Re-randomized MAC base `U` (public instance).
     pub u: ProjectivePoint,
+    /// Commitment to the re-randomized MAC value `U'` (public instance).
     pub u_prime_commit: ProjectivePoint,
+    /// Commitment to `m1` (public instance).
     pub m1_commit: ProjectivePoint,
+    /// The double-spend tag (public instance).
     pub tag: ProjectivePoint,
+    /// Per-context tag generator `hash_to_group(presentationContext, "Tag")`.
     pub generator_t: ProjectivePoint,
+    /// The secret attribute `m1` (witness).
     pub m1: Scalar,
+    /// The server's public `X1` (public instance).
     pub x1: ProjectivePoint,
+    /// The MAC-verification helper `V = z*X1 - r*G` (public instance).
     pub v: ProjectivePoint,
+    /// Blinding `r` of `u_prime_commit` (witness).
     pub r: Scalar,
+    /// Blinding `z` of `m1_commit` (witness).
     pub z: Scalar,
+    /// The presentation nonce, in `0..limit` (witness; range-proven).
     pub nonce: u64,
+    /// Blinding of `nonce_commit` (witness).
     pub nonce_blinding: Scalar,
+    /// Pedersen commitment to the nonce (public instance).
     pub nonce_commit: ProjectivePoint,
+    /// Presentation limit; fixes the number of range-proof bits.
     pub limit: u64,
 }
 

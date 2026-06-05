@@ -146,6 +146,7 @@
 //! commitment), `rand_core`, and `hex`.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 pub mod crypto;
 pub mod poseidon;
