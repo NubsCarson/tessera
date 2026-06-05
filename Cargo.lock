@@ -987,8 +987,10 @@ name = "tessera-issuer"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "k256",
  "rand_core",
  "sha2",
+ "sha3",
  "tessera-arc",
 ]
 

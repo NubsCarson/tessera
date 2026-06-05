@@ -91,10 +91,16 @@ genuinely required. The work is not wasted; it's the advanced tier.
 The leaner path's *components* are built; to be a deployed **payment** network a
 stranger can use still needs (mostly NOT the heavy crypto):
 
-1. **Token purchase** — a way to pay (ETH) and receive N blind-signed tokens.
-   Today tokens are *earned* via PoW (`tessera-issuer`); a paid mint
-   (`TokenMint.sol` exists) wired to the issuer is the small remaining piece.
-   **Buildable.**
+1. **Token purchase** — ✅ **built**: pay ETH to `TokenMint.sol` (earn
+   `entitled[buyer]` tokens), then the issuer's **paid mode** issues credentials
+   against that on-chain entitlement. The buyer proves control of its address
+   (`ecrecover` over a fresh issuer challenge); the issuer reads `entitled(buyer)`
+   live (`tessera-issuer::mint::EthRpc`, a std-only `eth_call`) and gates issuance
+   durably (`tessera-issuer::mint`, `serve_issuance_paid`, `obtain_credential_paid`).
+   Proven against a real local **anvil** chain (`tests/anvil_entitled.rs`). PoW
+   issuance remains the default; paid is opt-in. Consuming the entitlement on-chain
+   (`TokenMint.redeem`) is the operator's submit step (calldata via
+   `mint::encode_redeem`).
 2. **Client/wallet UX** — ✅ **built**: the network now runs end to end. A
    `tessera-issuer` node serves PoW-gated issuance over the wire; the
    `tessera-client` binary obtains a credential and runs a **local `CONNECT`

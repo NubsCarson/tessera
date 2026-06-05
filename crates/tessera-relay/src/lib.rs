@@ -88,7 +88,7 @@ use tessera_proxy::pipe;
 // budget exhaustion, re-obtains a credential from the issuer.
 use rand_core::OsRng;
 use tessera_arc::arc::Credential;
-use tessera_client::{obtain_credential, TesseraClient};
+use tessera_client::{obtain_credential, obtain_credential_paid, TesseraClient};
 
 /// What a hop observed about a single forwarded connection. Wired into each hop
 /// so a test (or an operator) can prove the **split-trust** property: assert the
@@ -734,6 +734,10 @@ fn expect_200(stream: &mut TcpStream, who: &str) -> Result<()> {
 // traffic is admitted on a credential, never the client's IP, with the relay
 // blind to the destination and the exit blind to the client.
 
+/// Cloned issuer coordinates for an off-lock re-issue: `(issuer_addr, request_ctx,
+/// pk_pin, buyer_secret)`.
+type ReissueCoords = (String, Vec<u8>, Option<Vec<u8>>, Option<[u8; 32]>);
+
 /// A re-issuing credential holder for the client proxy: mints the next
 /// presentation header and, once the credential's budget is spent, transparently
 /// obtains a fresh one from the issuer so the proxy keeps serving.
@@ -744,12 +748,16 @@ pub struct CredentialSource {
     present_ctx: Vec<u8>,
     limit: u64,
     pin: Option<Vec<u8>>,
+    /// `Some` => re-issue via the PAID issuer using this buyer key; `None` => PoW.
+    buyer_secret: Option<[u8; 32]>,
 }
 
 impl CredentialSource {
     /// Build from an already-obtained `initial` credential plus the issuer
     /// coordinates to re-issue when the budget runs out. `pin`, if set, is the
-    /// issuer-public-key prefix any re-issuance must match.
+    /// issuer-public-key prefix any re-issuance must match. `buyer_secret`, if
+    /// set, re-issues against a **paid** issuer (proving control of that address);
+    /// otherwise re-issuance pays the PoW.
     pub fn new(
         initial: Credential,
         issuer_addr: impl Into<String>,
@@ -757,6 +765,7 @@ impl CredentialSource {
         present_ctx: &[u8],
         limit: u64,
         pin: Option<Vec<u8>>,
+        buyer_secret: Option<[u8; 32]>,
     ) -> Self {
         Self {
             client: TesseraClient::new(initial, present_ctx, limit),
@@ -765,6 +774,7 @@ impl CredentialSource {
             present_ctx: present_ctx.to_vec(),
             limit,
             pin,
+            buyer_secret,
         }
     }
 
@@ -774,13 +784,14 @@ impl CredentialSource {
         self.client.presentation_header(&mut OsRng).ok()
     }
 
-    /// Issuer coordinates for a re-issue, cloned so the slow `obtain_credential`
-    /// runs **without** the [`CredentialSource`] lock held (no head-of-line stall).
-    fn reissue_coords(&self) -> (String, Vec<u8>, Option<Vec<u8>>) {
+    /// Issuer coordinates for a re-issue, cloned so the slow obtain call runs
+    /// **without** the [`CredentialSource`] lock held (no head-of-line stall).
+    fn reissue_coords(&self) -> ReissueCoords {
         (
             self.issuer_addr.clone(),
             self.request_ctx.clone(),
             self.pin.clone(),
+            self.buyer_secret,
         )
     }
 
@@ -805,11 +816,14 @@ fn mint_header(source: &Arc<Mutex<CredentialSource>>) -> Result<String> {
     {
         return Ok(h);
     }
-    let (issuer, req_ctx, pin) = source
+    let (issuer, req_ctx, pin, buyer) = source
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .reissue_coords();
-    let credential = obtain_credential(&issuer, &req_ctx, pin.as_deref())?;
+    let credential = match buyer {
+        Some(secret) => obtain_credential_paid(&issuer, &req_ctx, &secret, pin.as_deref())?,
+        None => obtain_credential(&issuer, &req_ctx, pin.as_deref())?,
+    };
     source
         .lock()
         .unwrap_or_else(|p| p.into_inner())

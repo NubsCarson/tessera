@@ -106,3 +106,78 @@ pub fn obtain_credential(
         .finalize(&response)
         .map_err(|e| Error::other(format!("credential finalize failed: {e:?}")))
 }
+
+/// Obtain a credential from a **paid** issuer (one running
+/// [`serve_issuance_paid`](tessera_issuer::serve_issuance_paid)): prove control of
+/// the Ethereum address `buyer_secret` (a 32-byte secp256k1 key) that holds the
+/// TokenMint entitlement, and receive a credential charged against it.
+///
+/// `expected_pk_prefix` is **required** here (≥ 8 bytes): the control signature is
+/// bound to the issuer's pk, and pinning is what prevents a relay/MITM from luring
+/// you into signing for a *different* issuer (a wormhole that would steal your
+/// entitlement). Same transport-privacy caveat as [`obtain_credential`]: a direct
+/// connection, so the issuer sees the caller's IP; wrap it in Tor for anonymity.
+pub fn obtain_credential_paid(
+    issuer_addr: &str,
+    request_context: &[u8],
+    buyer_secret: &[u8; 32],
+    expected_pk_prefix: Option<&[u8]>,
+) -> Result<Credential> {
+    use tessera_issuer::mint::sign_control;
+    use tessera_issuer::net::{CONTROL_SIG_LEN, PAID_CHALLENGE_LEN};
+
+    // Paid mode REQUIRES a pin: the control signature is bound to the issuer pk,
+    // and pinning is what stops a relay/MITM from luring the buyer into signing
+    // for a different issuer (the wormhole). Refuse without it.
+    let prefix = expected_pk_prefix.ok_or_else(|| {
+        Error::other("paid issuance requires an issuer-pk pin (TESSERA_ISSUER_PK)")
+    })?;
+    if prefix.len() < MIN_PIN_LEN {
+        return Err(Error::other(
+            "issuer pk pin too short (need >= 8 bytes / 16 hex chars)",
+        ));
+    }
+
+    let mut s = TcpStream::connect(issuer_addr)?;
+    s.set_read_timeout(Some(Duration::from_secs(60)))?;
+    s.set_write_timeout(Some(Duration::from_secs(30)))?;
+
+    // 1. HELLO: pk(99) ‖ challenge(32).
+    let hello = read_frame(&mut s)?;
+    if hello.len() != HELLO_PK_LEN + PAID_CHALLENGE_LEN {
+        return Err(Error::other("issuer sent a malformed paid HELLO"));
+    }
+    let pk_bytes = &hello[..HELLO_PK_LEN];
+    if !pk_bytes.starts_with(prefix) {
+        return Err(Error::other("issuer public key did not match the pin"));
+    }
+    let public_key =
+        ServerPublicKey::from_bytes(pk_bytes).map_err(|_| Error::other("bad issuer public key"))?;
+    let challenge = &hello[HELLO_PK_LEN..];
+
+    // 2. Prove control of the buyer address — signature BOUND to this issuer's pk.
+    let sig = sign_control(pk_bytes, challenge, buyer_secret)
+        .ok_or_else(|| Error::other("invalid buyer secret key"))?;
+
+    // 3. REQUEST: sig(65) ‖ CredentialRequest.
+    let mut rng = OsRng;
+    let (pending, request) = begin_issuance(request_context, public_key, &mut rng);
+    let req_bytes = request.to_bytes();
+    let mut frame = Vec::with_capacity(CONTROL_SIG_LEN + req_bytes.len());
+    frame.extend_from_slice(&sig);
+    frame.extend_from_slice(&req_bytes);
+    write_frame(&mut s, &frame)?;
+
+    // 4. RESPONSE.
+    let resp = read_frame(&mut s)?;
+    if resp.is_empty() {
+        return Err(Error::other(
+            "issuer rejected the request (bad proof / insufficient paid entitlement)",
+        ));
+    }
+    let response = CredentialResponse::from_bytes(&resp)
+        .map_err(|_| Error::other("malformed CredentialResponse"))?;
+    pending
+        .finalize(&response)
+        .map_err(|e| Error::other(format!("credential finalize failed: {e:?}")))
+}

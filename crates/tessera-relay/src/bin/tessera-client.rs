@@ -22,7 +22,7 @@
 
 use std::net::{TcpListener, ToSocketAddrs};
 
-use tessera_client::obtain_credential;
+use tessera_client::{obtain_credential, obtain_credential_paid};
 use tessera_relay::{serve_client_proxy, CredentialSource};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
@@ -47,6 +47,19 @@ fn main() {
         .and_then(|h| hex::decode(h.trim()).ok())
         .filter(|p| !p.is_empty());
 
+    // PAID mode iff TESSERA_BUYER_KEY (a 32-byte hex secp256k1 secret) is set: the
+    // client proves control of that Ethereum address, which must hold a TokenMint
+    // entitlement. Otherwise the client pays the issuer's proof of work.
+    let buyer_secret: Option<[u8; 32]> = std::env::var("TESSERA_BUYER_KEY")
+        .ok()
+        .and_then(|h| hex::decode(h.trim().strip_prefix("0x").unwrap_or(h.trim())).ok())
+        .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
+
+    if buyer_secret.is_some() && pin.is_none() {
+        // Paid mode binds the control signature to the issuer pk; without a pin a
+        // relay could lure you into signing for a different issuer (wormhole).
+        panic!("paid mode (TESSERA_BUYER_KEY) requires TESSERA_ISSUER_PK (the issuer's pk fingerprint)");
+    }
     if pin.is_none() {
         eprintln!(
             "warning: no TESSERA_ISSUER_PK pin set — trusting the issuer's key on first use. \
@@ -54,11 +67,20 @@ fn main() {
         );
     }
 
-    eprintln!(
-        "Tessera CLIENT: obtaining a credential from issuer {issuer} (paying proof-of-work)…"
-    );
-    let credential = obtain_credential(&issuer, REQUEST_CTX, pin.as_deref())
-        .unwrap_or_else(|e| panic!("could not obtain a credential from {issuer}: {e}"));
+    let credential = match &buyer_secret {
+        Some(secret) => {
+            eprintln!("Tessera CLIENT: obtaining a PAID credential from issuer {issuer}…");
+            obtain_credential_paid(&issuer, REQUEST_CTX, secret, pin.as_deref())
+                .unwrap_or_else(|e| panic!("could not obtain a paid credential from {issuer}: {e}"))
+        }
+        None => {
+            eprintln!(
+                "Tessera CLIENT: obtaining a credential from issuer {issuer} (paying proof-of-work)…"
+            );
+            obtain_credential(&issuer, REQUEST_CTX, pin.as_deref())
+                .unwrap_or_else(|e| panic!("could not obtain a credential from {issuer}: {e}"))
+        }
+    };
     eprintln!("Tessera CLIENT: credential obtained.");
 
     let source = CredentialSource::new(
@@ -68,6 +90,7 @@ fn main() {
         PRESENT_CTX,
         LIMIT,
         pin,
+        buyer_secret,
     );
 
     let listener = TcpListener::bind(&listen)

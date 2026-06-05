@@ -35,9 +35,10 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 pub mod keyfile;
+pub mod mint;
 pub mod net;
 pub use keyfile::ensure_shared_key;
-pub use net::serve_issuance;
+pub use net::{serve_issuance, serve_issuance_paid};
 
 /// Length of the random challenge nonce, in bytes.
 pub const CHALLENGE_LEN: usize = 16;

@@ -50,6 +50,22 @@ the local `cargo run` demos):
 | `TESSERA_RELAY` / `TESSERA_EXIT` | client | relay / exit `HOST:PORT` to route through |
 | `TESSERA_CLIENT_LISTEN` | client | local proxy bind (default `127.0.0.1:8120`) |
 | `TESSERA_ISSUER_PK` | client | hex pin: the issuer pk (or fingerprint prefix) issuance must match |
+| `TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT` | issuer | **paid mode**: gate issuance on an on-chain `TokenMint` purchase (RPC URL + contract address) instead of PoW |
+| `TESSERA_MINT_LEDGER` | issuer | optional durable redemption-ledger path (paid mode) |
+| `TESSERA_BUYER_KEY` | client | hex secp256k1 secret of the address holding the entitlement (switches the client to paid issuance) |
+
+**Paid issuance (optional — pay ETH instead of PoW).** Deploy `TokenMint`
+(`contracts/src/TokenMint.sol`) with the issuer's Ethereum address; a buyer calls
+`purchase()` with ETH to earn `entitled[buyer]` tokens. Run the issuer with
+`TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT` set (it reads the live entitlement via
+`eth_call`); run the client with `TESSERA_BUYER_KEY` set to the buyer's secret. The
+client proves control of its address (`ecrecover` over a fresh challenge) and the
+issuer issues a credential against the on-chain balance, charging
+`TOKENS_PER_CREDENTIAL` (64) tokens, tracked durably so an entitlement becomes
+credentials at most once. The issuer consuming it on-chain (`TokenMint.redeem`) is
+an operator submit step (calldata from `mint::encode_redeem`); the single-issuer
+durable ledger is the default double-issue guard. Verified end to end against a
+local **anvil** chain (`crates/tessera-issuer/tests/anvil_entitled.rs`, opt-in).
 
 ## 1. Local Docker — the whole network
 

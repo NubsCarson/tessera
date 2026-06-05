@@ -19,6 +19,11 @@ rand_core.workspace = true
 # the ARC credential authority, so it needs the ARC issuance primitives + keys.
 tessera-arc = { path = "../tessera-arc" }
 hex.workspace = true
+# Paid-mint gate (`mint` module): keccak256 for the ABI selectors + the
+# proof-of-control digest, secp256k1 ecrecover to bind a request to the buyer's
+# Ethereum address. Same EVM-native crypto the channel court uses.
+sha3.workspace = true
+k256 = { workspace = true }
 
 [dev-dependencies]
 hex.workspace = true

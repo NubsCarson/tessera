@@ -100,6 +100,12 @@ request through it on a fresh, unlinkable token — re-issuing when the budget i
 spent. Verified end to end: `crates/tessera-relay/tests/network.rs` (all four
 nodes in-process) plus a 4-process binary run reaching a real HTTPS site (`200`).
 
+Issuance can be gated on **proof of work** (default) or a **paid on-chain mint**:
+buy tokens from `TokenMint.sol` with ETH, prove control of the buyer address, and
+the issuer issues against the live on-chain entitlement (`TESSERA_MINT_RPC` /
+`TESSERA_BUYER_KEY`; verified against a real anvil chain). See
+[`docs/DEPLOY.md`](./docs/DEPLOY.md).
+
 For a **verifiable, non-logging relay**, deploy it into an Intel TDX **TEE via
 dstack** — a client can then *attest* that the node runs this exact open-source
 image and physically can't log. That nails the **trust** axis; the **clean-IP**

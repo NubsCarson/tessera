@@ -9,7 +9,7 @@
 #![deny(missing_docs)]
 
 pub mod net;
-pub use net::obtain_credential;
+pub use net::{obtain_credential, obtain_credential_paid};
 
 use rand_core::RngCore;
 use tessera_arc::arc::{

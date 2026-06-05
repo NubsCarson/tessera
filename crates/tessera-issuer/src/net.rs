@@ -33,11 +33,19 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use rand_core::OsRng;
+use rand_core::{OsRng, RngCore};
 use tessera_arc::arc::{create_credential_response, CredentialRequest};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 
+use crate::mint::{EntitlementSource, PaymentGate};
 use crate::{PowChallenge, PowSolution, CHALLENGE_LEN};
+
+/// Length of the random control challenge in the **paid** HELLO (the buyer signs
+/// `keccak256(domain ‖ issuer_pk ‖ challenge)` to prove control of its address).
+pub const PAID_CHALLENGE_LEN: usize = 32;
+
+/// Recoverable signature length (`r‖s‖v`) in the paid REQUEST.
+pub const CONTROL_SIG_LEN: usize = 65;
 
 /// Largest accepted frame body. The real messages are tiny (`CredentialRequest`
 /// is 226 B, `CredentialResponse` 454 B); the cap just bounds a hostile peer.
@@ -169,6 +177,131 @@ fn handle_issuance(
         Err(_) => {
             let _ = write_frame(s, &[]);
             Err(Error::new(ErrorKind::InvalidData, "request proof rejected"))
+        }
+    }
+}
+
+/// Serve **paid** ARC issuance: instead of proof of work, the client proves
+/// control of an Ethereum address with a paid `TokenMint` entitlement, and the
+/// `gate` reserves the cost before a credential is issued.
+///
+/// Protocol (`tessera://issue-net/v1`, paid variant):
+/// 1. **Server → client `HELLO`**: `pk(99) ‖ challenge(32)` (a fresh nonce to sign).
+/// 2. **Client → server `REQUEST`**: `sig(65) ‖ CredentialRequest` — a recoverable
+///    secp256k1 signature over `keccak256(domain ‖ challenge)`, then the blinded
+///    ARC request. The buyer address is *recovered* from the signature.
+/// 3. **Server → client `RESPONSE`**: `CredentialResponse`, or empty on rejection
+///    (bad signature / insufficient entitlement / malformed / arithmetic).
+///
+/// Same keyed-verification note as [`serve_issuance`]: `pk` must match the exit's.
+pub fn serve_issuance_paid<E>(
+    listener: TcpListener,
+    sk: ServerPrivateKey,
+    pk: ServerPublicKey,
+    gate: PaymentGate<E>,
+) -> JoinHandle<()>
+where
+    E: EntitlementSource + Send + Sync + 'static,
+{
+    let sk = Arc::new(sk);
+    let gate = Arc::new(gate);
+    let inflight = Arc::new(AtomicUsize::new(0));
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let _ = s.set_read_timeout(Some(IO_TIMEOUT));
+            let _ = s.set_write_timeout(Some(IO_TIMEOUT));
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+                inflight.fetch_sub(1, Ordering::AcqRel);
+                continue;
+            }
+            let permit = InflightGuard(Arc::clone(&inflight));
+            let sk = Arc::clone(&sk);
+            let gate = Arc::clone(&gate);
+            thread::spawn(move || {
+                let _permit = permit;
+                let _ = handle_issuance_paid(&mut s, &sk, &pk, &gate);
+            });
+        }
+    })
+}
+
+/// One paid issuance exchange (see [`serve_issuance_paid`]).
+fn handle_issuance_paid<E: EntitlementSource>(
+    s: &mut TcpStream,
+    sk: &ServerPrivateKey,
+    pk: &ServerPublicKey,
+    gate: &PaymentGate<E>,
+) -> Result<()> {
+    let mut rng = OsRng;
+
+    // 1. HELLO — pk ‖ fresh control challenge. The signature is bound to `pk`, so
+    //    it can't be wormholed to another issuer (the client pins `pk`).
+    let pk_bytes = pk.serialize();
+    let mut challenge = [0u8; PAID_CHALLENGE_LEN];
+    rng.fill_bytes(&mut challenge);
+    let mut hello = Vec::with_capacity(HELLO_PK_LEN + PAID_CHALLENGE_LEN);
+    hello.extend_from_slice(&pk_bytes);
+    hello.extend_from_slice(&challenge);
+    write_frame(s, &hello)?;
+
+    // 2. REQUEST — sig(65) ‖ CredentialRequest.
+    let req = read_frame(s)?;
+    if req.len() < CONTROL_SIG_LEN {
+        let _ = write_frame(s, &[]);
+        return Err(Error::new(ErrorKind::InvalidData, "paid REQUEST too short"));
+    }
+    let mut sig = [0u8; CONTROL_SIG_LEN];
+    sig.copy_from_slice(&req[..CONTROL_SIG_LEN]);
+
+    // Recover the buyer from the (issuer-bound) control signature — proof only,
+    // no reservation yet.
+    let buyer = match crate::mint::recover_buyer(&pk_bytes, &challenge, &sig) {
+        Some(b) => b,
+        None => {
+            let _ = write_frame(s, &[]);
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "bad control signature",
+            ));
+        }
+    };
+
+    // Parse + build the credential BEFORE charging, so a malformed/garbage request
+    // never burns the buyer's paid entitlement.
+    let request = match CredentialRequest::from_bytes(&req[CONTROL_SIG_LEN..]) {
+        Ok(r) => r,
+        Err(_) => {
+            let _ = write_frame(s, &[]);
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "malformed CredentialRequest",
+            ));
+        }
+    };
+    let resp = match create_credential_response(sk, pk, &request, &mut rng) {
+        Ok(r) => r,
+        Err(_) => {
+            let _ = write_frame(s, &[]);
+            return Err(Error::new(ErrorKind::InvalidData, "request proof rejected"));
+        }
+    };
+
+    // Now that issuance is certain, RESERVE the entitlement…
+    if gate.reserve(&buyer).is_err() {
+        let _ = write_frame(s, &[]); // reject: unpaid / overdrawn
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "insufficient paid entitlement",
+        ));
+    }
+    // …and deliver. If delivery fails, REFUND so the buyer isn't charged for a
+    // credential it never received.
+    match write_frame(s, &resp.to_bytes()) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            gate.release(&buyer);
+            Err(e)
         }
     }
 }

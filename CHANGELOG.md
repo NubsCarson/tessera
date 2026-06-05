@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — paid mint wired to issuance (pay ETH → credentials)
+
+- **`tessera-issuer::mint`** — gate issuance on an on-chain `TokenMint` purchase
+  instead of PoW: ABI codec for `entitled(address)` / `redeem(address,uint256)`
+  (selectors pinned against `cast sig`), `ecrecover` proof-of-address-control
+  (k256 + keccak, the channel court's EVM-native crypto), a std-only JSON-RPC
+  `eth_call` reader (`EthRpc` — no async/RPC dependency), an `EntitlementSource`
+  trait (live + in-memory), and a durable `RedemptionLedger` (single-issuer
+  double-issue guard). `PaymentGate` ties them together.
+- **`serve_issuance_paid`** + **`obtain_credential_paid`** — the paid variant of
+  the wire protocol: HELLO carries a control challenge, the client returns a
+  recoverable signature + the blinded request, the issuer recovers the buyer,
+  reads its entitlement, reserves the cost, and issues. The `tessera-issuer`
+  binary enables paid mode via `TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT`; the
+  `tessera-client` binary (and `CredentialSource` auto-reissue) via `TESSERA_BUYER_KEY`.
+- Proven against a **real local anvil chain** (`tests/anvil_entitled.rs`, opt-in /
+  self-skipping like the Tor test): deploy TokenMint → `purchase()` →
+  `EthRpc.entitled` reads the real `64`. Plus unit tests (selectors, calldata,
+  proof-of-control binding, ledger persistence, mock-HTTP `eth_call`) and an
+  in-process paid loop (`paid_issuance_admits_buyer_routes_and_rejects_unpaid`).
+
 ### Added — the network now runs end to end ("run it yourself")
 
 - **Networked issuance** (`tessera-issuer::net`): a framed, PoW-gated issuance

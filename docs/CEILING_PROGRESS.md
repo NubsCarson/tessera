@@ -74,7 +74,7 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | (this commit) — `tessera-client` bin, proven by `tests/network.rs` + a 4-process run to a real HTTPS site (200) |
 | Shared-key exit (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | (this commit) |
 | Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3` + (this commit) |
-| Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → blind-issue) | ⬜ | buildable — the small remaining piece |
+| Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → issue) | ✅ | (this commit) — `tessera-issuer::mint` (ecrecover proof + std-only `eth_call` read + durable ledger), `serve_issuance_paid`/`obtain_credential_paid`; proven vs real **anvil** (`tests/anvil_entitled.rs`) |
 | Deployed **clean-IP** exit + Tor/Nym crowd + audit | 🔒 | external (the clean IP is now the *only* thing between this and a stranger using it) |
 
 ## SHOULD — in progress

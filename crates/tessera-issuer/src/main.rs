@@ -9,12 +9,29 @@
 //!   `TESSERA_ISSUER_LISTEN`  bind address (default `127.0.0.1:8121`)
 //!   `TESSERA_KEY_FILE`       shared ARC server-key path (default: an ephemeral key)
 //!   `TESSERA_POW_DIFFICULTY` leading-zero-bit PoW cost per credential (default `16`)
+//!
+//! **Paid mode** (gate on an on-chain `TokenMint` purchase instead of PoW) — set
+//! both:
+//!   `TESSERA_MINT_RPC`       Ethereum JSON-RPC URL (e.g. `http://127.0.0.1:8545`)
+//!   `TESSERA_MINT_CONTRACT`  TokenMint address (0x… 20 bytes)
+//!   `TESSERA_MINT_LEDGER`    optional durable redemption-ledger path
 
 use std::net::TcpListener;
 
 use rand_core::OsRng;
 use tessera_arc::keys::ServerPrivateKey;
-use tessera_issuer::{ensure_shared_key, serve_issuance};
+use tessera_issuer::mint::{EthRpc, PaymentGate, RedemptionLedger, TOKENS_PER_CREDENTIAL};
+use tessera_issuer::{ensure_shared_key, serve_issuance, serve_issuance_paid};
+
+/// Parse a `0x`-prefixed (or bare) 20-byte hex address.
+fn parse_addr(s: &str) -> Option<[u8; 20]> {
+    let bytes = hex::decode(s.trim().strip_prefix("0x").unwrap_or(s.trim())).ok()?;
+    (bytes.len() == 20).then(|| {
+        let mut a = [0u8; 20];
+        a.copy_from_slice(&bytes);
+        a
+    })
+}
 
 /// Default PoW difficulty (leading zero bits ≈ `2^difficulty` hashes per mint).
 const DEFAULT_DIFFICULTY: u32 = 16;
@@ -49,15 +66,51 @@ fn main() {
     let addr = listener.local_addr().expect("issuer addr");
     let fingerprint = hex::encode(&pk.serialize()[..8]);
 
+    // Paid mode iff both TESSERA_MINT_RPC and TESSERA_MINT_CONTRACT are set.
+    let paid = match (
+        std::env::var("TESSERA_MINT_RPC")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        std::env::var("TESSERA_MINT_CONTRACT")
+            .ok()
+            .and_then(|s| parse_addr(&s)),
+    ) {
+        (Some(rpc), Some(contract)) => Some((rpc, contract)),
+        _ => None,
+    };
+
     println!("Tessera ISSUER (credential authority) live on {addr}");
     println!("  key:        {key_src}  ·  pk fingerprint {fingerprint}…");
-    println!("  PoW cost:   {difficulty} leading zero bits per credential");
     println!("  the exit (tessera-proxy) MUST share this key to verify presentations.");
-    println!(
-        "  clients:    set TESSERA_ISSUER={addr} (and TESSERA_ISSUER_PK={fingerprint}… to pin)."
-    );
 
-    serve_issuance(listener, sk, pk, difficulty)
-        .join()
-        .expect("issuer thread");
+    match paid {
+        Some((rpc, contract)) => {
+            let ledger = match std::env::var("TESSERA_MINT_LEDGER") {
+                Ok(p) if !p.is_empty() => RedemptionLedger::at(p),
+                _ => RedemptionLedger::in_memory(),
+            };
+            let gate = PaymentGate::new(
+                EthRpc::new(rpc.clone(), contract),
+                ledger,
+                TOKENS_PER_CREDENTIAL,
+            );
+            println!(
+                "  gate:       PAID — TokenMint 0x{} via {rpc}  ·  {TOKENS_PER_CREDENTIAL} tokens/credential",
+                hex::encode(contract)
+            );
+            println!("  clients:    set TESSERA_ISSUER={addr} + TESSERA_BUYER_KEY=<hex secp256k1 secret>.");
+            serve_issuance_paid(listener, sk, pk, gate)
+                .join()
+                .expect("issuer thread");
+        }
+        None => {
+            println!("  gate:       PoW — {difficulty} leading zero bits per credential");
+            println!(
+                "  clients:    set TESSERA_ISSUER={addr} (and TESSERA_ISSUER_PK={fingerprint}… to pin)."
+            );
+            serve_issuance(listener, sk, pk, difficulty)
+                .join()
+                .expect("issuer thread");
+        }
+    }
 }

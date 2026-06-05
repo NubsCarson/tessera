@@ -12,16 +12,21 @@
 //! the PoW, gets a credential over the wire, and its presentations verify at the
 //! exit. No external network, no TLS — the destination is a local echo server.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
 
 use tessera_arc::keys::ServerPrivateKey;
-use tessera_client::obtain_credential;
-use tessera_issuer::serve_issuance;
+use tessera_client::{obtain_credential, obtain_credential_paid, TesseraClient};
+use tessera_issuer::mint::{
+    address_of, InMemoryEntitlement, PaymentGate, RedemptionLedger, TOKENS_PER_CREDENTIAL,
+};
+use tessera_issuer::{serve_issuance, serve_issuance_paid};
 use tessera_origin::OriginGuard;
 use tessera_proxy::{serve as serve_exit, Upstream};
+use tessera_relay::open_through_relay;
 use tessera_relay::{serve as serve_relay, serve_client_proxy, CredentialSource};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
@@ -87,6 +92,7 @@ fn spawn_network(limit: u64) -> SocketAddr {
         REQUEST_CTX,
         PRESENT_CTX,
         limit,
+        None,
         None,
     );
     let client_listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -164,4 +170,69 @@ fn issuer_pk_pin_mismatch_is_rejected() {
     let good_prefix = pk.serialize()[..8].to_vec();
     let ok = obtain_credential(&issuer_addr, REQUEST_CTX, Some(&good_prefix));
     assert!(ok.is_ok(), "the correct issuer-pk pin must be accepted");
+}
+
+#[test]
+fn paid_issuance_admits_buyer_routes_and_rejects_unpaid() {
+    // A PAID issuer (TokenMint-gated) instead of PoW: the buyer proves control of
+    // an address holding entitlement, gets a credential, and routes through the
+    // loop; a buyer who never paid is refused.
+    let echo = spawn_echo();
+
+    // issuer + exit share one ARC key.
+    let (sk, pk) = ServerPrivateKey::setup(&mut rand_core::OsRng);
+    let sk_exit = ServerPrivateKey::from_bytes(&sk.serialize()).unwrap();
+
+    let exit_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let exit_addr = exit_listener.local_addr().unwrap();
+    let guard = Arc::new(OriginGuard::new(sk_exit, pk, REQUEST_CTX, PRESENT_CTX, 64));
+    serve_exit(exit_listener, guard, Upstream::Direct);
+
+    let relay_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let relay_addr = relay_listener.local_addr().unwrap();
+    serve_relay(relay_listener, exit_addr, None);
+
+    // The buyer paid for one credential's worth of tokens; the issuer gates on it.
+    let buyer_secret = [5u8; 32];
+    let buyer = address_of(&buyer_secret).unwrap();
+    let mut entitlement = HashMap::new();
+    entitlement.insert(buyer, TOKENS_PER_CREDENTIAL);
+    let gate = PaymentGate::new(
+        InMemoryEntitlement(entitlement),
+        RedemptionLedger::in_memory(),
+        TOKENS_PER_CREDENTIAL,
+    );
+    let issuer_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let issuer_addr = issuer_listener.local_addr().unwrap().to_string();
+    let pin = pk.serialize()[..8].to_vec(); // paid mode requires pinning the issuer pk
+    serve_issuance_paid(issuer_listener, sk, pk, gate);
+
+    // Paid buyer: obtain a credential, route a request through the loop.
+    let cred = obtain_credential_paid(&issuer_addr, REQUEST_CTX, &buyer_secret, Some(&pin))
+        .expect("paid issuance");
+    let mut client = TesseraClient::new(cred, PRESENT_CTX, 64);
+    let header = client.presentation_header(&mut rand_core::OsRng).unwrap();
+    let mut stream =
+        open_through_relay(relay_addr, exit_addr, &echo.to_string(), &header).expect("loop opens");
+    stream.write_all(b"PING\n").unwrap();
+    let mut buf = [0u8; 5];
+    stream.read_exact(&mut buf).unwrap();
+    assert_eq!(&buf, b"PONG\n", "paid credential routes through the loop");
+
+    // The buyer's single credential's worth is now spent -> a second is refused.
+    assert!(
+        obtain_credential_paid(&issuer_addr, REQUEST_CTX, &buyer_secret, Some(&pin)).is_err(),
+        "entitlement exhausted -> refused"
+    );
+    // A buyer who never paid is refused outright.
+    let broke = [6u8; 32];
+    assert!(
+        obtain_credential_paid(&issuer_addr, REQUEST_CTX, &broke, Some(&pin)).is_err(),
+        "unpaid buyer -> refused"
+    );
+    // And a missing pin is refused (the wormhole guard).
+    assert!(
+        obtain_credential_paid(&issuer_addr, REQUEST_CTX, &buyer_secret, None).is_err(),
+        "paid issuance without a pin -> refused"
+    );
 }
