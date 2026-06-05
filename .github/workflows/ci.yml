@@ -5,7 +5,8 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: "0 7 * * *" # daily: catch new RustSec advisories
+    - cron: "0 7 * * *" # daily: catch new RustSec advisories + run the deep fuzz
+  workflow_dispatch: # allow the deep fuzz (and the rest) to be triggered manually
 
 env:
   CARGO_TERM_COLOR: always
@@ -274,4 +275,32 @@ jobs:
           for t in $(cargo +nightly fuzz list); do
             echo "== fuzzing $t =="
             cargo +nightly fuzz run "$t" -- -max_total_time=30 -detect_leaks=0
+          done
+
+  # S24: a DEEPER fuzz pass (300s/target) — too slow for every push, so it runs
+  # only on the daily schedule and on manual dispatch. Same targets/harness as
+  # the per-push smoke above, just a much longer budget per target.
+  fuzz-deep:
+    name: fuzz deep (300s/target)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust nightly
+        run: rustup toolchain install nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Build all fuzz targets
+        run: cargo +nightly fuzz build
+
+      - name: Deep-run each target (300s)
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          for t in $(cargo +nightly fuzz list); do
+            echo "== deep-fuzzing $t =="
+            cargo +nightly fuzz run "$t" -- -max_total_time=300 -detect_leaks=0
           done

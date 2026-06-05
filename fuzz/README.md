@@ -13,6 +13,8 @@ Targets:
 | `wire_from_bytes` | `ServerPublicKey` / `CredentialRequest` / `CredentialResponse` / `Presentation` decoders (incl. degenerate limits) |
 | `presentation_verify` | full `Presentation::from_bytes` → `verify_presentation` (range-sum + `sigma::verify`); asserts random bytes never verify |
 | `origin_guard_check` | end-to-end `OriginGuard::check` (hex-decode → deserialize → verify → tag store) |
+| `channel_wire` | relay outer-header channel decoders (untrusted wire input) |
+| `arc_lifecycle` | full cross-crate ARC lifecycle (request → response → finalize → present → verify); asserts completeness, single-use, tamper-soundness, and the rate limit |
 
 ## Running
 

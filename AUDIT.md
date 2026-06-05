@@ -223,14 +223,12 @@ docker compose -f deploy/docker-compose.yaml up --build   # the whole network (i
 
 ## 6. Test / fuzz / CI coverage map
 
-Verification, per [`CEILING_PROGRESS.md`](./docs/CEILING_PROGRESS.md): **~138
-Rust workspace tests + 61 Foundry tests + 6 fuzz targets**, all green; CI green on
-`main`. (Independently: a bare `#[test]`/`#[tokio::test]` grep counts 137; the
-**function count is 142** once you add the one parenthesized
-`#[tokio::test(flavor = "multi_thread", …)]` in `tessera-tower-demo` and the four
-`#[wasm_bindgen_test]` in `tessera-wasm`, which that bare regex misses. The
-per-crate rows below are function counts. `contracts/test/*.sol` declares 61
-`test*`/`testFuzz*`/`invariant_*` functions.)
+Verification, per [`CEILING_PROGRESS.md`](./docs/CEILING_PROGRESS.md): **~162 Rust
+test functions + 78 Foundry tests + 7 fuzz targets**, all green; CI green on
+`main`. (A `#[test]` / `#[tokio::test]` / `#[wasm_bindgen_test]` grep across
+`crates/` + `fuzz/` counts 162; `contracts/test/*.sol` declares 78
+`test*`/`testFuzz*`/`invariant_*` functions. Reproduce both with the commands in
+§"Build & reproduce" below.)
 
 ### CI jobs (`.github/workflows/ci.yml`)
 

@@ -15,9 +15,9 @@
 ## Status snapshot
 
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
-- **SHOULD tier: 28/34** — hardening + completeness (S1–S8; CI hardening S23/S25/S26/S27; spec/audit docs S12–S14, S16, S19, S20, S22, S29–S31; the hardening tests S9–S11, S17, S18, S32).
+- **SHOULD tier: 33/34** — hardening + completeness. The ONLY open item is **S34** (PIR / green-routing / x402 egress lanes) — the irreducibly-external clean-egress frontier, not buildable here.
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** ~158 Rust workspace tests + 78 Foundry tests + 6 fuzz targets, all green; CI green on `main`.
+- **Verification:** ~162 Rust test functions + 78 Foundry tests + 7 fuzz targets, all green; CI green on `main`.
 
 ## MUST — done
 
@@ -95,25 +95,25 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | S12 | Channel-state durability/recovery model (doc) | ✅ | [`docs/CHANNEL_RECOVERY.md`](./CHANNEL_RECOVERY.md) |
 | S13 | Deployment topology / trust-boundary spec (doc) | ✅ | [`docs/DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) |
 | S14 | System key-management lifecycle (doc) | ✅ | [`docs/KEY_MANAGEMENT.md`](./KEY_MANAGEMENT.md) |
-| S15 | Cross-layer protocol versioning | ⬜ | |
+| S15 | Cross-layer protocol versioning | ✅ | [`docs/PROTOCOL_VERSIONING.md`](./PROTOCOL_VERSIONING.md) (catalog + upgrade convention; explicit version byte recommended, not yet impl) |
 | S16 | Observability/metrics spec + privacy review (doc) | ✅ | [`docs/OBSERVABILITY.md`](./OBSERVABILITY.md) |
 | S17 | Concurrency double-spend tests for tag stores | ✅ | `tessera-origin/tests/concurrency_double_spend.rs` (Barrier-raced threads, exactly-one-wins; in-mem + file) |
 | S18 | `FileTagStore` durability tests | ✅ | `tessera-origin/tests/filetagstore_durability.rs` (spent tags survive store drop+reopen) |
 | S19 | Relayer-cheat matrix (doc, reconcile w/ M1) | ✅ | [`docs/RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) |
 | S20 | Anonymity-set sparse-deployment warnings | ✅ | [`docs/SAFETY.md`](./SAFETY.md) (sparse-deployment §) |
-| S21 | ARC lifecycle + cross-crate fuzz | ⬜ | |
+| S21 | ARC lifecycle + cross-crate fuzz | ✅ | `fuzz/fuzz_targets/arc_lifecycle.rs` (issue→present→verify invariants: no-panic/complete/single-use/sound/rate-limited) |
 | S22 | Honest-relayer atomicity spec (doc) | ✅ | [`docs/RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) (atomicity §) |
 | S23 | CI: cargo-deny | ✅ | `deny.toml` + the `deny` CI job (advisories/bans/licenses/sources) |
-| S24 | CI: deeper fuzz (300s/target) | ⬜ | |
+| S24 | CI: deeper fuzz (300s/target) | ✅ | the `fuzz-deep` CI job (300s/target, schedule + workflow_dispatch gated) |
 | S25 | CI: Slither static analysis | ✅ | the `contracts` CI job (Slither, fails on High/Medium) |
 | S26 | CI: coverage report | ✅ | the `coverage` CI job (cargo-llvm-cov) |
 | S27 | `#![deny(missing_docs)]` all crates | ✅ | all 8 library crates; `cargo doc -D warnings` clean |
-| S28 | Known-limitations + claim-boundary in README | ⬜ | |
+| S28 | Known-limitations + claim-boundary in README | ✅ | README "What this is / what it is NOT" + the IP-blind caveat + "Security status" |
 | S29 | Phase-status consistency table | ✅ | [`docs/STATUS.md`](./STATUS.md) |
 | S30 | `docs/SAFETY.md` (abuse handling) | ✅ | [`docs/SAFETY.md`](./SAFETY.md) |
 | S31 | Audit-prep packet (`AUDIT.md`) | ✅ | [`AUDIT.md`](../AUDIT.md) |
 | S32 | Multi-spend channel integration test | ✅ | `tessera-channel/tests/multi_spend.rs` (40 round trips + settlement + non-destructive over-budget reject) |
-| S33 | PoW honest-difficulty analysis + benches | ⬜ | |
+| S33 | PoW honest-difficulty analysis + benches | ✅ | `tessera-issuer/benches/pow.rs` (criterion) + [`docs/POW_ANALYSIS.md`](./POW_ANALYSIS.md) |
 | S34 | PIR / green-routing / x402 egress lanes (code parts) | ⬜ | |
 
 ## NICE — pending

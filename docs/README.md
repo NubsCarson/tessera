@@ -31,6 +31,8 @@ If you read nothing else, read the **honest status** at the bottom.
 | Responsible use + sparse-deployment anonymity warning | [`SAFETY.md`](./SAFETY.md) |
 | Who owns the `epoch` clock + the skew/rejection rules | [`EPOCH_AUTHORITY.md`](./EPOCH_AUTHORITY.md) |
 | The clean-egress portfolio (the hardest, no-silver-bullet part) | [`IP_EGRESS_IDEAS.md`](./IP_EGRESS_IDEAS.md) |
+| PoW difficulty / cost analysis (honest cost knob, not Sybil) | [`POW_ANALYSIS.md`](./POW_ANALYSIS.md) |
+| How each wire layer is versioned + the upgrade convention | [`PROTOCOL_VERSIONING.md`](./PROTOCOL_VERSIONING.md) |
 | Post-quantum terrain | [`POST_QUANTUM.md`](./POST_QUANTUM.md) |
 | The roadmap | [`ROADMAP.md`](./ROADMAP.md) |
 | **One status table for the whole system** | [`STATUS.md`](./STATUS.md) |

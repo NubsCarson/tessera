@@ -27,6 +27,8 @@ k256 = { workspace = true }
 
 [dev-dependencies]
 hex.workspace = true
+# Proof-of-work cost/throughput benches (S33) — see benches/pow.rs + docs/POW_ANALYSIS.md.
+criterion.workspace = true
 
 [[bin]]
 name = "tessera-issuer"
@@ -34,3 +36,7 @@ path = "src/main.rs"
 
 [lib]
 path = "src/lib.rs"
+
+[[bench]]
+name = "pow"
+harness = false
