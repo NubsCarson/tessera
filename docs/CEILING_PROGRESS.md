@@ -45,13 +45,15 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | **Tag `v0.1.0`** | ✅ pushed | — |
 | Positioning: honest present tense across docs | ✅ | `ac9b9a3` |
 
-**Remaining ship-polish (non-blocking, "nice" tier — deferred, documented):**
-`#![deny(missing_docs)]` across crates (S27 — ~100+ pub items to document; gauged
-50 in tessera-arc alone) · CI hardening I can't verify locally without risking a
-red main (cargo-deny + a `deny.toml`, `cargo llvm-cov` coverage, Slither, a
-`forge fmt --check` gate — the last would require reformatting the generated
-verifier, which we deliberately leave matching its snarkjs output) · pinning the
-CI `cargo install` versions. None blocks the v0.1.0 promotion.
+**Ship-polish (post-v0.1.0):**
+- ✅ **S27 `#![deny(missing_docs)]`** on all 8 library crates — public API fully
+  documented (56 items via an 8-agent pass + stragglers by hand), commit `e1076ef`.
+- 🔨 **cargo-deny** (supply-chain advisories/licenses/sources) — being added the
+  verified way (install → tune `deny.toml` → run locally → then the CI job).
+- ⬜ remaining (lower-value / locally-unverifiable): `cargo llvm-cov` coverage,
+  Slither, a `forge fmt --check` gate (would reformat the generated verifier,
+  which we deliberately leave matching snarkjs), pinning CI `cargo install`
+  versions. None blocks the v0.1.0 promotion.
 
 ## Architecture pivot (the leaner ecash-token + Tor path — `docs/ARCHITECTURE.md`)
 
