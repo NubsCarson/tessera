@@ -6,7 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Nothing yet — see the live [`docs/CEILING_PROGRESS.md`](./docs/CEILING_PROGRESS.md).
+### Added — the network now runs end to end ("run it yourself")
+
+- **Networked issuance** (`tessera-issuer::net`): a framed, PoW-gated issuance
+  protocol (`tessera://issue-net/v1`) + `serve_issuance`, so a client can *obtain*
+  a credential from a running authority over TCP instead of having one minted
+  in-process.
+- **`tessera-issuer` binary** — the credential **authority** node. Serves
+  issuance; persists/loads a shared ARC server key (`TESSERA_KEY_FILE`) so the
+  exit can verify against it (ARC is keyed-verification).
+- **`tessera-client::obtain_credential`** — the client side of the protocol:
+  solve the PoW, run the blinded ARC issuance, return a finalized credential.
+  Supports an issuer-public-key **pin** against a substituted issuer.
+- **`tessera-client` binary** (the local **client proxy**) — obtains a credential
+  and exposes a local HTTP `CONNECT` proxy; point a browser/curl at it and each
+  request is admitted on a fresh, unlinkable token (never your IP), routed through
+  the 2-hop loop, with transparent **re-issue** when the budget is spent
+  (`tessera_relay::{serve_client_proxy, CredentialSource}`).
+- **`tessera-proxy` `TESSERA_KEY_FILE`** — the exit can load the issuer's **shared
+  key** (load-with-retry, atomic create) so issuer-minted credentials verify.
+- **Full-network integration test** (`tessera-relay/tests/network.rs`): issuer +
+  relay + exit + client proxy in-process — credential obtained over the wire →
+  `200` through the loop → auto re-issue past the budget → issuer-pin mismatch
+  rejected. A 4-process binary run additionally reaches a real HTTPS site (`200`).
+- **Docker compose** now brings up the **whole** network (issuer + exit sharing a
+  key volume + relay + client), entry point `127.0.0.1:8120`; `docs/DEPLOY.md`
+  documents the four-node run (Docker and bare `cargo run`).
 
 ## [0.1.0] - 2026-06-04
 

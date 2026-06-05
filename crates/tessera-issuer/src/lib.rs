@@ -34,6 +34,11 @@ use rand_core::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
+pub mod keyfile;
+pub mod net;
+pub use keyfile::ensure_shared_key;
+pub use net::serve_issuance;
+
 /// Length of the random challenge nonce, in bytes.
 pub const CHALLENGE_LEN: usize = 16;
 

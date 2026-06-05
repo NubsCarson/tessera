@@ -86,18 +86,24 @@ credential, not an address.
 > [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) and
 > [`docs/IP_EGRESS_IDEAS.md`](./docs/IP_EGRESS_IDEAS.md).
 
-### Run it as real nodes (Docker / TEE)
+### Run it yourself as a network (Docker / TEE)
 
 ```sh
-docker compose -f deploy/docker-compose.yaml up --build   # the 2-hop relay+exit loop
+docker compose -f deploy/docker-compose.yaml up --build   # issuer + relay + exit + client
+curl -x http://127.0.0.1:8120 https://example.com         # admitted on a token, not your IP
 ```
 
-The relay + exit run as containers (verified: a request with a token tunnels to a
-real site; a replay is rejected). For a **verifiable, non-logging relay**, deploy
-it into an Intel TDX **TEE via dstack** — a client can then *attest* that the node
-runs this exact open-source image and physically can't log. That nails the
-**trust** axis; the **clean-IP** axis stays external. See
-[`docs/DEPLOY.md`](./docs/DEPLOY.md).
+This runs the **whole network** as containers: an **issuer** mints PoW-gated
+credentials (sharing one ARC key with the exit), the **relay**+**exit** form the
+2-hop loop, and a local **client proxy** obtains a credential and routes each
+request through it on a fresh, unlinkable token — re-issuing when the budget is
+spent. Verified end to end: `crates/tessera-relay/tests/network.rs` (all four
+nodes in-process) plus a 4-process binary run reaching a real HTTPS site (`200`).
+
+For a **verifiable, non-logging relay**, deploy it into an Intel TDX **TEE via
+dstack** — a client can then *attest* that the node runs this exact open-source
+image and physically can't log. That nails the **trust** axis; the **clean-IP**
+axis stays external. See [`docs/DEPLOY.md`](./docs/DEPLOY.md).
 
 ## The problem it attacks
 

@@ -967,6 +967,7 @@ dependencies = [
  "hex",
  "rand_core",
  "tessera-arc",
+ "tessera-issuer",
 ]
 
 [[package]]
@@ -988,6 +989,7 @@ dependencies = [
  "hex",
  "rand_core",
  "sha2",
+ "tessera-arc",
 ]
 
 [[package]]
@@ -1015,6 +1017,7 @@ dependencies = [
  "rand_core",
  "tessera-arc",
  "tessera-client",
+ "tessera-issuer",
  "tessera-origin",
 ]
 
@@ -1027,6 +1030,7 @@ dependencies = [
  "tessera-arc",
  "tessera-channel",
  "tessera-client",
+ "tessera-issuer",
  "tessera-origin",
  "tessera-proxy",
 ]

@@ -92,13 +92,22 @@ The leaner path's *components* are built; to be a deployed **payment** network a
 stranger can use still needs (mostly NOT the heavy crypto):
 
 1. **Token purchase** — a way to pay (ETH) and receive N blind-signed tokens.
-   Today tokens are *earned* via PoW (`tessera-issuer`); a paid mint is the small
-   new piece. **Buildable.**
-2. **Client/wallet UX** — an app/extension that buys tokens, attaches one per
-   request, and points at a Tor-reached exit. The MV3 extension is a scaffold.
+   Today tokens are *earned* via PoW (`tessera-issuer`); a paid mint
+   (`TokenMint.sol` exists) wired to the issuer is the small remaining piece.
    **Buildable.**
-3. **A deployed exit on a clean IP** + **a Tor/Nym crowd** — operational +
-   external (the clean-IP and anonymity-set hand-offs remain).
+2. **Client/wallet UX** — ✅ **built**: the network now runs end to end. A
+   `tessera-issuer` node serves PoW-gated issuance over the wire; the
+   `tessera-client` binary obtains a credential and runs a **local `CONNECT`
+   proxy** you point a browser/curl at, routing each request through the loop on
+   a fresh unlinkable token and re-issuing when the budget is spent
+   (`docs/DEPLOY.md`; proven by `tests/network.rs` + a 4-process run reaching a
+   real HTTPS site). A polished GUI/extension on top is the remaining nicety (the
+   MV3 extension is a scaffold).
+3. **A deployed exit on a clean IP** + **a Tor/Nym crowd** + **an audit** —
+   operational + external. The clean-IP and anonymity-set hand-offs remain (the
+   crowd must also cover the client→issuer hop, since the issuer sees the
+   client's IP at issuance), and a third-party audit is still required. These are
+   the remaining gaps between the runnable network and a stranger safely using it.
 
 That's the path: it's short on *new crypto* (the token primitive is ARC, already
 built) and gated mainly on the same external realities — a clean IP and a crowd —

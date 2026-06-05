@@ -1,22 +1,42 @@
-# The Tessera 2-hop split-trust loop, containerized. See docs/DEPLOY.md.
+# The full Tessera network, containerized. See docs/DEPLOY.md.
 #
-#   client --(Tor)--> RELAY --(internal)--> EXIT --(its egress IP)--> destination
+#   you --▶ CLIENT-PROXY --▶ RELAY --(internal)--▶ EXIT --(its egress IP)--▶ dest
+#                  │                                 ▲
+#                  └──▶ ISSUER (authority) ──────────┘  shares one ARC key with EXIT
+#   (the client connects to the ISSUER to obtain a credential — so the issuer sees
+#    the client's IP at issuance; ARC still can't link it to browsing. In a real
+#    deployment the client reaches the issuer over Tor too. All-local demo => moot.)
 #
-# The RELAY is the credential-blind first hop (learns {client, exit}, never the
-# destination); the EXIT is credential-gated (learns {destination, a valid token},
-# never the client). The client reaches the RELAY anonymously over Tor (front it
-# with a Tor onion service in production — DEPLOY.md). The EXIT egresses from its
-# own IP, which the destination sees and which MUST be clean (the external piece
-# Tessera cannot manufacture).
+# - ISSUER mints PoW-gated credentials and shares ONE ARC key with the EXIT
+#   (ARC is keyed-verification — the exit needs that key to verify presentations).
+# - RELAY is the credential-blind first hop (learns {client, exit}, never the dest).
+# - EXIT is credential-gated (learns {dest, a valid token}, never the client) and
+#   egresses from its own IP — which the destination sees and which MUST be clean
+#   (the external piece Tessera cannot manufacture).
+# - CLIENT-PROXY is what you point a browser/curl at: it obtains a credential from
+#   the issuer and routes each request through the loop on a fresh unlinkable token.
 #
 # Run locally:   docker compose -f deploy/docker-compose.yaml up --build
-# Deploy in a TEE: see deploy/dstack/app-compose.json + docs/DEPLOY.md.
+#   then:        curl -x http://127.0.0.1:8120 https://example.com
+# Deploy in a TEE: see deploy/dstack/docker-compose.yaml + docs/DEPLOY.md.
 
 services:
-  exit:
+  issuer:
     build:
       context: ..
       dockerfile: Dockerfile
+    image: tessera-node:0.1.0
+    command: ["tessera-issuer"]
+    environment:
+      TESSERA_ISSUER_LISTEN: "0.0.0.0:8121"
+      # The authority creates the shared ARC key on this volume; the exit loads it.
+      TESSERA_KEY_FILE: "/keys/server.key"
+      TESSERA_POW_DIFFICULTY: "14"
+    volumes:
+      - tessera-key:/keys
+    restart: unless-stopped
+
+  exit:
     image: tessera-node:0.1.0
     command: ["tessera-proxy"]
     environment:
@@ -25,6 +45,12 @@ services:
       # via a Tor SOCKS proxy instead — but then the destination sees a Tor exit).
       TESSERA_LISTEN: "0.0.0.0:8118"
       TESSERA_UPSTREAM: "direct"
+      # Same shared key as the issuer, so credentials it mints verify here.
+      TESSERA_KEY_FILE: "/keys/server.key"
+    volumes:
+      - tessera-key:/keys
+    depends_on:
+      - issuer
     restart: unless-stopped
 
   relay:
@@ -35,8 +61,27 @@ services:
       TESSERA_EXIT_ADDR: "exit:8118"
     depends_on:
       - exit
-    ports:
-      # The client entry point. In production this sits behind a Tor onion service
-      # (or a gateway), so clients reach it anonymously rather than on a public IP.
-      - "127.0.0.1:8119:8119"
     restart: unless-stopped
+
+  client:
+    image: tessera-node:0.1.0
+    command: ["tessera-client"]
+    environment:
+      TESSERA_ISSUER: "issuer:8121"
+      TESSERA_RELAY: "relay:8119"
+      TESSERA_EXIT: "exit:8118"
+      TESSERA_CLIENT_LISTEN: "0.0.0.0:8120"
+    depends_on:
+      - relay
+      - issuer
+    ports:
+      # The client entry point you point curl/your browser at. Bound to localhost
+      # only — this is your machine's local proxy, not a public service.
+      - "127.0.0.1:8120:8120"
+    restart: unless-stopped
+
+volumes:
+  # Holds the shared ARC server key. In a real multi-node/TEE deployment this is
+  # exactly what the dstack KMS should seal to the enclaves (docs/DEPLOY.md);
+  # a plain volume is the local-demo stand-in.
+  tessera-key:

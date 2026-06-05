@@ -8,9 +8,16 @@
 ## The topology
 
 ```
-client --(Tor)--> RELAY --(internal)--> EXIT --(its egress IP)--> destination
+                  ┌──────────────────────────────┐ obtain a credential (PoW)
+client ──────────▶│ ISSUER (authority, shares a   │  the issuer sees the client's IP here
+   │              │ key with EXIT)                │
+   └─(Tor)─▶ RELAY ──(internal)──▶ EXIT ──(its egress IP)──▶ destination
 ```
 
+- **ISSUER** (`tessera-issuer`) — the credential authority. The client connects
+  to it **directly** to obtain a credential, so it **sees the client's IP at
+  issuance** (ARC unlinkability still prevents tying that to later browsing — see
+  limits). Shares one ARC key with the exit.
 - **RELAY** (`tessera-relay`) — the credential-blind first hop. Learns
   `{client, exit}`, **never** the destination or the content.
 - **EXIT** (`tessera-proxy`) — credential-gated `CONNECT`. Learns
@@ -22,38 +29,58 @@ client --(Tor)--> RELAY --(internal)--> EXIT --(its egress IP)--> destination
   **EXIT egresses from its own IP** — the IP the destination sees, which must be
   **clean** (see limits).
 
+The full network is **four** nodes: a credential **issuer** (authority), the
+**relay**, the **exit**, and the local **client** proxy you point a browser at.
+The issuer and exit **share one ARC key** (ARC is keyed-verification — the exit
+needs that key to verify presentations); point both at the same `TESSERA_KEY_FILE`.
+
 The nodes are configured entirely by env vars (additive — the defaults preserve
 the local `cargo run` demos):
 
 | Var | Node | Meaning |
 |---|---|---|
+| `TESSERA_ISSUER_LISTEN` | issuer | bind address (default `127.0.0.1:8121`) |
+| `TESSERA_POW_DIFFICULTY` | issuer | leading-zero-bit PoW cost per credential (default `16`) |
+| `TESSERA_KEY_FILE` | issuer, exit | **shared** ARC server-key path (issuer creates, exit loads) |
 | `TESSERA_LISTEN` | exit | bind address (e.g. `0.0.0.0:8118`) |
 | `TESSERA_UPSTREAM` | exit | `direct` \| `tor` \| `tor:HOST:PORT` |
 | `TESSERA_RELAY_LISTEN` | relay | bind address (e.g. `0.0.0.0:8119`) |
 | `TESSERA_EXIT_ADDR` | relay | the exit to forward to (e.g. `exit:8118`) |
+| `TESSERA_ISSUER` | client | issuer `HOST:PORT` to obtain a credential from |
+| `TESSERA_RELAY` / `TESSERA_EXIT` | client | relay / exit `HOST:PORT` to route through |
+| `TESSERA_CLIENT_LISTEN` | client | local proxy bind (default `127.0.0.1:8120`) |
+| `TESSERA_ISSUER_PK` | client | hex pin: the issuer pk (or fingerprint prefix) issuance must match |
 
-## 1. Local Docker
+## 1. Local Docker — the whole network
 
 ```sh
 docker compose -f deploy/docker-compose.yaml up --build
+# then point a normal HTTPS client at the local client proxy:
+curl -x http://127.0.0.1:8120 https://example.com
 ```
 
-This builds one `tessera-node` image and runs the **relay** (on `127.0.0.1:8119`)
-in front of the **exit**. The exit logs a ready-to-run `curl` with a fresh
-single-use credential. The simplest check hits the exit directly (one `CONNECT`,
-so plain `curl` works):
+This builds one `tessera-node` image and runs all four nodes: the **issuer**
+mints the shared key, the **exit** loads it, the **relay** fronts the exit, and
+the **client** obtains a credential and serves a local `CONNECT` proxy on
+`127.0.0.1:8120`. A request through it is admitted on a fresh, unlinkable token
+(never your IP), tunneled relay→exit→destination with your TLS end-to-end; when
+the credential's budget is spent the client transparently re-issues.
+
+> Verified end to end: `crates/tessera-relay/tests/network.rs` stands up all four
+> nodes in-process (credential obtained over the wire → 200 through the loop →
+> auto re-issue → pin mismatch rejected), and a 4-process binary run reaches a
+> real HTTPS site with `200`.
+
+To run the nodes **without** Docker (each in its own terminal):
 
 ```sh
-# grab a credential the exit minted:
-HDR=$(docker compose -f deploy/docker-compose.yaml logs exit | grep -o 'Tessera-Presentation: [0-9a-f]*' | head -1 | cut -d' ' -f2)
-# no credential -> 407; with the credential -> tunnels to the site:
-docker compose -f deploy/docker-compose.yaml exec exit \
-  sh -c "true"   # (the exit is reachable inside the compose network as exit:8118)
+KEY=$(mktemp -u);  export TESSERA_KEY_FILE=$KEY
+TESSERA_KEY_FILE=$KEY cargo run -p tessera-issuer          # authority :8121 (creates the key)
+TESSERA_KEY_FILE=$KEY cargo run -p tessera-proxy           # exit :8118 (loads the key)
+TESSERA_RELAY_LISTEN=127.0.0.1:8119 TESSERA_EXIT_ADDR=127.0.0.1:8118 cargo run -p tessera-relay
+cargo run -p tessera-relay --bin tessera-client            # client proxy :8120
+curl -x http://127.0.0.1:8120 https://example.com
 ```
-
-(The full nested relay→exit path is what `tessera_relay::open_through_relay`
-drives and what `tests/loop.rs` proves end-to-end; plain `curl` does a single
-`CONNECT`, so point it at the exit for a quick check.)
 
 ## 2. dstack TEE deployment (the verifiable, non-logging relay)
 
@@ -89,17 +116,25 @@ setup on your host.
 
 ## Honest limits (read this)
 
+- **The issuer sees the client's IP at issuance.** Obtaining a credential is a
+  **direct** client→issuer connection, so the issuer learns the client's IP and
+  the time of issuance. ARC unlinkability still means it **cannot** tie that to
+  any later presentation/browsing — but the *act* of getting a credential is not
+  hidden. A client that wants anonymity must reach the issuer over Tor too
+  (`obtain_credential` is transport-agnostic; the demo runs everything on
+  localhost, so this is moot there but matters in a real deployment).
 - **A clean egress IP is still external.** A TEE proves the node doesn't log; it
   does **not** make the exit's egress IP clean. TDX hosts are *datacenter* IPs —
   *more* likely to be blocked than residential, not less. Reaching sites that
   blocklist Tor still needs a clean exit IP, which no code (or enclave)
   manufactures (see [`IP_EGRESS_IDEAS.md`](./IP_EGRESS_IDEAS.md)). TEE + clean
   residential egress is the ideal and the hard part.
-- **Key distribution is simplified here.** Each node currently mints an ephemeral
-  ARC server key on startup (fine for a single self-contained exit). A multi-node
-  deployment needs one shared issuer key (ARC is *keyed-verification* — the exit
-  needs the secret key to verify), which is exactly what the dstack KMS should
-  seal to the enclaves; wiring that derivation is the next step.
+- **Key distribution is file-based here.** The issuer + exit converge on one ARC
+  server key via a shared `TESSERA_KEY_FILE` (`tessera_issuer::ensure_shared_key`
+  — a single-winner create that can't diverge). That is fine on a trusted host /
+  shared volume; a real multi-host or TEE deployment should instead **derive the
+  shared key from the dstack KMS and seal it to the enclaves** so it never lands
+  on a disk. Wiring that KMS derivation is the next step.
 - **Tor onion fronting** for the relay (so clients reach it anonymously) is a
   deployment step, not yet in the compose.
 - **UNAUDITED.** Do not protect real users or funds with this yet.

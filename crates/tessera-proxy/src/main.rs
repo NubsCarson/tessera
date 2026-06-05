@@ -12,6 +12,7 @@ use rand_core::OsRng;
 use tessera_arc::arc::{create_credential_response, Credential};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 use tessera_client::{begin_issuance, TesseraClient};
+use tessera_issuer::ensure_shared_key;
 use tessera_origin::OriginGuard;
 use tessera_proxy::{serve_observed_shaped, ShapingConfig, Upstream, VolumeShaper};
 
@@ -33,6 +34,9 @@ fn main() {
     // these — see docs/DEPLOY.md):
     //   TESSERA_LISTEN   bind address (default 127.0.0.1:8118; a node sets 0.0.0.0:PORT)
     //   TESSERA_UPSTREAM "direct" | "tor" | "tor:HOST:PORT" (default direct; `--tor` => tor)
+    //   TESSERA_KEY_FILE shared ARC server-key path — set it (same value as the
+    //                    issuer's) so the exit verifies credentials minted by the
+    //                    issuer; unset => ephemeral self-issuing exit (the demo).
     let tor_arg = std::env::args().any(|a| a == "--tor");
     let listen = std::env::var("TESSERA_LISTEN").unwrap_or_else(|_| "127.0.0.1:8118".into());
     let upstream = match std::env::var("TESSERA_UPSTREAM").ok().as_deref() {
@@ -44,7 +48,12 @@ fn main() {
     };
     let tor = matches!(upstream, Upstream::Tor(_));
 
-    let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+    // Convergent shared-key bootstrap: the exit loads the SAME ARC key as the
+    // issuer (they can never diverge — see tessera_issuer::ensure_shared_key).
+    let (sk, pk) = match std::env::var("TESSERA_KEY_FILE") {
+        Ok(path) if !path.is_empty() => ensure_shared_key(&path),
+        _ => ServerPrivateKey::setup(&mut rng),
+    };
     let credential = issue(&sk, &pk, &mut rng);
 
     let listener = TcpListener::bind(&listen)

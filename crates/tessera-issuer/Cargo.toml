@@ -15,6 +15,17 @@ categories.workspace = true
 [dependencies]
 sha2.workspace = true
 rand_core.workspace = true
+# For the networked issuance endpoint (`net` module + the binary): the issuer is
+# the ARC credential authority, so it needs the ARC issuance primitives + keys.
+tessera-arc = { path = "../tessera-arc" }
+hex.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+
+[[bin]]
+name = "tessera-issuer"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"

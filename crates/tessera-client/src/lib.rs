@@ -8,6 +8,9 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod net;
+pub use net::obtain_credential;
+
 use rand_core::RngCore;
 use tessera_arc::arc::{
     create_credential_request, finalize_credential, ArcError, Credential, CredentialResponse,

@@ -84,6 +84,11 @@ use tessera_channel::{Channel, ChannelError, RelayerChannel, SignedState, Spend,
 // The relay reuses tessera-proxy's byte-pump (`pipe`) verbatim — the exact same
 // transport heart the EXIT uses — rather than reinventing it.
 use tessera_proxy::pipe;
+// The local client proxy ([`serve_client_proxy`]) mints presentations and, on
+// budget exhaustion, re-obtains a credential from the issuer.
+use rand_core::OsRng;
+use tessera_arc::arc::Credential;
+use tessera_client::{obtain_credential, TesseraClient};
 
 /// What a hop observed about a single forwarded connection. Wired into each hop
 /// so a test (or an operator) can prove the **split-trust** property: assert the
@@ -718,5 +723,191 @@ fn expect_200(stream: &mut TcpStream, who: &str) -> Result<()> {
             "{who} refused the tunnel: {}",
             status_line.trim_end()
         )))
+    }
+}
+
+// ────────────────────────── the local client proxy ──────────────────────────
+//
+// The piece a *person* runs. A local HTTP `CONNECT` proxy you point a browser or
+// curl at: for each request it mints a fresh, unlinkable ARC presentation and
+// drives the 2-hop loop ([`open_through_relay`]) to the deployed relay+exit — so
+// traffic is admitted on a credential, never the client's IP, with the relay
+// blind to the destination and the exit blind to the client.
+
+/// A re-issuing credential holder for the client proxy: mints the next
+/// presentation header and, once the credential's budget is spent, transparently
+/// obtains a fresh one from the issuer so the proxy keeps serving.
+pub struct CredentialSource {
+    client: TesseraClient,
+    issuer_addr: String,
+    request_ctx: Vec<u8>,
+    present_ctx: Vec<u8>,
+    limit: u64,
+    pin: Option<Vec<u8>>,
+}
+
+impl CredentialSource {
+    /// Build from an already-obtained `initial` credential plus the issuer
+    /// coordinates to re-issue when the budget runs out. `pin`, if set, is the
+    /// issuer-public-key prefix any re-issuance must match.
+    pub fn new(
+        initial: Credential,
+        issuer_addr: impl Into<String>,
+        request_ctx: &[u8],
+        present_ctx: &[u8],
+        limit: u64,
+        pin: Option<Vec<u8>>,
+    ) -> Self {
+        Self {
+            client: TesseraClient::new(initial, present_ctx, limit),
+            issuer_addr: issuer_addr.into(),
+            request_ctx: request_ctx.to_vec(),
+            present_ctx: present_ctx.to_vec(),
+            limit,
+            pin,
+        }
+    }
+
+    /// The cheap path: mint a presentation from the current credential with **no**
+    /// network I/O. `None` means the budget is spent and a re-issue is needed.
+    fn try_header(&mut self) -> Option<String> {
+        self.client.presentation_header(&mut OsRng).ok()
+    }
+
+    /// Issuer coordinates for a re-issue, cloned so the slow `obtain_credential`
+    /// runs **without** the [`CredentialSource`] lock held (no head-of-line stall).
+    fn reissue_coords(&self) -> (String, Vec<u8>, Option<Vec<u8>>) {
+        (
+            self.issuer_addr.clone(),
+            self.request_ctx.clone(),
+            self.pin.clone(),
+        )
+    }
+
+    /// Install a freshly obtained credential and mint the first presentation.
+    fn install(&mut self, credential: Credential) -> Result<String> {
+        self.client = TesseraClient::new(credential, &self.present_ctx, self.limit);
+        self.client.presentation_header(&mut OsRng).map_err(|e| {
+            std::io::Error::other(format!("presentation failed after re-issue: {e:?}"))
+        })
+    }
+}
+
+/// Mint the next presentation header for a connection, re-issuing if the budget
+/// is spent. The slow re-issue (`obtain_credential`: a PoW solve + a round-trip
+/// to the issuer) runs **outside** the lock — under the lock we only ever do the
+/// cheap presentation mint — so one re-issue cannot stall other in-flight requests.
+fn mint_header(source: &Arc<Mutex<CredentialSource>>) -> Result<String> {
+    if let Some(h) = source
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .try_header()
+    {
+        return Ok(h);
+    }
+    let (issuer, req_ctx, pin) = source
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .reissue_coords();
+    let credential = obtain_credential(&issuer, &req_ctx, pin.as_deref())?;
+    source
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .install(credential)
+}
+
+/// Run the **local client proxy**: a forward HTTP `CONNECT` proxy on `listener`
+/// that mints a fresh presentation from `source` per request and routes the
+/// tunnel through the 2-hop loop to `relay_addr` → `exit_addr`. Point a normal
+/// HTTPS client at it (`curl -x http://LISTENER …`). Spawns the accept loop and
+/// returns its handle.
+pub fn serve_client_proxy(
+    listener: TcpListener,
+    relay_addr: SocketAddr,
+    exit_addr: SocketAddr,
+    source: CredentialSource,
+) -> thread::JoinHandle<()> {
+    let source = Arc::new(Mutex::new(source));
+    let inflight = Arc::new(AtomicUsize::new(0));
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut browser) = stream else { continue };
+            let _ = browser.set_read_timeout(Some(SOCKET_TIMEOUT));
+            let _ = browser.set_write_timeout(Some(SOCKET_TIMEOUT));
+            if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+                inflight.fetch_sub(1, Ordering::AcqRel);
+                write_status(&mut browser, "503 Service Unavailable");
+                continue;
+            }
+            let permit = InflightGuard(Arc::clone(&inflight));
+            let source = Arc::clone(&source);
+            thread::spawn(move || {
+                let _permit = permit;
+                let _ = handle_client_proxy_conn(browser, relay_addr, exit_addr, &source);
+            });
+        }
+    })
+}
+
+/// Handle one inbound `CONNECT` from the user's client: parse the target, mint a
+/// presentation, open the loop, ACK the tunnel, and pump bytes.
+fn handle_client_proxy_conn(
+    mut browser: TcpStream,
+    relay_addr: SocketAddr,
+    exit_addr: SocketAddr,
+    source: &Arc<Mutex<CredentialSource>>,
+) -> Result<()> {
+    let target = match read_connect_target(&mut browser)? {
+        Some(t) => t,
+        None => {
+            write_status(&mut browser, "400 Bad Request");
+            return Ok(());
+        }
+    };
+    let header = match mint_header(source) {
+        Ok(h) => h,
+        Err(_) => {
+            write_status(&mut browser, "502 Bad Gateway");
+            return Ok(());
+        }
+    };
+    let upstream = match open_through_relay(relay_addr, exit_addr, &target, &header) {
+        Ok(u) => u,
+        Err(_) => {
+            write_status(&mut browser, "502 Bad Gateway");
+            return Ok(());
+        }
+    };
+    browser.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
+    browser.flush()?;
+    pipe(browser, upstream);
+    Ok(())
+}
+
+/// Read a `CONNECT` request block and return its `host:port` target. Reads
+/// unbuffered up to the blank line so no tunnel bytes are consumed past it.
+fn read_connect_target(s: &mut TcpStream) -> Result<Option<String>> {
+    let mut block = Vec::with_capacity(256);
+    let mut byte = [0u8; 1];
+    loop {
+        if s.read(&mut byte)? == 0 {
+            return Ok(None);
+        }
+        block.push(byte[0]);
+        if block.ends_with(b"\r\n\r\n") {
+            break;
+        }
+        if block.len() > 8 * 1024 {
+            return Ok(None);
+        }
+    }
+    let text = String::from_utf8_lossy(&block);
+    let first = text.lines().next().unwrap_or("");
+    let mut parts = first.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (Some(m), Some(target)) if m.eq_ignore_ascii_case("CONNECT") => {
+            Ok(Some(target.to_string()))
+        }
+        _ => Ok(None),
     }
 }

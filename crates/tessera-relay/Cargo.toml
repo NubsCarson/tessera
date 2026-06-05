@@ -16,6 +16,14 @@ categories.workspace = true
 name = "tessera-relay"
 path = "src/main.rs"
 
+# The local client proxy a person runs (lives here, not in `tessera-client`, to
+# avoid a dependency cycle: this crate already depends on tessera-client). `doc =
+# false` avoids a rustdoc output collision with the `tessera-client` library.
+[[bin]]
+name = "tessera-client"
+path = "src/bin/tessera-client.rs"
+doc = false
+
 [dependencies]
 # The relay reuses tessera-proxy's CONNECT/pipe/SOCKS5/OriginGuard logic for the
 # EXIT hop; the relay hop itself is the new, credential-blind first hop.
@@ -30,3 +38,5 @@ rand_core.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
+# The full-network integration test (tests/network.rs) stands up a real issuer.
+tessera-issuer = { path = "../tessera-issuer" }
