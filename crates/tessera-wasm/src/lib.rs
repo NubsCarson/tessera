@@ -73,7 +73,8 @@ impl TesseraCredential {
 }
 
 impl TesseraCredential {
-    /// Native constructor used by the `rlib` unit test (not exported to JS).
+    /// Native (not `#[wasm_bindgen]`-exported) constructor shared by `mint_local`
+    /// and `IssuanceFlow::finalize`.
     fn from_credential(credential: Credential, presentation_context: &[u8], limit: u64) -> Self {
         Self {
             client: TesseraClient::new(credential, presentation_context, limit),

@@ -45,9 +45,11 @@ This byte-for-byte cross-language match is the load-bearing risk, so it is
 | `slashEquivocation(stateA, stateB, userSigA, userSigB)` | `Verdict::SlashUser` | two states, **same seq, different commitment**, both carrying the user's valid secp256k1 sig → attributable equivocation → the user bond is forfeited to the relayer. CEI + `nonReentrant`. |
 | `refundOnTimeout(channelId)` | `Verdict::RefundUser` | after `timeout` with no advance → refund user the full `B0`. CEI + `nonReentrant`. |
 
-The escrow doubling as the slashable bond, the `ShieldedPool` (unlinkable
-funding) being absent, and there being no Groth16 verifier yet are the honest
-gaps — the contract is the *court*, not the full §6 system.
+The escrow doubling as the slashable bond and the `ShieldedPool` (unlinkable
+funding) being absent are the honest gaps — and the Groth16 `RDecVerifier` is
+present but generated from a **TEST-ONLY single-party trusted setup** (it needs a
+real multi-party MPC ceremony before any value). The contract is the *court*, not
+the full §6 system.
 
 ## Cross-language vector
 
@@ -79,7 +81,7 @@ itself is fetched, which Foundry caches).
 ```sh
 cd contracts
 forge build
-forge test          # 61 tests across 6 suites
+forge test          # 78 tests across 7 suites
 forge test -vvv     # verbose traces
 ```
 
@@ -88,12 +90,19 @@ forge test -vvv     # verbose traces
 ```
 contracts/
 ├─ foundry.toml                       # solc 0.8.24, optimizer, no libs
-├─ src/ChannelRegistry.sol            # the on-chain court
+├─ src/
+│  ├─ ChannelRegistry.sol             # the on-chain court (this README)
+│  ├─ TokenMint.sol                   # ETH-paid mint rail (the leaner default)
+│  └─ RDecVerifier.sol                # generated Groth16 verifier (TEST-ONLY setup)
 └─ test/
    ├─ Std.sol                         # vendored Vm interface + Test base (no forge-std)
    ├─ CrossLanguageVector.t.sol       # THE PROOF: Rust-signed state verified on-chain
    ├─ ChannelRegistry.t.sol           # cooperativeClose / unilateral+challenge / slash / refund / rejects
-   └─ Reentrancy.t.sol                # nonReentrant guard blocks a malicious reentrant payee
+   ├─ CourtInvariant.t.sol            # invariant fuzzing of the court's conservation
+   ├─ CourtAdversarial.t.sol          # adversarial close / dispute / slash sequences
+   ├─ Reentrancy.t.sol                # nonReentrant guard blocks a malicious reentrant payee
+   ├─ TokenMint.t.sol                 # ETH-paid mint: entitlement / redeem / refund
+   └─ RDecVerifier.t.sol              # the pinned R_dec Groth16 proof verifies on-chain
 ```
 
 `out/`, `cache/`, and `lib/` are build artifacts / fetched deps and are
