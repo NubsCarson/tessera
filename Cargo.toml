@@ -4,6 +4,7 @@ members = [
     "crates/tessera-arc",
     "crates/tessera-issuer",
     "crates/tessera-origin",
+    "crates/tessera-directory",
     "crates/tessera-client",
     "crates/tessera-proxy",
     "crates/tessera-relay",

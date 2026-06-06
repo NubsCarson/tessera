@@ -147,6 +147,15 @@ verifiers, that is the BBS/public-verifiability track described in
 [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md), not the current ARC
 deployment.
 
+For client routing, the built path is either direct pinning
+(`TESSERA_ISSUER_PK`) or signed-directory mode. In directory mode the client pins
+a directory signer set (`TESSERA_DIRECTORY_SIGNERS`), verifies a signature
+threshold and validity window over a snapshot, optionally records a monotonic
+sequence in `TESSERA_DIRECTORY_STATE_FILE`, selects one accepting exit entry, and
+uses that entry's full ARC issuer public key as the issuance pin. That is a
+local verification layer; running a mirrored directory publisher and real
+operator governance is still deployment work.
+
 ## 4. Storage: file-based default vs. dstack-KMS-sealed
 
 ### 4.1 File-based (the shipped default)

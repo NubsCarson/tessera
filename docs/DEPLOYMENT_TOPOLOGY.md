@@ -173,9 +173,11 @@ Joining those two views re-links a client to its destination.
   issuer (`tessera-client.rs:191-195`; `THREAT_MODEL.md` §3.5 last paragraph).
 - **Across exits, the boundary is per key domain.** A multi-exit fleet is a set
   of issuer+exit domains, not one shared verifier. The client must select and
-  pin the issuer key for the exit domain it intends to use. Fleet discovery and
-  route selection are future product work; the safe default is explicit
-  per-domain configuration.
+  pin the issuer key for the exit domain it intends to use. Explicit per-domain
+  configuration is still valid; signed-directory mode now gives the client an
+  off-band, threshold-verified snapshot path to select one domain and pin its
+  issuer key. Live mirrored directory publication and operator discovery remain
+  deployment work.
 - **Issuer ⟂ Exit for *linkage* is N/A by construction.** Even full
   issuer↔exit collusion cannot link issuance to presentation, because ARC
   issuance is blind (`THREAT_MODEL.md` §3.2 "Link a presentation back to
@@ -215,10 +217,11 @@ limits" and `THREAT_MODEL.md` §4):
 - **Tor fronting of the relay** (so clients reach it anonymously) and **KMS-sealed
   key derivation** (so the shared ARC key never hits disk) are intended next steps,
   not yet wired into the compose (`DEPLOY.md` lines 153–160).
-- **Multi-exit routing/discovery is not built.** The repo now defines the safe
-  custody rule (per-exit key domains) and fail-closed single-domain proxy
-  guardrails, but it does not yet ship a replicated signed directory or automatic
-  client path selector.
+- **Live multi-exit directory operation is not built.** The repo now defines the
+  safe custody rule (per-exit key domains), fail-closed single-domain proxy
+  guardrails, and a client-side signed snapshot verifier/selector. It does not
+  operate a replicated directory, signer governance process, or independent exit
+  fleet for you.
 - **No post-quantum claim.** All security rests on discrete log over P-256
   (`THREAT_MODEL.md` §4 item 4).
 - **UNAUDITED.** Do not protect real users or funds with this yet.

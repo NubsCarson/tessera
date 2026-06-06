@@ -130,11 +130,13 @@ metadata only, a **distinct-destination cap + concurrency cap + sticky-session +
 jitter**, and over the envelope it **paces gracefully (a bounded, capped delay) —
 never hard-blocks** (a hard refusal is itself a fingerprintable signal). The
 headline behavior is proven by a test (one IP → 1000 unrelated domains is
-throttled, never blocked). Still external/future: tying the envelope to the
-credential's earn/spend caps as a *network-wide* invariant (vs the current
-per-exit local governor), a signed/replicated exit directory, and the
-path-selector refusing over-envelope flows across a multi-exit fleet without
-sharing one ARC key across exits.
+throttled, never blocked). The local signed directory verifier/selector is now
+built for key-domain choice (`tessera-directory` + `tessera-client` directory
+mode). Still external/future: tying the envelope to the credential's earn/spend
+caps as a *network-wide* invariant (vs the current per-exit local governor),
+mirrored directory publication with capacity/health feeds, and selector refusal
+of over-envelope flows across a real multi-exit fleet without sharing one ARC key
+across exits.
 
 ## 5. Honest verdict — is "most of the web at human volume" achievable?
 

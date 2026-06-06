@@ -1,6 +1,6 @@
 # Tessera — Roadmap (post-v0 frontier)
 
-The v0 implementation is complete: all of `GOAL.md`'s milestones, eight workspace
+The v0 implementation is complete: all of `GOAL.md`'s milestones, nine workspace
 crates (plus two excluded), CI-green, fuzzed, internally audited, honest about its
 limits. This doc plans the genuinely-meaningful work *beyond* polish. Four tracks,
 each a real effort.

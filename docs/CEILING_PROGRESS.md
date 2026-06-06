@@ -17,7 +17,8 @@
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
 - **SHOULD tier: 33/34** — hardening + completeness. The ONLY open item is **S34** (PIR / green-routing / x402 egress lanes) — the irreducibly-external clean-egress frontier, not buildable here.
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** ~162 Rust test functions + 78 Foundry tests + 7 fuzz targets, all green; CI green on `main`.
+- **Verification:** 187 host-workspace Rust `#[test]` markers + 78 Foundry
+  tests + 7 fuzz targets, all green; CI green on `main`.
 
 ## MUST — done
 
@@ -46,7 +47,7 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | Positioning: honest present tense across docs | ✅ | `ac9b9a3` |
 
 **Ship-polish (post-v0.1.0):**
-- ✅ **S27 `#![deny(missing_docs)]`** on all 8 library crates — public API fully
+- ✅ **S27 `#![deny(missing_docs)]`** on all 9 library crates — public API fully
   documented (56 items via an 8-agent pass + stragglers by hand), commit `e1076ef`.
 - ✅ **cargo-deny** (supply-chain advisories/licenses/sources/bans) — `deny.toml`
   + a pinned CI job; `cargo deny check` passes locally (the two unmaintained
@@ -73,10 +74,10 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | Networked issuance (PoW-gated issuer node + over-the-wire credential acquisition) | ✅ | (this commit) — `tessera-issuer::net`, `tessera-client::obtain_credential` |
 | **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | (this commit) — `tessera-client` bin, proven by `tessera-relay/tests/network.rs` + a 4-process run to a real HTTPS site (200) |
 | Single-exit shared-key domain (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | (this commit) |
-| Multi-exit key-custody decision + single-domain proxy guardrails | ✅ | (this commit) — per-exit key domains, key-domain lease, optional durable spent-tag file |
+| Multi-exit key-custody decision + single-domain proxy guardrails + signed directory verifier/client selector | ✅ | (this commit) — per-exit key domains, key-domain lease, optional durable spent-tag file, `tessera-directory`, `tessera-client` directory mode |
 | Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3` + (this commit) |
 | Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → issue) | ✅ | (this commit) — `tessera-issuer::mint` (ecrecover proof + std-only `eth_call` read + durable ledger), `serve_issuance_paid`/`obtain_credential_paid`; proven vs real **anvil** (`tests/anvil_entitled.rs`) |
-| Deployed **clean-IP** exit + Tor/Nym crowd + signed fleet directory + distributed spent tags + audit | 🔒 | external (clean egress is one blocker; stranger-safe deployment also needs the listed network/audit work) |
+| Deployed **clean-IP** exit + Tor/Nym crowd + live mirrored directory operation + distributed spent tags + audit | 🔒 | external (clean egress is one blocker; stranger-safe deployment also needs the listed network/audit work; local signed directory verification/selection is built) |
 
 ## SHOULD — in progress
 
@@ -108,7 +109,7 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | S24 | CI: deeper fuzz (300s/target) | ✅ | the `fuzz-deep` CI job (300s/target, schedule + workflow_dispatch gated) |
 | S25 | CI: Slither static analysis | ✅ | the `slither` CI job (fails on High/Medium) |
 | S26 | CI: coverage report | ✅ | the `coverage` CI job (cargo-llvm-cov) |
-| S27 | `#![deny(missing_docs)]` all crates | ✅ | all 8 library crates; `cargo doc -D warnings` clean |
+| S27 | `#![deny(missing_docs)]` all crates | ✅ | all 9 library crates; `cargo doc -D warnings` clean |
 | S28 | Known-limitations + claim-boundary in README | ✅ | README "What this is / what it is NOT" + the IP-blind caveat + "Security status" |
 | S29 | Phase-status consistency table | ✅ | [`docs/STATUS.md`](./STATUS.md) |
 | S30 | `docs/SAFETY.md` (abuse handling) | ✅ | [`docs/SAFETY.md`](./SAFETY.md) |
@@ -131,10 +132,11 @@ N14 cachegrind CT analysis · N15 PoW solver timing-leak doc.
 E1 3rd-party audit · E2 multi-party Groth16 ceremony · E3 clean residential egress IP
 at scale · E4 Tor/Nym anonymity set · E5 Nym mixnet integration · E6 perpetual anti-bot
 defense · E7 production PQ primitives · E8 mainnet deploy w/ real value · E9 cross-epoch
-SDA budget (open research) · E10 accountable hostile-exit (open research) · E11 signed /
-replicated multi-exit directory + distributed spent-tag consistency · E12 shielded pool
-(XL) · E13 carrier/CGNAT/Snowflake lanes · E14 legal/liability model · E15 real-world
-anonymity-set measurement · E16 machine-checked soundness proof / full CT audit.
+SDA budget (open research) · E10 accountable hostile-exit (open research) · E11 live
+replicated multi-exit directory operation + distributed spent-tag consistency · E12
+shielded pool (XL) · E13 carrier/CGNAT/Snowflake lanes · E14 legal/liability model ·
+E15 real-world anonymity-set measurement · E16 machine-checked soundness proof / full
+CT audit.
 
 ## Authorship note
 

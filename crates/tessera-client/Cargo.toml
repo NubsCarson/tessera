@@ -14,6 +14,7 @@ categories.workspace = true
 
 [dependencies]
 tessera-arc = { path = "../tessera-arc" }
+tessera-directory = { path = "../tessera-directory" }
 # For obtaining a credential over the wire: reuse the issuer's PoW solver + the
 # framed issuance protocol. (No cycle: tessera-issuer does not depend on us.)
 tessera-issuer = { path = "../tessera-issuer" }

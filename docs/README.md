@@ -74,9 +74,10 @@ If you read nothing else, read the **honest status** at the bottom.
 8. **Multi-exit key custody = per-exit ARC key domains.** A single-exit
    issuer+exit pair shares one `TESSERA_KEY_FILE`, but independent exits must
    not share one fleet-wide ARC server key. That would put every exit inside one
-   forge-and-verify trust domain. Use per-exit issuer/key domains now; keep
-   publicly verifiable BBS-style credentials as a future cryptographic track, not
-   a shipped claim (`KEY_CUSTODY_DECISION.md`).
+   forge-and-verify trust domain. Use per-exit issuer/key domains now; the local
+   signed directory verifier/client selector is built for choosing one domain
+   and pinning its issuer key. Keep publicly verifiable BBS-style credentials as
+   a future cryptographic track, not a shipped claim (`KEY_CUSTODY_DECISION.md`).
 9. **Honesty is a feature.** Every external hand-off and every "doesn't do X" is
    named in docs rather than glossed; an auditor sees the gaps up front.
 
@@ -87,11 +88,10 @@ is genuinely needed):** the ZK Spilman channel (`tessera-channel`), the EVM cour
 (`contracts/src/ChannelRegistry.sol`), on-chain ZK settlement (`circuits/`,
 `cooperativeCloseZK`).
 
-**Buildable-here, not yet done** (tracked in `CEILING_PROGRESS.md`): the rest of
-the SHOULD tier (more adversarial court/protocol tests, 3-language Poseidon
-regression, CI hardening — cargo-deny/Slither/coverage/`forge fmt --check`, the
-topology/key-management/audit-prep docs) and the NICE tier (polish, `unilateralCloseZK`,
-a per-IP-per-epoch ZK rate circuit, etc.).
+**Buildable-here, not yet done** (tracked in `CEILING_PROGRESS.md`): S34
+(PIR/green-routing/x402 egress lanes, gated by the clean-egress frontier) and
+the NICE tier (polish, `unilateralCloseZK`, a per-IP-per-epoch ZK rate circuit,
+etc.).
 
 **Toward "usable" (mostly not core crypto):** a paid-mint client/wallet UX (the
 MV3 extension is a scaffold); the off-chain issuer integration (watch

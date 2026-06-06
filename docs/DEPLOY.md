@@ -36,8 +36,9 @@ keyed-verification — the exit needs that key to verify presentations); point b
 at the same `TESSERA_KEY_FILE`.
 
 For more than one independent exit, do **not** reuse that same key. Run one
-issuer/key file/key pin per exit domain. A future fleet directory/path selector
-must route by key domain; the current compose is a single-exit deployment.
+issuer/key file/key pin per exit domain. The client can consume a signed
+directory snapshot to choose one exit domain, but the current compose is still a
+single-exit deployment and does not publish or mirror a live fleet directory.
 
 The nodes are configured entirely by env vars (additive — the defaults preserve
 the local `cargo run` demos):
@@ -56,6 +57,11 @@ the local `cargo run` demos):
 | `TESSERA_RELAY` / `TESSERA_EXIT` | client | relay / exit `HOST:PORT` to route through |
 | `TESSERA_CLIENT_LISTEN` | client | local proxy bind (default `127.0.0.1:8120`) |
 | `TESSERA_ISSUER_PK` | client | hex pin: the issuer pk (or fingerprint prefix) issuance must match |
+| `TESSERA_DIRECTORY_FILE` | client | signed exit-directory snapshot; if set, supplies issuer/relay/exit/issuer pin |
+| `TESSERA_DIRECTORY_SIGNERS` | client | comma-separated SEC1 directory signer public-key pins (hex) |
+| `TESSERA_DIRECTORY_MIN_SIGNATURES` | client | directory signature threshold (default `1`) |
+| `TESSERA_DIRECTORY_STATE_FILE` | client | optional anti-rollback state file for monotonic directory sequence |
+| `TESSERA_EXIT_ID` | client | optional exact directory entry id to select |
 | `TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT` | issuer | **paid mode**: gate issuance on an on-chain `TokenMint` purchase (RPC URL + contract address) instead of PoW |
 | `TESSERA_MINT_LEDGER` | issuer | optional durable redemption-ledger path (paid mode) |
 | `TESSERA_BUYER_KEY` | client | hex secp256k1 secret of the address holding the entitlement (switches the client to paid issuance) |
@@ -65,9 +71,10 @@ the local `cargo run` demos):
 `purchase()` with ETH to earn `entitled[buyer]` tokens. Run the issuer with
 `TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT` set (it reads the live entitlement via
 `eth_call`); run the client with `TESSERA_BUYER_KEY` set to the buyer's secret **and
-`TESSERA_ISSUER_PK` set** (the issuer's pk fingerprint — **required** in paid mode:
-it pins the issuer so the control signature can't be wormholed to another issuer;
-the client refuses to start without it). The
+`TESSERA_ISSUER_PK` set** (or with `TESSERA_DIRECTORY_FILE` selecting an entry
+that supplies the full `issuer_pk`) — **required** in paid mode: it pins the
+issuer so the control signature can't be wormholed to another issuer; the client
+refuses to start without it. The
 client proves control of its address (`ecrecover` over a fresh challenge) and the
 issuer issues a credential against the on-chain balance, charging
 `TOKENS_PER_CREDENTIAL` (64) tokens, tracked durably so an entitlement becomes
@@ -84,6 +91,26 @@ deploy to catch a typo'd address / bad upstream / missing pin early. (It is a
 *preflight*, not a liveness probe — it binds the port, so don't run it against an
 already-serving node.) Misconfiguration now fails fast: a bad value exits `2`, a
 bind failure exits `1` — no node silently falls back to a random ephemeral port.
+
+**Signed directory client mode.** For a multi-exit deployment, publish an
+off-band signed snapshot and point the client at it:
+
+```sh
+TESSERA_DIRECTORY_FILE=/etc/tessera/exits.dir \
+TESSERA_DIRECTORY_SIGNERS=<signer-pk-hex>[,<signer-pk-hex>...] \
+TESSERA_DIRECTORY_MIN_SIGNATURES=1 \
+TESSERA_DIRECTORY_STATE_FILE=$HOME/.cache/tessera/directory.state \
+cargo run -p tessera-relay --bin tessera-client -- --check
+```
+
+The client verifies the pinned signer threshold, snapshot validity window, and
+optional monotonic sequence state; selects `TESSERA_EXIT_ID` if set, otherwise
+the highest-weight accepting entry; derives issuer/relay/exit addresses; and
+pins the entry's full ARC issuer public key before issuance. Directory mode
+rejects manual `TESSERA_ISSUER` / `TESSERA_RELAY` / `TESSERA_EXIT` /
+`TESSERA_ISSUER_PK` overrides so a stale env var cannot silently route across
+key domains. `--check` performs the same validation and records the sequence if
+`TESSERA_DIRECTORY_STATE_FILE` is set; a later lower sequence fails closed.
 
 ## 1. Local Docker — the whole network
 
@@ -182,7 +209,9 @@ setup on your host.
   files/key pins; see [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).
   The proxy now fails closed if a second local exit reaches the same established
   key file inode, including through a symlink/hardlink alias. That is a local
-  guardrail, not a distributed lease or copied-key detector.
+  guardrail, not a distributed lease or copied-key detector. The client-side
+  signed-directory verifier/selector is built, but live directory publication,
+  mirroring, operator governance, and real independent exits are deployment work.
 - **Durable replay protection is opt-in.** Set `TESSERA_SPENT_TAG_FILE` for a
   single exit to reject replays across restarts. The file store fails closed on
   malformed ledger rows or append/sync failure. It is not a distributed

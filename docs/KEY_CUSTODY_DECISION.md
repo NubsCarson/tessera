@@ -3,8 +3,8 @@
 > Decision record for the first real multi-exit question: what happens to the ARC
 > server key once Tessera has more than one egress exit? Research-grade,
 > **UNAUDITED**. This document is normative for deployment docs. It does not add
-> a fleet router or issuer-discovery protocol; it fixes the custody rule the
-> product must obey when those are built.
+> a live operator directory service; it fixes the custody rule and the client
+> verification contract that product layer must obey.
 
 ## Decision
 
@@ -89,9 +89,11 @@ For the code that exists today:
 - In a multi-exit deployment, never mount the same `TESSERA_KEY_FILE` into
   independent exits. Give each exit its own issuer/key file/key pin.
 - A client must know which issuer public key / key domain it is minting for
-  before routing to an exit.
-- A future fleet router must treat key domain as a routing dimension, not as an
-  implementation detail.
+  before routing to an exit. It can do that either by pinning
+  `TESSERA_ISSUER_PK` directly, or by verifying a signed directory snapshot that
+  supplies the full `issuer_pk` for the chosen exit.
+- Any fleet router or directory must treat key domain as a routing dimension,
+  not as an implementation detail.
 
 ## Target decentralized fleet shape
 
@@ -111,9 +113,22 @@ replicated directory of independent exit key domains:
 - Censorship resistance comes from many independently operated key domains plus
   replicated directory distribution, not from one shared secret.
 
-This target needs new product code: signed directory snapshots, client-side
-selection, key-domain-aware re-issuance, and distributed spent-tag consistency if
-an exit domain ever has more than one verifier replica.
+The local verification and selection layer for this target is now built:
+`tessera-directory` parses deterministic signed snapshots, verifies a pinned
+signer threshold, rejects expired or tampered snapshots, selects one accepting
+exit domain, and can persist a monotonic sequence state to reject rollback. The
+`tessera-client` binary consumes it via:
+
+- `TESSERA_DIRECTORY_FILE`
+- `TESSERA_DIRECTORY_SIGNERS`
+- `TESSERA_DIRECTORY_MIN_SIGNATURES` (default `1`)
+- `TESSERA_DIRECTORY_STATE_FILE` (optional anti-rollback state)
+- `TESSERA_EXIT_ID` (optional exact entry)
+
+Still-needed product/ops work: a real mirrored directory publisher, operator
+governance for signer rotation, aggregate health/capacity feeds, and distributed
+spent-tag consistency if one exit key domain ever has more than one verifier
+replica.
 
 ## Current status
 
@@ -125,6 +140,12 @@ Built here:
   scope for a local advisory lock).
 - Optional durable single-exit spent-tag file (`TESSERA_SPENT_TAG_FILE`) that
   fails closed on malformed ledger state or append/sync failure.
+- Signed exit-directory snapshot verification (`crates/tessera-directory`) with
+  pinned signer thresholds, validity windows, deterministic serialization,
+  highest-weight or exact-ID selection, and local anti-rollback state.
+- Client directory mode in `tessera-client --check` and runtime: signed snapshot
+  → selected exit domain → full issuer-key pin before issuance, including paid
+  mode without a separate `TESSERA_ISSUER_PK`.
 - Fail-fast key-file path validation on both issuer and proxy.
 - Regression coverage that a presentation from one key domain is rejected by
   another.
@@ -132,8 +153,8 @@ Built here:
 
 Not built here:
 
-- Fleet discovery.
-- Client-side exit/key-domain selection UX.
+- Live fleet discovery / mirrored directory publication.
+- Rich client-side route-selection UX beyond env-driven signed directory mode.
 - Multi-key issuer service.
 - Key epoch negotiation / graceful multi-key rotation.
 - Publicly verifiable credential migration.

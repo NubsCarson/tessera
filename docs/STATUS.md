@@ -35,11 +35,11 @@
 | 2 | **Issuance — PoW gate (default)** — hashcash challenge/solve/verify + one-time `ChallengeStore`, served over the wire | ✅ built + tested (cost knob, **not** Sybil resistance) | `crates/tessera-issuer/src/{lib,net}.rs`; tests `tests/pow.rs` |
 | 3 | **Issuance — paid mint (ETH, opt-in)** — buyer proves address via `ecrecover` over an issuer-bound challenge; issuer reads live `entitled(buyer)` via a std-only `eth_call`; durable ledger; refundable + double-issue guard | ✅ built + tested vs a real local **anvil** (testnet-only, UNAUDITED) | wire server `crates/tessera-issuer/src/net.rs` (`serve_issuance_paid`); on-chain plumbing `crates/tessera-issuer/src/mint.rs` (`ecrecover` proof-of-control `recover_buyer`/`sign_control`, std-only `eth_call`, `EntitlementSource`, `RedemptionLedger`, `PaymentGate`); client `obtain_credential_paid` in `crates/tessera-client/src/net.rs`; contract `contracts/src/TokenMint.sol`; tests `crates/tessera-issuer/tests/anvil_entitled.rs`, `contracts/test/TokenMint.t.sol` |
 | 4 | **2-hop split-trust loop** — relay (hop 1) learns {client, exit} but never the destination; exit learns {destination + valid-token} but never the client; neither sees content (E2E TLS) | ✅ built + tested (default path; ARC-token mode) | `crates/tessera-relay/src/{lib,channel}.rs`; tests `loop.rs`, `network.rs`, `channel_loop.rs`, `cross_epoch.rs` |
-| 5 | **Client proxy** — obtains a credential, runs a local `CONNECT` proxy, mints a fresh unlinkable presentation per request, auto-reissues when the budget is spent | ✅ built + tested (4-process run to a real HTTPS site → 200) | `crates/tessera-client/src/{lib,net}.rs`; bin `crates/tessera-relay/src/bin/tessera-client.rs` (`serve_client_proxy`/`CredentialSource`); proven by `crates/tessera-relay/tests/network.rs` |
+| 5 | **Client proxy** — obtains a credential, runs a local `CONNECT` proxy, mints a fresh unlinkable presentation per request, auto-reissues when the budget is spent; signed-directory mode selects one exit key domain and pins its issuer key before issuance | ✅ built + tested (4-process run to a real HTTPS site → 200; binary config tests cover signed directory accept/reject/rollback) | `crates/tessera-client/src/{lib,net}.rs`; bin `crates/tessera-relay/src/bin/tessera-client.rs` (`serve_client_proxy`/`CredentialSource`); proven by `crates/tessera-relay/tests/{network,client_config}.rs` |
 | 6 | **Credential-gated exit (proxy)** — `CONNECT` forward proxy admitting on the ARC presentation **never the IP**, E2E-TLS, optionally over Tor; per-IP human-volume shaping (M5) | ✅ built + tested | `crates/tessera-proxy/src/{lib,shaping,main}.rs`; tests `tests/proxy.rs` |
 | 7 | **Origin guard + tower middleware** — transport-agnostic `OriginGuard` (verify header, enforce limit + double-spend); off-by-default `tower::Layer` (`TesseraLayer`) that short-circuits rejects with `403` | ✅ built + tested (guard in host gates; `tower` feature unit-tested) | `crates/tessera-origin/src/{lib,store,tower_layer}.rs`; tests `guard.rs`, `store.rs`, `tower_layer.rs` |
 | 8 | **Pluggable / durable tag store** — `SpentTagStore` trait + `OriginGuard::with_store`; `InMemoryTagStore` (default), durable `FileTagStore`; injection point for a distributed backend | ✅ built + tested (double-spend survives a guard restart; **concrete distributed impl left to the deployer**) | `crates/tessera-origin/src/store.rs`; tests `crates/tessera-origin/tests/store.rs` |
-| 9 | **Single-exit key domain (issuer ↔ exit)** — convergent single-winner bootstrap so issuer (mints) + one exit (verifies) share one ARC key via `TESSERA_KEY_FILE`; proxy fails closed on a second local exit reaching the same established key-file inode; optional durable spent-tag file for restart safety | ✅ built + tested (multi-exit custody decision documented; fleet routing/discovery not built) | `crates/tessera-issuer/src/keyfile.rs` (`ensure_shared_key`); `crates/tessera-proxy/src/main.rs` (`KeyDomainLease`, `TESSERA_SPENT_TAG_FILE`); docs [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md), [`DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) §3 |
+| 9 | **Per-exit key domains + signed directory selection** — convergent single-winner bootstrap so issuer (mints) + one exit (verifies) share one ARC key via `TESSERA_KEY_FILE`; proxy fails closed on a second local exit reaching the same established key-file inode; optional durable spent-tag file for restart safety; client verifies threshold-signed exit-directory snapshots, rejects rollback, and pins the selected entry's full issuer key | ✅ built + tested (live directory publication/replication remains external deployment work) | `crates/tessera-issuer/src/keyfile.rs` (`ensure_shared_key`); `crates/tessera-proxy/src/main.rs` (`KeyDomainLease`, `TESSERA_SPENT_TAG_FILE`); `crates/tessera-directory/src/lib.rs`; `crates/tessera-relay/tests/client_config.rs`; docs [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md), [`DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) §3 |
 | 10 | **Tor binding** — expose the loop/origin as an onion service; client connects over a real Tor circuit (SOCKS5); admitted purely on the credential | ✅ built (onion always created; live rendezvous needs host Tor egress — credential check is byte-identical on either transport) | `crates/tessera-demo/src/tor.rs`; `--tor` flag; env-gated `TESSERA_TOR_E2E` integration test |
 | 11 | **Channel tier — ZK Spilman channel** — unidirectional, monotone-decrementing, single-payee off-chain state machine; user-signed states (attributable equivocation), sign-then-serve co-sign, HOPR-style proof-of-relay, watchtower, off-chain settlement; secp256k1+keccak chain-facing sigs | 🔧 optional-advanced (built + tested; off the default path per `ARCHITECTURE.md`) | `crates/tessera-channel/src/{channel,state,relay,watchtower,settlement,crypto,poseidon}.rs`; tests `protocol.rs`, `settlement_props.rs`, `watchtower.rs`, `no_mint.rs`, `eth_vector.rs` |
 | 12 | **ZK / on-chain court** — EVM `ChannelRegistry.sol` (open/close/dispute/slash/refund + relayer bond) + Groth16 `R_dec` settlement (`RDecVerifier.sol`); Circom/snarkjs circuit | 🔧 optional-advanced (built + tested incl. a Rust→Solidity cross-language vector + a pinned on-chain proof; **verifier built under a TEST-ONLY single-party dev ceremony — a multi-party MPC ceremony is required before any real value**, see ‡) | `contracts/src/{ChannelRegistry,RDecVerifier}.sol`; `circuits/R_dec.circom`; tests `contracts/test/{ChannelRegistry,CourtInvariant,RDecVerifier,Reentrancy,CrossLanguageVector}.t.sol`; settlement model `crates/tessera-channel/src/settlement.rs` |
@@ -47,11 +47,16 @@
 | 14 | **WASM browser client** — `tessera-arc`+`tessera-client` built for `wasm32-unknown-unknown`; `wasm-bindgen` API (`present()`, `prepare_issuance`/`IssuanceFlow`); MV3 extension scaffold | 🧩 built, excluded workspace (compiles + headless round-trip tests pass incl. real issuance against a live Rust origin; **loading the extension in a real browser is the human last mile**) | `crates/tessera-wasm/src/lib.rs`; tests **4 `#[wasm_bindgen_test]`** (`wasm_roundtrip.rs`, the headless-`node` round-trip) + **2 native `#[test]`** (`native_roundtrip.rs`); `examples/node-real-issuance.cjs`, MV3 `background.js` |
 | 15 | **Tower e2e server** — runnable `axum` server using `TesseraLayer` on a multi-thread `tokio` runtime, driven over a real TCP socket (403/200/replay-403) | 🧩 built, excluded workspace (its own `tower-e2e` CI job; `axum`/`tokio` kept out of the host MSRV gate) | `crates/tessera-tower-demo/src/main.rs`; test `crates/tessera-tower-demo/tests/e2e.rs` |
 | 16 | **Edge / Cloudflare Worker deploy** | 🔒 external — documented **sketch only**, not a compiled artifact (needs the server secret at the edge + a wasm guard build + a shared cross-isolate `SpentTagStore`) | sketch in `crates/tessera-origin` README; [`docs/ROADMAP.md`](./ROADMAP.md) track 2 |
-| 17 | **Deployed clean-IP exits + signed/replicated fleet directory + Tor/Nym anonymity crowd + third-party audit + multi-party MPC ceremony** | 🔒 external / future product — never simulated; the gaps between the runnable artifact and a stranger safely using it | tracked in [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md) (E1–E16) and [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md) |
+| 17 | **Deployed clean-IP exits + live replicated directory operation + Tor/Nym anonymity crowd + third-party audit + multi-party MPC ceremony** | 🔒 external / future product — never simulated; the gaps between the runnable artifact and a stranger safely using it | tracked in [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md) (E1–E16) and [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md) |
 
 ## Verification (counts, re-measured for this doc)
 
-- **Rust:** ~159 `#[test]` functions across the **host-workspace** crates (re-measured ~159 passing under `cargo test --workspace --all-features`; run the suite for the exact figure); the host workspace contains no `#[tokio::test]` (the lone `#[tokio::test]` in the repo is the parenthesized `#[tokio::test(flavor = "multi_thread", ...)]` in the excluded `tessera-tower-demo` e2e). The two excluded crates run in their own CI jobs: `tessera-tower-demo` (1 `#[tokio::test]`) and `tessera-wasm` (4 `#[wasm_bindgen_test]` + 2 native `#[test]`).
+- **Rust:** 187 `#[test]` markers across the **host-workspace** crates (plus
+  ignored upstream-vector checks; run the suite for the exact pass count). The
+  host workspace contains no `#[tokio::test]`; the lone `#[tokio::test]` is in
+  the excluded `tessera-tower-demo` e2e. The two excluded crates run in their
+  own CI jobs: `tessera-tower-demo` (1 `#[tokio::test]`) and `tessera-wasm` (4
+  `#[wasm_bindgen_test]` + 2 native `#[test]`).
 - **Foundry:** ~78 test/invariant/fuzz functions across the seven
   `contracts/test/*.t.sol` suites (ChannelRegistry, CourtAdversarial,
   CourtInvariant, CrossLanguageVector, RDecVerifier, Reentrancy, TokenMint);
@@ -59,9 +64,9 @@
 - **Fuzz:** 7 `cargo-fuzz` targets (`fuzz/fuzz_targets/`): `arc_lifecycle`, `channel_wire`, `wire_from_bytes`, the scalar/element deserializers (`deserialize_scalar`/`deserialize_element`), `presentation_verify`, and `origin_guard_check`.
 - **CI gates (host):** `cargo test`, `cargo clippy --all-targets --all-features
   --locked -- -D warnings`, `cargo fmt --check`, `cargo doc --workspace`
-  (`-D warnings`). All 8 library crates carry `#![deny(missing_docs)]`; the 7
+  (`-D warnings`). All 9 library crates carry `#![deny(missing_docs)]`; the 8
   host-workspace libraries ride that host `cargo doc --workspace` gate, while the
-  8th (`tessera-wasm`, an excluded crate) is doc/clippy-gated in its own wasm CI
+  9th (`tessera-wasm`, an excluded crate) is doc/clippy-gated in its own wasm CI
   job. Plus MSRV 1.74, `cargo deny`, `cargo audit` (RustSec advisories), a
   fuzz-build + 30s/target smoke job, `cargo-llvm-cov` (library surface gated
   ≥80%, measured 91.46% line), and Slither on the production contracts (0 High /
@@ -70,16 +75,14 @@
 ## Reconciliations (where the other docs need reading-in-this-light)
 
 - **Test counts.** [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md)'s snapshot
-  states "~162 Rust test functions + 78 Foundry tests + 7 fuzz targets." Treat
-  these as approximate, re-measured aggregates, not pins — per `CLAUDE.md`/`AGENTS.md`,
-  run the suite rather than trusting any stated count. The ~162 all-in Rust figure
-  is the host-workspace tests run by `cargo test` plus the excluded-crate tests that
-  run in their own CI jobs: `tessera-wasm` (native `#[test]` in `native_roundtrip.rs`
-  plus 4 `#[wasm_bindgen_test]` headless-node tests) and `tessera-tower-demo`
-  (`#[tokio::test]` e2e). STATUS.md's per-component "where it lives" rows count only
-  the host markers; the excluded crates are gated separately. Foundry (78, across the
-  seven `contracts/test/*.t.sol` suites) and fuzz (7 targets) match what CEILING
-  reports. So measured the same way, the two docs agree.
+  tracks current approximate aggregates. Treat them as moving markers, not pins
+  — per `CLAUDE.md`/`AGENTS.md`, run the suite rather than trusting any stated
+  count. The current Rust marker count is 187 host-workspace `#[test]` markers,
+  plus the excluded-crate tests gated separately: `tessera-wasm` (2 native
+  `#[test]` in `native_roundtrip.rs` + 4 `#[wasm_bindgen_test]` headless-node
+  tests) and `tessera-tower-demo` (1 `#[tokio::test]` e2e). Foundry (78, across
+  the seven `contracts/test/*.t.sol` suites) and fuzz (7 targets) match what
+  CEILING reports. So measured the same way, the docs agree.
 - **TEE status nuance.** README §"Run it yourself" presents the dstack TEE as the
   verifiable-relay deploy; [`docs/DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md)
   §3 is the precise statement and governs: the TEE compose wires **only relay +

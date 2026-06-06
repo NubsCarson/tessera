@@ -967,6 +967,7 @@ dependencies = [
  "hex",
  "rand_core",
  "tessera-arc",
+ "tessera-directory",
  "tessera-issuer",
 ]
 
@@ -980,6 +981,15 @@ dependencies = [
  "tessera-client",
  "tessera-issuer",
  "tessera-origin",
+]
+
+[[package]]
+name = "tessera-directory"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "k256",
+ "tessera-arc",
 ]
 
 [[package]]
@@ -1028,6 +1038,7 @@ name = "tessera-relay"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "k256",
  "rand_core",
  "tessera-arc",
  "tessera-channel",

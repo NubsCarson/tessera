@@ -1,0 +1,18 @@
+[package]
+name = "tessera-directory"
+version = "0.1.0"
+description = "Signed exit-directory snapshots for Tessera multi-exit key-domain selection."
+readme = "README.md"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+tessera-arc = { path = "../tessera-arc" }
+hex.workspace = true
+k256 = { workspace = true }

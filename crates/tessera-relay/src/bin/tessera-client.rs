@@ -15,11 +15,16 @@
 //!   `TESSERA_RELAY`         relay node  `HOST:PORT` (default `127.0.0.1:8119`)
 //!   `TESSERA_EXIT`          exit node   `HOST:PORT` (default `127.0.0.1:8118`)
 //!   `TESSERA_CLIENT_LISTEN` local proxy bind        (default `127.0.0.1:8120`)
+//!   `TESSERA_DIRECTORY_FILE` signed directory file; if set, derives issuer/relay/exit/pin
+//!   `TESSERA_DIRECTORY_SIGNERS` comma-separated SEC1 directory signer pk hex pins
+//!   `TESSERA_DIRECTORY_MIN_SIGNATURES` signature threshold (default `1`)
+//!   `TESSERA_DIRECTORY_STATE_FILE` optional anti-rollback state path
+//!   `TESSERA_EXIT_ID`       optional directory entry id to select
 //!   `TESSERA_BUYER_KEY`     hex (32 bytes) secp256k1 secret → PAID mode (else PoW)
 //!   `TESSERA_ISSUER_PK`     hex pin: the issuer pk (or its fingerprint prefix, ≥ 8
 //!                           bytes / 16 hex chars) the issuance must match
 //!                           (recommended; else trust-on-first-use). Required in
-//!                           paid mode.
+//!                           paid mode unless a signed directory supplies it.
 //!
 //! Run with `--check` for a fast preflight: it validates all config, resolves the
 //! issuer/relay/exit peers, and binds the local proxy listener (then drops it),
@@ -30,8 +35,11 @@
 //! Then: `curl -x http://127.0.0.1:8120 https://example.com`
 
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
+use std::path::PathBuf;
 
-use tessera_client::{obtain_credential, obtain_credential_paid};
+use tessera_client::{
+    obtain_credential, obtain_credential_paid, DirectoryState, SignedExitDirectory,
+};
 use tessera_relay::{serve_client_proxy, CredentialSource};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
@@ -51,22 +59,27 @@ fn die(msg: &str) -> ! {
     std::process::exit(2)
 }
 
-/// Resolve a `HOST:PORT` env var (or its default) to a concrete `SocketAddr`,
-/// dying with a clear config error if it is malformed or does not resolve.
-fn resolve(var: &str, default: &str) -> SocketAddr {
-    let spec = std::env::var(var).unwrap_or_else(|_| default.into());
+/// Resolve a `HOST:PORT` value to a concrete `SocketAddr`, dying with a clear
+/// config error if it is malformed or does not resolve.
+fn resolve_value(label: &str, spec: &str) -> SocketAddr {
     let mut addrs = match spec.to_socket_addrs() {
         Ok(addrs) => addrs,
         Err(e) => die(&format!(
-            "config error: {var}={spec} is not a valid HOST:PORT ({e})"
+            "config error: {label}={spec} is not a valid HOST:PORT ({e})"
         )),
     };
     match addrs.next() {
         Some(addr) => addr,
         None => die(&format!(
-            "config error: {var}={spec} did not resolve to any address"
+            "config error: {label}={spec} did not resolve to any address"
         )),
     }
+}
+
+/// Resolve a `HOST:PORT` env var (or its default) to a concrete `SocketAddr`.
+fn resolve(var: &str, default: &str) -> SocketAddr {
+    let spec = std::env::var(var).unwrap_or_else(|_| default.into());
+    resolve_value(var, &spec)
 }
 
 /// The fully-validated configuration the binary will run with. Building this
@@ -81,6 +94,15 @@ struct Config {
     listen: String,
     pin: Option<Vec<u8>>,
     buyer_secret: Option<[u8; 32]>,
+    directory: Option<DirectorySelection>,
+}
+
+struct DirectorySelection {
+    path: PathBuf,
+    entry_id: String,
+    sequence: u64,
+    min_signatures: usize,
+    state_path: Option<PathBuf>,
 }
 
 impl Config {
@@ -98,24 +120,15 @@ impl Config {
 /// Validate every env var the binary reads and resolve all peer addresses,
 /// dying with a specific `tessera-client: config error: …` on the first problem.
 fn load_config() -> Config {
-    let issuer = std::env::var("TESSERA_ISSUER").unwrap_or_else(|_| "127.0.0.1:8121".into());
-    // The issuer is used as a connect-by-name target, but we still validate that
-    // it parses/resolves up front so a typo fails fast rather than at issuance.
-    match issuer.to_socket_addrs() {
-        Ok(mut addrs) => {
-            if addrs.next().is_none() {
-                die(&format!(
-                    "config error: TESSERA_ISSUER={issuer} did not resolve to any address"
-                ));
-            }
-        }
-        Err(e) => die(&format!(
-            "config error: TESSERA_ISSUER={issuer} is not a valid HOST:PORT ({e})"
-        )),
-    }
+    let directory_path = directory_file_env();
 
-    let relay_addr = resolve("TESSERA_RELAY", "127.0.0.1:8119");
-    let exit_addr = resolve("TESSERA_EXIT", "127.0.0.1:8118");
+    let (issuer, relay_addr, exit_addr, pin, directory) = match directory_path {
+        Some((var, path)) => load_directory_route(var, path),
+        None => {
+            reject_stray_directory_env();
+            load_manual_route()
+        }
+    };
 
     let listen = std::env::var("TESSERA_CLIENT_LISTEN").unwrap_or_else(|_| "127.0.0.1:8120".into());
     // Validate that the listen address parses; we still keep the string form so
@@ -132,32 +145,6 @@ fn load_config() -> Config {
             "config error: TESSERA_CLIENT_LISTEN={listen} is not a valid HOST:PORT ({e})"
         )),
     }
-
-    // TESSERA_ISSUER_PK: optional hex pin. If present it must be valid hex and a
-    // meaningful fingerprint length (>= 8 bytes); empty is treated as unset.
-    let pin = match std::env::var("TESSERA_ISSUER_PK") {
-        Ok(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                let bytes = hex::decode(trimmed).unwrap_or_else(|e| {
-                    die(&format!(
-                        "config error: TESSERA_ISSUER_PK is not valid hex ({e})"
-                    ))
-                });
-                if bytes.len() < MIN_PIN_LEN {
-                    die(&format!(
-                        "config error: TESSERA_ISSUER_PK pin too short ({} bytes); need >= {MIN_PIN_LEN} bytes / {} hex chars",
-                        bytes.len(),
-                        MIN_PIN_LEN * 2
-                    ));
-                }
-                Some(bytes)
-            }
-        }
-        Err(_) => None,
-    };
 
     // PAID mode iff TESSERA_BUYER_KEY (a 32-byte hex secp256k1 secret) is set: the
     // client proves control of that Ethereum address, which must hold a TokenMint
@@ -191,7 +178,7 @@ fn load_config() -> Config {
     if buyer_secret.is_some() && pin.is_none() {
         // Paid mode binds the control signature to the issuer pk; without a pin a
         // relay could lure you into signing for a different issuer (wormhole).
-        die("config error: paid mode (TESSERA_BUYER_KEY) requires TESSERA_ISSUER_PK (the issuer's pk fingerprint)");
+        die("config error: paid mode (TESSERA_BUYER_KEY) requires TESSERA_ISSUER_PK or a signed directory entry with issuer_pk");
     }
 
     Config {
@@ -201,7 +188,269 @@ fn load_config() -> Config {
         listen,
         pin,
         buyer_secret,
+        directory,
     }
+}
+
+fn load_manual_route() -> (
+    String,
+    SocketAddr,
+    SocketAddr,
+    Option<Vec<u8>>,
+    Option<DirectorySelection>,
+) {
+    let issuer = std::env::var("TESSERA_ISSUER").unwrap_or_else(|_| "127.0.0.1:8121".into());
+    // The issuer is used as a connect-by-name target, but we still validate that
+    // it parses/resolves up front so a typo fails fast rather than at issuance.
+    match issuer.to_socket_addrs() {
+        Ok(mut addrs) => {
+            if addrs.next().is_none() {
+                die(&format!(
+                    "config error: TESSERA_ISSUER={issuer} did not resolve to any address"
+                ));
+            }
+        }
+        Err(e) => die(&format!(
+            "config error: TESSERA_ISSUER={issuer} is not a valid HOST:PORT ({e})"
+        )),
+    }
+    let relay_addr = resolve("TESSERA_RELAY", "127.0.0.1:8119");
+    let exit_addr = resolve("TESSERA_EXIT", "127.0.0.1:8118");
+
+    // TESSERA_ISSUER_PK: optional hex pin. If present it must be valid hex and a
+    // meaningful fingerprint length (>= 8 bytes); empty is treated as unset.
+    let pin = match std::env::var("TESSERA_ISSUER_PK") {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                let bytes = hex::decode(trimmed).unwrap_or_else(|e| {
+                    die(&format!(
+                        "config error: TESSERA_ISSUER_PK is not valid hex ({e})"
+                    ))
+                });
+                if bytes.len() < MIN_PIN_LEN {
+                    die(&format!(
+                        "config error: TESSERA_ISSUER_PK pin too short ({} bytes); need >= {MIN_PIN_LEN} bytes / {} hex chars",
+                        bytes.len(),
+                        MIN_PIN_LEN * 2
+                    ));
+                }
+                Some(bytes)
+            }
+        }
+        Err(_) => None,
+    };
+
+    (issuer, relay_addr, exit_addr, pin, None)
+}
+
+fn directory_file_env() -> Option<(&'static str, String)> {
+    let current = std::env::var("TESSERA_DIRECTORY_FILE")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let legacy = std::env::var("TESSERA_EXIT_DIRECTORY")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+
+    match (current, legacy) {
+        (Some(path), None) => Some(("TESSERA_DIRECTORY_FILE", path)),
+        (None, Some(path)) => Some(("TESSERA_EXIT_DIRECTORY", path)),
+        (Some(_), Some(_)) => die(
+            "config error: set only one of TESSERA_DIRECTORY_FILE or legacy TESSERA_EXIT_DIRECTORY",
+        ),
+        (None, None) => None,
+    }
+}
+
+fn reject_stray_directory_env() {
+    for var in [
+        "TESSERA_DIRECTORY_SIGNERS",
+        "TESSERA_DIRECTORY_MIN_SIGNATURES",
+        "TESSERA_DIRECTORY_STATE_FILE",
+        "TESSERA_DIRECTORY_SIGNER_PK",
+        "TESSERA_EXIT_ID",
+    ] {
+        if std::env::var(var).is_ok() {
+            die(&format!(
+                "config error: {var} requires TESSERA_DIRECTORY_FILE"
+            ));
+        }
+    }
+}
+
+fn load_directory_signers(path_var: &str) -> Vec<Vec<u8>> {
+    if std::env::var("TESSERA_DIRECTORY_SIGNER_PK").is_ok() {
+        die(
+            "config error: TESSERA_DIRECTORY_SIGNER_PK is obsolete; use comma-separated TESSERA_DIRECTORY_SIGNERS",
+        );
+    }
+    let raw = std::env::var("TESSERA_DIRECTORY_SIGNERS").unwrap_or_else(|_| {
+        die(&format!(
+            "config error: TESSERA_DIRECTORY_SIGNERS is required with {path_var}"
+        ))
+    });
+    if raw.trim().is_empty() {
+        die("config error: TESSERA_DIRECTORY_SIGNERS cannot be empty");
+    }
+    raw.split(',')
+        .enumerate()
+        .map(|(idx, part)| {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                die(&format!(
+                    "config error: TESSERA_DIRECTORY_SIGNERS entry {} is empty",
+                    idx + 1
+                ));
+            }
+            let hex_str = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+            hex::decode(hex_str).unwrap_or_else(|e| {
+                die(&format!(
+                    "config error: TESSERA_DIRECTORY_SIGNERS entry {} is not valid hex ({e})",
+                    idx + 1
+                ))
+            })
+        })
+        .collect()
+}
+
+fn load_directory_threshold() -> usize {
+    match std::env::var("TESSERA_DIRECTORY_MIN_SIGNATURES") {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                die("config error: TESSERA_DIRECTORY_MIN_SIGNATURES cannot be empty");
+            }
+            let threshold = trimmed.parse::<usize>().unwrap_or_else(|e| {
+                die(&format!(
+                    "config error: TESSERA_DIRECTORY_MIN_SIGNATURES is not a positive integer ({e})"
+                ))
+            });
+            if threshold == 0 {
+                die("config error: TESSERA_DIRECTORY_MIN_SIGNATURES must be non-zero");
+            }
+            threshold
+        }
+        Err(_) => 1,
+    }
+}
+
+fn load_directory_route(
+    path_var: &'static str,
+    path: String,
+) -> (
+    String,
+    SocketAddr,
+    SocketAddr,
+    Option<Vec<u8>>,
+    Option<DirectorySelection>,
+) {
+    for var in [
+        "TESSERA_ISSUER",
+        "TESSERA_RELAY",
+        "TESSERA_EXIT",
+        "TESSERA_ISSUER_PK",
+    ] {
+        if std::env::var(var).is_ok() {
+            die(&format!(
+                "config error: {var} cannot be set with {path_var}; the signed directory supplies issuer/relay/exit/pin"
+            ));
+        }
+    }
+
+    let signers = load_directory_signers(path_var);
+    let min_signatures = load_directory_threshold();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        die(&format!(
+            "config error: could not read {path_var}={path}: {e}"
+        ))
+    });
+    let directory = SignedExitDirectory::parse(&text)
+        .unwrap_or_else(|e| die(&format!("config error: invalid exit directory: {e}")));
+    directory
+        .verify_now(&signers, min_signatures)
+        .unwrap_or_else(|e| die(&format!("config error: exit directory rejected: {e}")));
+
+    let state_path = std::env::var("TESSERA_DIRECTORY_STATE_FILE")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    if let Some(state_path) = &state_path {
+        let mut state = DirectoryState::open(state_path).unwrap_or_else(|e| {
+            die(&format!(
+                "config error: could not open directory state {}: {e}",
+                state_path.display()
+            ))
+        });
+        state
+            .check_and_record(directory.snapshot.sequence)
+            .unwrap_or_else(|e| die(&format!("config error: exit directory rejected: {e}")));
+    }
+
+    let selected_id = std::env::var("TESSERA_EXIT_ID")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    let entry = directory
+        .snapshot
+        .select(selected_id.as_deref())
+        .unwrap_or_else(|e| {
+            die(&format!(
+                "config error: exit directory selection failed: {e}"
+            ))
+        });
+
+    let issuer = entry.issuer_addr.clone();
+    match issuer.to_socket_addrs() {
+        Ok(mut addrs) => {
+            if addrs.next().is_none() {
+                die(&format!(
+                    "config error: directory issuer {} did not resolve to any address",
+                    entry.issuer_addr
+                ));
+            }
+        }
+        Err(e) => die(&format!(
+            "config error: directory issuer {} is not a valid HOST:PORT ({e})",
+            entry.issuer_addr
+        )),
+    }
+    let relay_addr = resolve_value("directory relay", &entry.relay_addr);
+    let exit_addr = resolve_value("directory exit", &entry.exit_addr);
+    let selection = DirectorySelection {
+        path: PathBuf::from(path),
+        entry_id: entry.id.clone(),
+        sequence: directory.snapshot.sequence,
+        min_signatures,
+        state_path,
+    };
+    (
+        issuer,
+        relay_addr,
+        exit_addr,
+        Some(entry.issuer_pk.clone()),
+        Some(selection),
+    )
+}
+
+fn directory_summary(directory: &DirectorySelection) -> String {
+    format!(
+        " directory={} entry={} seq={} threshold={}{}",
+        directory.path.display(),
+        directory.entry_id,
+        directory.sequence,
+        directory.min_signatures,
+        directory_state_summary(directory)
+    )
+}
+
+fn directory_state_summary(directory: &DirectorySelection) -> String {
+    directory
+        .state_path
+        .as_ref()
+        .map(|path| format!(" state={}", path.display()))
+        .unwrap_or_default()
 }
 
 /// Bind the local proxy listener at the configured address. Unlike the old
@@ -231,12 +480,16 @@ fn main() {
 
         println!("tessera-client: config OK");
         println!(
-            "  mode={} listen={bound} issuer={} relay={} exit={} pin={}",
+            "  mode={} listen={bound} issuer={} relay={} exit={} pin={}{}",
             cfg.mode(),
             cfg.issuer,
             cfg.relay_addr,
             cfg.exit_addr,
             if cfg.pin.is_some() { "set" } else { "unset" },
+            cfg.directory
+                .as_ref()
+                .map(directory_summary)
+                .unwrap_or_default(),
         );
         std::process::exit(0);
     }
@@ -259,6 +512,7 @@ fn main() {
         listen: _,
         pin,
         buyer_secret,
+        directory,
     } = cfg;
 
     let credential = match &buyer_secret {
@@ -299,6 +553,16 @@ fn main() {
 
     println!("\nTessera client proxy live on http://{addr}");
     println!("  route: you → (this proxy) → RELAY {relay_addr} → EXIT {exit_addr} → destination");
+    if let Some(directory) = &directory {
+        println!(
+            "  directory: {} entry={} seq={} threshold={}{} (issuer key pinned from signed snapshot)",
+            directory.path.display(),
+            directory.entry_id,
+            directory.sequence,
+            directory.min_signatures,
+            directory_state_summary(directory)
+        );
+    }
     println!(
         "  the EXIT admits each request on a fresh unlinkable token, never your IP; re-issues when spent."
     );
