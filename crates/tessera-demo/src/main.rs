@@ -101,7 +101,7 @@ fn main() {
         "issuance is unlinkable: the server cannot tie this credential to any later request",
     );
 
-    // ---- 3. Stand up the guarded origin --------------------------------
+    // ---- 4. Stand up the guarded origin --------------------------------
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("addr");
     let guard = Arc::new(OriginGuard::new(
@@ -120,7 +120,7 @@ fn main() {
     let addr_s = addr.to_string();
     let mut client = TesseraClient::new(credential, PRESENT_CTX, LIMIT);
 
-    // ---- 4. The world as it is today -----------------------------------
+    // ---- 5. The world as it is today -----------------------------------
     ui::section("What every Tor user gets today");
     let r = net::get_direct(&addr_s, None).expect("request");
     ui::result(
@@ -130,7 +130,7 @@ fn main() {
         &r.result,
     );
 
-    // ---- 5. The world with Tessera -------------------------------------
+    // ---- 6. The world with Tessera -------------------------------------
     ui::section("The same anonymous client, now carrying a credential");
     let mut first_header = None;
     for i in 1..=LIMIT {
@@ -151,7 +151,7 @@ fn main() {
         );
     }
 
-    // ---- 6. Abuse is bounded -------------------------------------------
+    // ---- 7. Abuse is bounded -------------------------------------------
     ui::section("Abuse is cryptographically bounded");
     match client.presentation_header(&mut rng) {
         Err(_) => ui::result(
@@ -173,7 +173,7 @@ fn main() {
 
     ui::summary();
 
-    // ---- 7. Optional: prove it over a real Tor circuit -----------------
+    // ---- 8. Optional: prove it over a real Tor circuit -----------------
     if want_tor {
         ui::section("Bonus: over a real Tor circuit (onion service)");
         match tor::run_onion_demo(addr.port(), &sk, &pk, &mut rng) {

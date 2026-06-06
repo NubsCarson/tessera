@@ -143,6 +143,32 @@ fn open_channel() -> (RelayGate, UserChannel) {
     (gate, user)
 }
 
+/// `RelayGate::open` rejects a channel whose `relayer_pk` is not this gate's key
+/// — the client must have agreed to pay *this* relay. Covers the pk-equality
+/// reject arm in `RelayGate::open` that the happy-path loop tests never reach.
+#[test]
+fn relay_gate_rejects_channel_for_a_different_relayer() {
+    let mut rng = OsRng;
+    let user_keys = KeyPair::generate(&mut rng);
+    let relayer_keys = KeyPair::generate(&mut rng);
+    let other_relayer = KeyPair::generate(&mut rng);
+    let gate = RelayGate::new(relayer_keys, EPOCH);
+
+    // A channel the client opened against a DIFFERENT relayer's key.
+    let params = Channel::open(
+        CHAN_ID,
+        B0,
+        SALT,
+        user_keys.verifying_key(),
+        other_relayer.verifying_key(),
+    );
+
+    assert!(
+        matches!(gate.open(params), Err(ChannelError::BadSignature)),
+        "a channel naming a different relayer must be rejected by RelayGate::open"
+    );
+}
+
 /// Build the inner-CONNECT exit header carrying a fresh ARC participant
 /// presentation (the exit's "is this a participant" token — NOT the payment).
 fn exit_header(client: &mut TesseraClient) -> String {

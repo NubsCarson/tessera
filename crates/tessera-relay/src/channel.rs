@@ -93,7 +93,7 @@ use std::io::{Error, ErrorKind, Result};
 use tessera_channel::crypto::{EthSig, Hash};
 use tessera_channel::relay::RelayRequest;
 use tessera_channel::state::{ChanId, ChannelState, Salt, SignedState};
-use tessera_channel::{Spend, VerifyingKey};
+use tessera_channel::Spend;
 
 /// Outer-header name carrying the hex `chan_id` (which channel a request spends).
 pub const CHANNEL_ID_HEADER: &str = "Tessera-Channel-Id";
@@ -246,12 +246,6 @@ pub fn decode_chan_id(s: &str) -> Result<ChanId> {
     let mut id: ChanId = [0u8; 32];
     id.copy_from_slice(&bytes);
     Ok(id)
-}
-
-/// Serialize a [`VerifyingKey`] (its 33-byte SEC1-compressed form) to hex — used
-/// when a client announces its identity to the relay at open time.
-pub fn encode_pubkey(pk: &VerifyingKey) -> String {
-    hex::encode(pk.to_bytes())
 }
 
 fn bad<E: std::fmt::Display>(e: E) -> Error {
