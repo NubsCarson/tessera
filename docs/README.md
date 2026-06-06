@@ -25,6 +25,7 @@ If you read nothing else, read the **honest status** at the bottom.
 | DoS / abuse surface + the bounds we added | [`ABUSE_MODEL.md`](./ABUSE_MODEL.md) |
 | Deployment topology + per-node trust boundaries | [`DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) |
 | The ARC server-key lifecycle (bootstrap / sharing / rotation / leak) | [`KEY_MANAGEMENT.md`](./KEY_MANAGEMENT.md) |
+| Multi-exit key custody (per-exit domains vs shared fleet key vs BBS) | [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md) |
 | What's safe to log (observability + privacy review) | [`OBSERVABILITY.md`](./OBSERVABILITY.md) |
 | Relayer misbehavior → defense + honest-relayer atomicity | [`RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) |
 | Channel durability / crash-recovery (optional-advanced tier) | [`CHANNEL_RECOVERY.md`](./CHANNEL_RECOVERY.md) |
@@ -70,7 +71,13 @@ If you read nothing else, read the **honest status** at the bottom.
 7. **Relayer accountability = a per-channel bond** with symmetric equivocation
    slashing (`ECONOMICS.md`); honest that it's accountability/Sybil/forward-compat,
    not a theft reserve in the unidirectional channel.
-8. **Honesty is a feature.** Every external hand-off and every "doesn't do X" is
+8. **Multi-exit key custody = per-exit ARC key domains.** A single-exit
+   issuer+exit pair shares one `TESSERA_KEY_FILE`, but independent exits must
+   not share one fleet-wide ARC server key. That would put every exit inside one
+   forge-and-verify trust domain. Use per-exit issuer/key domains now; keep
+   publicly verifiable BBS-style credentials as a future cryptographic track, not
+   a shipped claim (`KEY_CUSTODY_DECISION.md`).
+9. **Honesty is a feature.** Every external hand-off and every "doesn't do X" is
    named in docs rather than glossed; an auditor sees the gaps up front.
 
 ## Open paths / ideas not yet taken

@@ -13,6 +13,16 @@ cargo run -p tessera-proxy -- --tor  # tunnel through Tor at 127.0.0.1:9050
 
 On startup it self-issues a credential, binds `127.0.0.1:8118` (overridable via `TESSERA_LISTEN`; it exits rather than fall back to a random port), and prints a ready-to-paste `curl` command using the `Tessera-Presentation` proxy header. Requests with a valid single-use credential are admitted and tunneled; missing or invalid credentials get `407 Proxy Authentication Required`.
 
+For a networked issuer+exit deployment, set `TESSERA_KEY_FILE` on the issuer and
+this exit to the same path. That path is one ARC key domain; after key
+convergence, the proxy takes a local advisory lock on the established key file
+inode and fails closed if a second live local exit reaches the same key through a
+symlink/hardlink/path alias. On Unix the lease releases automatically when the
+process exits. This is not a distributed lease and cannot detect copied key bytes
+on another path or host. Independent exits need separate issuer/key files/key
+pins, not one shared fleet key. Set `TESSERA_SPENT_TAG_FILE` to persist spent
+tags across a single exit restart; it is not a distributed multi-exit tag store.
+
 ## Status
 
 Research-grade and **unaudited**; do not use to protect real users. See [SECURITY](../../SECURITY.md) and the [threat model](../../docs/THREAT_MODEL.md). This is std-only demo/example tooling, not a hardened production proxy.

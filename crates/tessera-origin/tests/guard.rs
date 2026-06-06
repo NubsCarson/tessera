@@ -88,6 +88,29 @@ fn presentation_for_another_origin_is_rejected() {
 }
 
 #[test]
+fn presentation_for_another_key_domain_is_rejected() {
+    // Multi-exit custody relies on this boundary: a credential issued under
+    // one issuer+exit key domain must not verify at another exit's key domain.
+    let mut rng = OsRng;
+    let (issuer_a_sk, issuer_a_pk) = ServerPrivateKey::setup(&mut rng);
+    let (exit_b_sk, exit_b_pk) = ServerPrivateKey::setup(&mut rng);
+
+    let (pending, request) = begin_issuance(REQ, issuer_a_pk, &mut rng);
+    let response =
+        create_credential_response(&issuer_a_sk, &issuer_a_pk, &request, &mut rng).unwrap();
+    let credential = pending.finalize(&response).unwrap();
+    let mut client = TesseraClient::new(credential, CTX, LIMIT);
+    let header = client.presentation_header(&mut rng).unwrap();
+
+    let guard_b = OriginGuard::new(exit_b_sk, exit_b_pk, REQ, CTX, LIMIT);
+    assert_eq!(
+        guard_b.check(Some(&header)),
+        Decision::Reject(RejectReason::InvalidProof),
+        "credentials from one ARC key domain must not cross-verify in another"
+    );
+}
+
+#[test]
 fn distinct_presentations_have_distinct_tags() {
     let (guard, mut client) = setup();
     let mut tags = Vec::new();

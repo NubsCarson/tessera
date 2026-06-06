@@ -183,7 +183,13 @@ fn load_config() -> Result<Config, String> {
             check_path_usable(&path, "TESSERA_KEY_FILE")?;
             Some(path)
         }
-        _ => None,
+        Ok(_) => {
+            return Err(
+                "TESSERA_KEY_FILE is set but empty (unset it for an ephemeral single-node issuer, or give it a path)"
+                    .to_string(),
+            );
+        }
+        Err(_) => None,
     };
 
     // ── paid-mode gate ──────────────────────────────────────────────────────

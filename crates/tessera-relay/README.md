@@ -46,12 +46,14 @@ observation is recorded **only after** the spend is accepted, so it also witness
 > The within-session link it does hold (which in-channel requests are yours) is
 > the **accepted** linkability of `DESIGN.md` §9, named not hidden.
 
-## The loop now does REAL channel pay-per-request (Phase 2a protocol)
+## The loop also does REAL channel pay-per-request (optional-advanced)
 
-The loop now has **two payment modes**, and the **channel-payment mode is the
-real, tested default** for pay-per-request:
+The loop has **two payment modes**. Per the root architecture decision, the
+recommended default path is the ARC-token mode (credential minted by the issuer,
+verified at the exit). The channel-payment mode is still real, built, and tested,
+but it is the optional-advanced tier for pay-as-you-go-with-refund:
 
-* **Channel mode (real — `DESIGN.md` §1/§2).** The **relay is the
+* **Channel mode (real, optional-advanced — `DESIGN.md` §1/§2).** The **relay is the
   [`tessera-channel`](../tessera-channel) counterparty + per-request payment
   gate.** The client OPENS a channel with the relay (`RelayGate::open`; the relay
   holds a `RelayerChannel`, the client a `UserChannel`). For **each** request the
@@ -64,10 +66,10 @@ real, tested default** for pay-per-request:
   `402 Payment Required` and **the request never reaches the destination**. The
   full protocol (how the spend rides the nested-CONNECT tunnel, and the exit's
   role + trust) is documented in the `tessera_relay::channel` module.
-* **ARC-v0 mode (legacy stand-in).** The original credential-*blind* relay where
-  the ARC presentation gated at the **exit**. Kept available behind its own entry
-  point (`serve` / `open_through_relay`) so the Phase-1 loop still works and is
-  still tested, but it is no longer how the loop pays for real.
+* **ARC-token mode (recommended default).** The credential-*blind* relay where
+  the ARC presentation gates at the **exit**. This is the leaner default path
+  documented in `docs/ARCHITECTURE.md`; it is available through `serve` /
+  `open_through_relay` and is tested end to end.
 
 **Why this is the correct trust model** (`DESIGN.md` §1/§2/§8): the relay is the
 **single channel counterparty**, so it *necessarily links your in-channel
@@ -98,8 +100,8 @@ The real per-request payment is the channel spend at the relay.
 * There is **still no real clean egress** — reaching a Tor-blocked site through a
   clean residential-class IP is a documented **manual** final step (below).
 
-ARC remains usable as the v0 spend stand-in in the legacy mode; the channel mode
-is the real, tested default.
+ARC-token mode is the default architecture path; channel mode remains the real,
+tested optional-advanced path.
 
 ## Run it
 
@@ -107,7 +109,7 @@ is the real, tested default.
 # REAL channel pay-per-request demo: open + a couple of PAID requests + a refused replay
 cargo run -p tessera-relay --example paid_loop
 
-# Legacy ARC-v0 loop (credential gates at the exit):
+# ARC-token loop (recommended default; credential gates at the exit):
 cargo run -p tessera-relay            # exit egresses directly
 cargo run -p tessera-relay -- --tor   # exit egresses via Tor (SOCKS5 127.0.0.1:9050)
 ```
@@ -115,9 +117,9 @@ cargo run -p tessera-relay -- --tor   # exit egresses via Tor (SOCKS5 127.0.0.1:
 `paid_loop` opens a channel and prints each paid request (seq/balance), then shows
 the replayed spend getting `402` (no double-spend, destination never touched).
 
-The canonical client moves are `tessera_relay::open_through_relay_paid` (channel
-mode) and `tessera_relay::open_through_relay` (legacy ARC mode); the tests and the
-example/binary use them.
+The canonical client moves are `tessera_relay::open_through_relay` (ARC-token
+mode) and `tessera_relay::open_through_relay_paid` (channel mode); the tests and
+the example/binary use them.
 
 ## Design choices (and why)
 

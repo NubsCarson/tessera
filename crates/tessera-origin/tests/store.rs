@@ -10,7 +10,7 @@ use tessera_arc::arc::create_credential_response;
 use tessera_arc::keys::ServerPrivateKey;
 use tessera_client::{begin_issuance, TesseraClient};
 use tessera_origin::{
-    Decision, FileTagStore, InMemoryTagStore, OriginGuard, RejectReason, SpentTagStore,
+    Decision, FileTagStore, InMemoryTagStore, OriginGuard, RejectReason, SpentTagStore, StoreError,
 };
 
 const REQ: &[u8] = b"tessera://issue/v1";
@@ -37,10 +37,16 @@ fn in_memory_store_detects_repeats() {
     let store = InMemoryTagStore::new();
     assert!(store.is_empty());
     let tag = [9u8; 33];
-    assert!(store.record_if_new(tag), "first record is new");
-    assert!(!store.record_if_new(tag), "repeat is a double-spend");
+    assert!(store.record_if_new(tag).unwrap(), "first record is new");
+    assert!(
+        !store.record_if_new(tag).unwrap(),
+        "repeat is a double-spend"
+    );
     assert_eq!(store.len(), 1);
-    assert!(store.record_if_new([1u8; 33]), "a different tag is new");
+    assert!(
+        store.record_if_new([1u8; 33]).unwrap(),
+        "a different tag is new"
+    );
     assert_eq!(store.len(), 2);
 }
 
@@ -53,9 +59,12 @@ fn file_store_detects_repeats_and_persists() {
     {
         let store = FileTagStore::open(&path).expect("open");
         assert!(store.is_empty());
-        assert!(store.record_if_new(tag_a));
-        assert!(!store.record_if_new(tag_a), "repeat within the run");
-        assert!(store.record_if_new(tag_b));
+        assert!(store.record_if_new(tag_a).unwrap());
+        assert!(
+            !store.record_if_new(tag_a).unwrap(),
+            "repeat within the run"
+        );
+        assert!(store.record_if_new(tag_b).unwrap());
         assert_eq!(store.len(), 2);
     } // drop -> file flushed/closed
 
@@ -63,16 +72,19 @@ fn file_store_detects_repeats_and_persists() {
     let reopened = FileTagStore::open(&path).expect("reopen");
     assert_eq!(reopened.len(), 2, "tags survive across re-open");
     assert!(
-        !reopened.record_if_new(tag_a),
+        !reopened.record_if_new(tag_a).unwrap(),
         "a tag from a prior run must still be a double-spend"
     );
-    assert!(reopened.record_if_new([3u8; 33]), "a fresh tag is admitted");
+    assert!(
+        reopened.record_if_new([3u8; 33]).unwrap(),
+        "a fresh tag is admitted"
+    );
 
     let _ = std::fs::remove_file(&path);
 }
 
 #[test]
-fn file_store_skips_malformed_lines() {
+fn file_store_rejects_malformed_lines() {
     let path = temp_path("malformed");
     std::fs::write(
         &path,
@@ -81,9 +93,11 @@ fn file_store_skips_malformed_lines() {
     )
     .unwrap();
 
-    let store = FileTagStore::open(&path).expect("open tolerates malformed lines");
-    assert_eq!(store.len(), 1, "only the one valid tag loads");
-    assert!(!store.record_if_new([5u8; 33]), "the loaded tag is spent");
+    let err = match FileTagStore::open(&path) {
+        Ok(_) => panic!("malformed rows fail closed"),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
 
     let _ = std::fs::remove_file(&path);
 }
@@ -145,6 +159,31 @@ fn double_spend_is_enforced_across_a_guard_restart() {
     let _ = std::fs::remove_file(&path);
 }
 
+#[test]
+fn separate_in_memory_exits_do_not_share_double_spend_state() {
+    let mut rng = OsRng;
+    let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+    let mut client = issue(&sk, pk);
+    let header = client.presentation_header(&mut OsRng).unwrap();
+
+    let exit_a = OriginGuard::new(sk.clone(), pk, REQ, CTX, LIMIT);
+    let exit_b = OriginGuard::new(sk, pk, REQ, CTX, LIMIT);
+
+    assert!(
+        exit_a.check(Some(&header)).is_admit(),
+        "first exit admits the fresh presentation"
+    );
+    assert_eq!(
+        exit_a.check(Some(&header)),
+        Decision::Reject(RejectReason::DoubleSpend),
+        "one exit catches its own replay"
+    );
+    assert!(
+        exit_b.check(Some(&header)).is_admit(),
+        "a second process-local exit with the same key has no shared tag state"
+    );
+}
+
 /// A custom store wired through the trait works exactly like the built-ins —
 /// this is the extension point real deployments use (Redis/Postgres/DO).
 #[test]
@@ -154,9 +193,9 @@ fn a_custom_store_can_be_injected() {
     /// A toy "reject everything as already-spent" store, to prove injection.
     struct AlwaysSpent(Mutex<u64>);
     impl SpentTagStore for AlwaysSpent {
-        fn record_if_new(&self, _tag: [u8; 33]) -> bool {
+        fn record_if_new(&self, _tag: [u8; 33]) -> Result<bool, StoreError> {
             *self.0.lock().unwrap() += 1;
-            false
+            Ok(false)
         }
     }
 
@@ -178,5 +217,28 @@ fn a_custom_store_can_be_injected() {
         guard.check(Some(&header)),
         Decision::Reject(RejectReason::DoubleSpend),
         "the injected store's verdict is honored"
+    );
+}
+
+#[test]
+fn an_unavailable_store_fails_closed() {
+    /// A toy store that cannot safely record, to prove failures are not admitted.
+    struct Unavailable;
+    impl SpentTagStore for Unavailable {
+        fn record_if_new(&self, _tag: [u8; 33]) -> Result<bool, StoreError> {
+            Err(StoreError::new("test store unavailable"))
+        }
+    }
+
+    let mut rng = OsRng;
+    let (sk, pk) = ServerPrivateKey::setup(&mut rng);
+    let mut client = issue(&sk, pk);
+    let header = client.presentation_header(&mut OsRng).unwrap();
+
+    let guard = OriginGuard::with_store(sk, pk, REQ, CTX, LIMIT, Box::new(Unavailable));
+    assert_eq!(
+        guard.check(Some(&header)),
+        Decision::Reject(RejectReason::StoreUnavailable),
+        "a verified presentation is rejected when the store cannot record it"
     );
 }

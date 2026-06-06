@@ -96,11 +96,13 @@ curl -x http://127.0.0.1:8120 https://example.com         # admitted on a token,
 ```
 
 This runs the **whole network** as containers: an **issuer** mints PoW-gated
-credentials (sharing one ARC key with the exit), the **relay**+**exit** form the
+credentials (sharing one ARC key with one exit key domain), the **relay**+**exit** form the
 2-hop loop, and a local **client proxy** obtains a credential and routes each
 request through it on a fresh, unlinkable token — re-issuing when the budget is
 spent. Verified end to end: `crates/tessera-relay/tests/network.rs` (all four
 nodes in-process) plus a 4-process binary run reaching a real HTTPS site (`200`).
+Independent multi-exit scale is per-exit key domains, not one shared fleet key;
+see [`docs/KEY_CUSTODY_DECISION.md`](./docs/KEY_CUSTODY_DECISION.md).
 
 Issuance can be gated on **proof of work** (default) or a **paid on-chain mint**:
 buy tokens from `TokenMint.sol` with ETH, prove control of the buyer address, and

@@ -2,13 +2,15 @@
 #
 #   you --▶ CLIENT-PROXY --▶ RELAY --(internal)--▶ EXIT --(its egress IP)--▶ dest
 #                  │                                 ▲
-#                  └──▶ ISSUER (authority) ──────────┘  shares one ARC key with EXIT
+#                  └──▶ ISSUER (authority) ──────────┘  one ARC key domain with EXIT
 #   (the client connects to the ISSUER to obtain a credential — so the issuer sees
 #    the client's IP at issuance; ARC still can't link it to browsing. In a real
 #    deployment the client reaches the issuer over Tor too. All-local demo => moot.)
 #
-# - ISSUER mints PoW-gated credentials and shares ONE ARC key with the EXIT
+# - ISSUER mints PoW-gated credentials and shares ONE ARC key with this one EXIT
 #   (ARC is keyed-verification — the exit needs that key to verify presentations).
+#   Do not scale `exit` with this same key. A multi-exit fleet needs one
+#   issuer/key file/key pin per independent exit domain.
 # - RELAY is the credential-blind first hop (learns {client, exit}, never the dest).
 # - EXIT is credential-gated (learns {dest, a valid token}, never the client) and
 #   egresses from its own IP — which the destination sees and which MUST be clean
@@ -47,6 +49,9 @@ services:
       TESSERA_UPSTREAM: "direct"
       # Same shared key as the issuer, so credentials it mints verify here.
       TESSERA_KEY_FILE: "/keys/server.key"
+      # Durable replay protection for this single exit across restarts. This is
+      # not a distributed multi-exit store.
+      TESSERA_SPENT_TAG_FILE: "/keys/spent-tags.log"
     volumes:
       - tessera-key:/keys
     depends_on:
@@ -83,5 +88,6 @@ services:
 volumes:
   # Holds the shared ARC server key. In a real multi-node/TEE deployment this is
   # exactly what the dstack KMS should seal to the enclaves (docs/DEPLOY.md);
-  # a plain volume is the local-demo stand-in.
+  # a plain volume is the local-demo stand-in. This volume is one key domain:
+  # add more exits with their own issuer/key volume/pin, not by sharing this one.
   tessera-key:

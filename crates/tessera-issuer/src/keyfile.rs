@@ -53,19 +53,19 @@ pub fn ensure_shared_key(path: &str) -> (ServerPrivateKey, ServerPublicKey) {
                 std::process::id(),
                 TMP_SEQ.fetch_add(1, Ordering::Relaxed)
             );
-            let wrote = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            let wrote = opts
                 .open(&tmp)
                 .and_then(|mut f| {
                     f.write_all(&sk.serialize())?;
                     f.flush()?;
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
-                    }
-                    Ok(())
+                    f.sync_data()
                 })
                 .is_ok();
             if wrote {
@@ -138,6 +138,21 @@ mod tests {
             keys.iter().all(|k| *k == keys[0]),
             "all racing nodes must converge on exactly one key (no divergence)"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn created_shared_key_is_owner_only_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = temp_path("mode");
+        let _ = std::fs::remove_file(&path);
+        let _ = ensure_shared_key(&path);
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "shared ARC key file must be owner-only");
+
         let _ = std::fs::remove_file(&path);
     }
 }

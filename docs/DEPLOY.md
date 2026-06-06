@@ -9,15 +9,15 @@
 
 ```
                   ┌──────────────────────────────┐ obtain a credential (PoW)
-client ──────────▶│ ISSUER (authority, shares a   │  the issuer sees the client's IP here
-   │              │ key with EXIT)                │
+client ──────────▶│ ISSUER (authority for one     │  the issuer sees the client's IP here
+   │              │ exit key domain)              │
    └─(Tor)─▶ RELAY ──(internal)──▶ EXIT ──(its egress IP)──▶ destination
 ```
 
 - **ISSUER** (`tessera-issuer`) — the credential authority. The client connects
   to it **directly** to obtain a credential, so it **sees the client's IP at
   issuance** (ARC unlinkability still prevents tying that to later browsing — see
-  limits). Shares one ARC key with the exit.
+  limits). Shares one ARC key with its paired exit.
 - **RELAY** (`tessera-relay`) — the credential-blind first hop. Learns
   `{client, exit}`, **never** the destination or the content.
 - **EXIT** (`tessera-proxy`) — credential-gated `CONNECT`. Learns
@@ -31,8 +31,13 @@ client ──────────▶│ ISSUER (authority, shares a   │  t
 
 The full network is **four** nodes: a credential **issuer** (authority), the
 **relay**, the **exit**, and the local **client** proxy you point a browser at.
-The issuer and exit **share one ARC key** (ARC is keyed-verification — the exit
-needs that key to verify presentations); point both at the same `TESSERA_KEY_FILE`.
+The issuer and exit in this single-exit key domain **share one ARC key** (ARC is
+keyed-verification — the exit needs that key to verify presentations); point both
+at the same `TESSERA_KEY_FILE`.
+
+For more than one independent exit, do **not** reuse that same key. Run one
+issuer/key file/key pin per exit domain. A future fleet directory/path selector
+must route by key domain; the current compose is a single-exit deployment.
 
 The nodes are configured entirely by env vars (additive — the defaults preserve
 the local `cargo run` demos):
@@ -41,7 +46,8 @@ the local `cargo run` demos):
 |---|---|---|
 | `TESSERA_ISSUER_LISTEN` | issuer | bind address (default `127.0.0.1:8121`) |
 | `TESSERA_POW_DIFFICULTY` | issuer | leading-zero-bit PoW cost per credential (default `16`) |
-| `TESSERA_KEY_FILE` | issuer, exit | **shared** ARC server-key path (issuer creates, exit loads) |
+| `TESSERA_KEY_FILE` | issuer, exit | ARC server-key path for this **single exit key domain** (issuer creates, exit loads) |
+| `TESSERA_SPENT_TAG_FILE` | exit | optional durable spent-tag file for one exit; unset = in-memory |
 | `TESSERA_LISTEN` | exit | bind address (e.g. `0.0.0.0:8118`) |
 | `TESSERA_UPSTREAM` | exit | `direct` \| `tor` \| `tor:HOST:PORT` |
 | `TESSERA_RELAY_LISTEN` | relay | bind address (e.g. `0.0.0.0:8119`) |
@@ -87,8 +93,9 @@ docker compose -f deploy/docker-compose.yaml up --build
 curl -x http://127.0.0.1:8120 https://example.com
 ```
 
-This builds one `tessera-node` image and runs all four nodes: the **issuer**
-mints the shared key, the **exit** loads it, the **relay** fronts the exit, and
+This builds one `tessera-node` image and runs all four nodes in one
+**single-exit key domain**: the **issuer** mints the shared key, the **exit**
+loads it, the **relay** fronts the exit, and
 the **client** obtains a credential and serves a local `CONNECT` proxy on
 `127.0.0.1:8120`. A request through it is admitted on a fresh, unlinkable token
 (never your IP), tunneled relay→exit→destination with your TLS end-to-end; when
@@ -98,13 +105,18 @@ the credential's budget is spent the client transparently re-issues.
 > nodes in-process (credential obtained over the wire → 200 through the loop →
 > auto re-issue → pin mismatch rejected), and a 4-process binary run reaches a
 > real HTTPS site with `200`.
+>
+> Do not `docker compose --scale exit=N` with this file. Multiple exits sharing
+> `/keys/server.key` are one unsafe key domain unless a future distributed
+> spent-tag store and key-domain-aware router are wired. Add another exit by
+> adding another issuer + key file + issuer pin.
 
 To run the nodes **without** Docker (each in its own terminal):
 
 ```sh
-KEY=$(mktemp -u);  export TESSERA_KEY_FILE=$KEY
+KEY=$(mktemp -u);  TAGS=$(mktemp -u);  export TESSERA_KEY_FILE=$KEY TESSERA_SPENT_TAG_FILE=$TAGS
 TESSERA_KEY_FILE=$KEY cargo run -p tessera-issuer          # authority :8121 (creates the key)
-TESSERA_KEY_FILE=$KEY cargo run -p tessera-proxy           # exit :8118 (loads the key)
+TESSERA_KEY_FILE=$KEY TESSERA_SPENT_TAG_FILE=$TAGS cargo run -p tessera-proxy  # exit :8118 (loads the key)
 TESSERA_RELAY_LISTEN=127.0.0.1:8119 TESSERA_EXIT_ADDR=127.0.0.1:8118 cargo run -p tessera-relay
 cargo run -p tessera-relay --bin tessera-client            # client proxy :8120
 curl -x http://127.0.0.1:8120 https://example.com
@@ -165,6 +177,16 @@ setup on your host.
   shared volume; a real multi-host or TEE deployment should instead **derive the
   shared key from the dstack KMS and seal it to the enclaves** so it never lands
   on a disk. Wiring that KMS derivation is the next step.
+- **Multi-exit custody is per-exit, not fleet-shared.** One `TESSERA_KEY_FILE`
+  is one issuer+exit key domain. Independent exits need separate issuer/key
+  files/key pins; see [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).
+  The proxy now fails closed if a second local exit reaches the same established
+  key file inode, including through a symlink/hardlink alias. That is a local
+  guardrail, not a distributed lease or copied-key detector.
+- **Durable replay protection is opt-in.** Set `TESSERA_SPENT_TAG_FILE` for a
+  single exit to reject replays across restarts. The file store fails closed on
+  malformed ledger rows or append/sync failure. It is not a distributed
+  multi-exit store.
 - **Tor onion fronting** for the relay (so clients reach it anonymously) is a
   deployment step, not yet in the compose.
 - **UNAUDITED.** Do not protect real users or funds with this yet.

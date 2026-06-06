@@ -38,6 +38,10 @@ The two specific linkages that must never be createable from logs:
 2. **credential ↔ destination** (or credential ↔ client over time) — would let
    the verifier partition the anonymity set (see
    [`THREAT_MODEL.md`](THREAT_MODEL.md) §3.4 context partitioning).
+3. **tag/key-domain/exit ↔ destination** — in a multi-exit deployment, key domain
+   is a routing and anonymity-set boundary. A central metrics system must not
+   join per-presentation tags or high-cardinality key-domain/exit labels to
+   destination hosts.
 
 [`THREAT_MODEL.md`](THREAT_MODEL.md) §3.3 already states the standing rule: even
 with a clean transport, "the network and any logging middlebox certainly can
@@ -57,11 +61,14 @@ macros at all.
 
 ### 2.1 Exit — `tessera-proxy` ([`src/main.rs`](../crates/tessera-proxy/src/main.rs))
 
-All output is the startup banner (lines 228–244), printed once before the accept
-loop. It prints the **bind address**, the route mode (`direct` / `via Tor`), a
-**freshly minted demo credential** to paste into an example `curl`, and usage
-text. None of it is request-derived. After the banner the process just sleeps
-(line 247, `std::thread::sleep`); the accept loop logs nothing per connection.
+Output is limited to fatal config/bind errors, the `--check` config summary, and
+the startup banner printed once after the accept loop is spawned. The banner
+prints the **bind address**, the route mode (`direct` / `via Tor`), a **freshly
+minted demo credential** to paste into an example `curl`, and usage text. The
+`--check` summary prints configured listen/upstream/key/tag-store/topology
+labels. None of this is request-derived. After the banner the process just keeps
+the main thread alive with `std::thread::sleep`; the accept loop logs nothing per
+connection.
 
 ### 2.2 Relay — `tessera-relay` ([`src/main.rs`](../crates/tessera-relay/src/main.rs))
 
@@ -135,12 +142,12 @@ logging hooks but are **not**: they are the in-memory, test-only ledger the
 integration test (`tests/loop.rs`) reads to *prove* the split — e.g. assert the
 relay's `Observer.targets()` only ever contains the exit, never the destination.
 Crucially, the two binaries that run relay/exit serve loops — `tessera-proxy`
-and `tessera-relay` — **never wire an observer**: the exit uses
-`serve_observed_shaped` with observer `None` (`tessera-proxy/src/main.rs:215`;
-and in the all-in-one relay binary via `tessera_proxy::serve`, which is
-`serve_observed(.., None)` — [`proxy/src/lib.rs:94`](../crates/tessera-proxy/src/lib.rs) —
-called as `serve_exit(..)` at `tessera-relay/src/main.rs:247`),
-and the relay uses `tessera_relay::serve(.., None)` (`tessera-relay/src/main.rs:228,254`).
+and `tessera-relay` — **never wire an observer**: the exit calls
+`serve_observed_shaped` with observer `None`
+([`proxy main`](../crates/tessera-proxy/src/main.rs)); the all-in-one relay
+binary calls `tessera_proxy::serve`, which is `serve_observed(.., None)`
+([`proxy/src/lib.rs:94`](../crates/tessera-proxy/src/lib.rs)); and the relay uses
+`tessera_relay::serve(.., None)`.
 The `tessera-issuer` binary has no observer at all. So the observers record
 nothing in any shipped node. They are an assertion harness, not telemetry, and an
 operator **MUST NOT** wire a persisting observer into a real node (it would record
@@ -169,6 +176,10 @@ Notes for the reviewer:
   tag per line, no metadata — no destination, IP, or timestamp;
   [`store.rs:158–159`](../crates/tessera-origin/src/store.rs)). This is the
   intended, necessary state — do not "enrich" it with destination or peer.
+- **Key-domain identifiers are safe only as coarse health labels.** A count like
+  "exit domain A admitted N requests" is acceptable; a row like
+  `(tag, key_domain, exit_id, destination, timestamp)` is not. That join rebuilds
+  a verifier-side activity ledger and defeats the point of per-exit custody.
 - **The shaper window is the exit's only destination-side state, and it is the
   one piece of in-memory state that, if exfiltrated/persisted, partially recreates
   a destination history for an egress IP.** It is RAM-only, pruned to the window
@@ -188,7 +199,7 @@ Notes for the reviewer:
 
 | Emitter | Could it link client↔dest / leak the protected half? | Verdict |
 |---|---|---|
-| Exit startup banner (`proxy/main.rs:228–244`) | No request data; the demo header is a *minted* credential, not a presented one | **Safe** |
+| Exit `--check` summary and startup banner (`proxy/main.rs`) | No request data; the demo header is a *minted* credential, not a presented one | **Safe** |
 | Relay startup banner (`relay/main.rs:224–227, 267–292`) | Prints relay+exit addresses (relay's legitimate next hop) and a demo header; never a destination | **Safe** |
 | Issuer banner (`issuer/main.rs:303–332`) | Bind addr + public key fingerprint + gate mode; no issuance data | **Safe** |
 | Issuer ledger WARN (`mint.rs:346,351`) | Prints an `io::Error`, not a buyer/address; PAID mode + disk-fault only | **Safe** |
@@ -209,7 +220,8 @@ a small, privacy-preserving counter) and do **not** create a linkage:
 
 - **Aggregate counters with no per-request key**: total connections accepted,
   total admitted, total rejected (optionally bucketed by `RejectReason` —
-  `MissingCredential` / `Malformed` / `InvalidProof` / `DoubleSpend`, from
+  `MissingCredential` / `Malformed` / `InvalidProof` / `DoubleSpend` /
+  `StoreUnavailable`, from
   [`tessera-origin/src/lib.rs`](../crates/tessera-origin/src/lib.rs)), `502`/`503`
   counts. A `407`/`402`/`503` *rate* is a useful health/abuse signal and carries
   no client or destination identity.
@@ -249,13 +261,16 @@ To preserve split-trust + the no-log property, **no node may emit or store**:
    tag for replay defense, but never `tag + destination`, `tag + timestamp`, or
    `tag + peer`. That join would let the verifier partition the anonymity set
    ([`THREAT_MODEL.md`](THREAT_MODEL.md) §3.4) and link a credential's spends.
-5. **Ethereum address ↔ presentation / destination / client** at the issuer.
+5. **Key-domain / exit labels joined to presentation tags and destinations.** A
+   fleet directory may need aggregate per-domain health, but no telemetry plane
+   may store presentation-level rows keyed by exit/domain.
+6. **Ethereum address ↔ presentation / destination / client** at the issuer.
    The ledger keeps `(address, count)` only; never tie it to issued credentials
    or downstream traffic — that would defeat ARC issuer-unlinkability.
-6. **Plaintext or per-connection timing/byte-count fingerprints.** The tunnel is
+7. **Plaintext or per-connection timing/byte-count fingerprints.** The tunnel is
    end-to-end TLS by construction; do not add request/response size or precise
    timing logs that could fingerprint a flow.
-7. **The full shaper window or per-decision destination logs.** Keep it the
+8. **The full shaper window or per-decision destination logs.** Keep it the
    in-memory, windowed gauge it is.
 
 ## 7. Deployment guidance

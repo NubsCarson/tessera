@@ -6,13 +6,16 @@
 > public-key asymmetry to fall back on. This document is the lifecycle for that
 > key: what it is, how the issuer and exit converge on one copy, how it is stored
 > (file-based default vs. dstack-KMS-sealed), what rotation costs, and exactly
-> what breaks if it leaks. Research-grade, **UNAUDITED**; the KMS-sealed path is
-> a deployment upgrade, not the shipped default.
+> what breaks if it leaks. For more than one independent exit, the rule is
+> explicit: **one ARC key domain per exit, never one shared fleet-wide key**.
+> Research-grade, **UNAUDITED**; the KMS-sealed path is a deployment upgrade, not
+> the shipped default.
 >
 > Companion docs: key distribution in [`DEPLOY.md`](./DEPLOY.md), the
 > verifier-trust model in [`THREAT_MODEL.md`](./THREAT_MODEL.md) §3.4–§3.5 and
 > the rotation note in §"Key rotation", and the KVAC security argument in
-> [`SECURITY_ARGUMENT.md`](./SECURITY_ARGUMENT.md).
+> [`SECURITY_ARGUMENT.md`](./SECURITY_ARGUMENT.md). The multi-exit custody
+> decision record is [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).
 
 ## 1. What the key is
 
@@ -33,8 +36,9 @@ defined in `crates/tessera-arc/src/keys.rs`:
   `TESSERA_ISSUER_PK`.
 
 The private key never needs to be transmitted on the wire — it only has to exist
-identically on the issuer and the exit. That is the entire distribution problem,
-and §3 solves it without ever sending the key over a socket.
+identically on the issuer and the exit **inside one key domain**. That is the
+single-exit distribution problem, and §3 solves it without ever sending the key
+over a socket. It is not permission to reuse one key across every future exit.
 
 ### Defensive handling in the type
 
@@ -53,16 +57,18 @@ is written to disk in the file-based path (§4).
 
 A fresh key pair comes from `ServerPrivateKey::setup(rng)` (`keys.rs:65`), the
 spec's `SetupServer()` — four `random_scalar` draws from a CSPRNG. Both the
-issuer and the exit seed this from `OsRng` (`tessera-issuer/src/main.rs:294`;
-in the proxy the `OsRng` is constructed at `tessera-proxy/src/main.rs:136` and
-consumed by `setup(&mut rng)` at `tessera-proxy/src/main.rs:193`). There is no key-derivation-from-seed path in the
-shipped code: a key is either freshly sampled or read back from disk.
+issuer and the exit seed this from `OsRng` (`crates/tessera-issuer/src/main.rs`
+and `crates/tessera-proxy/src/main.rs`). There is no key-derivation-from-seed
+path in the shipped code: a key is either freshly sampled or read back from
+disk.
 `from_scalars` is the explicit-key constructor the §10.2 test vectors require;
 production generation goes through `setup`, which samples four scalars and wraps
 them via `from_scalars` (`keys.rs:66`).
 
-If `TESSERA_KEY_FILE` is **unset/empty**, each binary samples its own ephemeral
-key and there is no sharing — the exit self-issues to itself. This is the
+If `TESSERA_KEY_FILE` is **unset**, each binary samples its own ephemeral
+key and there is no sharing — the exit self-issues to itself. A present-but-empty
+proxy value is a config error, because silently downgrading a configured exit to
+an ephemeral key is unsafe. This is the
 single-node demo (`cargo run -p tessera-proxy` with no env), labeled "ephemeral
 key (single-node only)" by the issuer. A multi-node deployment **must** set
 `TESSERA_KEY_FILE`, or the exit's key will not match the issuer's and every
@@ -70,10 +76,12 @@ presentation fails `407` forever.
 
 ## 3. The convergent shared-key bootstrap (`ensure_shared_key`)
 
-The issuer and exit must hold the **same** key. The shipped mechanism is
+The issuer and exit inside one key domain must hold the **same** key. The shipped
+mechanism is
 `tessera_issuer::ensure_shared_key(path)` in
 `crates/tessera-issuer/src/keyfile.rs`, called by both binaries against the same
-`TESSERA_KEY_FILE` (`tessera-issuer/src/main.rs:290`, `tessera-proxy/src/main.rs:192`).
+`TESSERA_KEY_FILE` (`crates/tessera-issuer/src/main.rs` and
+`crates/tessera-proxy/src/main.rs`).
 
 It is **single-winner and convergence-guaranteed** by design — it does not rely
 on the issuer starting before the exit, and it tolerates any startup ordering or
@@ -110,6 +118,34 @@ silently `407`s every client.
 > where hard links are unsupported or non-atomic, the single-winner property is
 > not guaranteed — another reason the KMS-sealed path (§4.2) is the real
 > multi-host answer.
+
+### 3.1 One `TESSERA_KEY_FILE` is one key domain
+
+`TESSERA_KEY_FILE` defines a single ARC key domain: one issuer authority and the
+exit that verifies credentials minted by that authority. That is correct for the
+single-exit topology.
+
+For a multi-exit network, **repeat the domain per exit**. Do not mount one
+fleet-wide `TESSERA_KEY_FILE` into independent exits. A shared fleet key would
+make every exit a holder of the minting-and-verification secret for every other
+exit: any compromised exit can forge fleet-valid credentials, every exit becomes
+a verification oracle for fleet presentations that cross its boundary, and one
+rotation event invalidates the whole fleet.
+
+The accepted multi-exit shape is:
+
+```text
+issuer-a + exit-a  ->  key-domain A  ->  /keys/exit-a.arc
+issuer-b + exit-b  ->  key-domain B  ->  /keys/exit-b.arc
+issuer-c + exit-c  ->  key-domain C  ->  /keys/exit-c.arc
+```
+
+That partitions anonymity sets by exit key. This is a real trade-off, but it is
+the safer one: blast radius and audit scope stay local to an egress domain. If a
+future product needs one issuer with many independently operated public
+verifiers, that is the BBS/public-verifiability track described in
+[`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md), not the current ARC
+deployment.
 
 ## 4. Storage: file-based default vs. dstack-KMS-sealed
 
@@ -221,8 +257,11 @@ not transparent.
 ## 7. Operational checklist (S14)
 
 - **Set `TESSERA_KEY_FILE` on issuer and exit to the same path** in any
-  multi-node deployment; never leave it unset there (unset ⇒ divergent ephemeral
-  keys ⇒ permanent `407`).
+  single-exit multi-node deployment; never leave it unset there (unset ⇒
+  divergent ephemeral keys ⇒ permanent `407`).
+- **For multi-exit deployments, use one key file per independent exit domain.**
+  Never share one fleet-wide ARC key across exits unless they are honestly one
+  operator / one enclave / one failure domain.
 - **Treat the key file as MAC-key-grade secret.** It is plaintext at mode
   `0600`; control volume access, backups, and host-root reach accordingly.
 - **Single trusted host / shared volume only** for the file-based path. For a

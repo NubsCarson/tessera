@@ -26,17 +26,43 @@ use std::sync::Mutex;
 /// The presentation tag the guard records — a SEC1-compressed P-256 point.
 pub type Tag = [u8; 33];
 
+/// Error returned when a spent-tag store cannot safely record a fresh tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreError {
+    message: String,
+}
+
+impl StoreError {
+    /// Build a store error with a human-readable diagnostic.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for StoreError {}
+
 /// A spent-tag set: records accepted presentation tags and detects repeats.
 ///
 /// The single operation must be **atomic**: for concurrent calls with the same
-/// tag, exactly one must observe `true` (admit) and the rest `false`
-/// (double-spend). The store is shared behind `&self` and must be `Send + Sync`
-/// (the guard is typically wrapped in an `Arc` and driven from many threads).
+/// tag, exactly one must observe `Ok(true)` (admit) and the rest `Ok(false)`
+/// (double-spend). `Err` means the store cannot durably/authoritatively decide,
+/// so callers must fail closed. The store is shared behind `&self` and must be
+/// `Send + Sync` (the guard is typically wrapped in an `Arc` and driven from
+/// many threads).
 pub trait SpentTagStore: Send + Sync {
-    /// Record `tag` as spent. Returns `true` if it was newly recorded (the
-    /// presentation is fresh — **admit**), or `false` if it was already present
-    /// (replay / double-spend — **reject**).
-    fn record_if_new(&self, tag: Tag) -> bool;
+    /// Record `tag` as spent. Returns `Ok(true)` if it was newly recorded (the
+    /// presentation is fresh — **admit**), `Ok(false)` if it was already present
+    /// (replay / double-spend — **reject**), or `Err` if the store is unavailable
+    /// or cannot make the record durable/authoritative (**reject**).
+    fn record_if_new(&self, tag: Tag) -> Result<bool, StoreError>;
 }
 
 /// The default store: an in-memory `HashSet` behind a `Mutex`. Process-local and
@@ -66,11 +92,12 @@ impl InMemoryTagStore {
 }
 
 impl SpentTagStore for InMemoryTagStore {
-    fn record_if_new(&self, tag: Tag) -> bool {
-        self.spent
+    fn record_if_new(&self, tag: Tag) -> Result<bool, StoreError> {
+        Ok(self
+            .spent
             .lock()
             .expect("tag store mutex poisoned")
-            .insert(tag)
+            .insert(tag))
     }
 }
 
@@ -85,10 +112,10 @@ impl SpentTagStore for InMemoryTagStore {
 ///   multiple replicas, implement [`SpentTagStore`] over a shared store instead.
 /// * **Unbounded growth.** The file grows by 66 bytes per accepted presentation
 ///   and is never compacted. Rotate it per key-epoch / context in deployment.
-/// * **Durability is a best-effort flush**, not `fsync`-per-write (kept off the
-///   hot path). A crash can lose the last few appends; the in-memory set still
-///   rejects replays for the current run. Wrap your own store if you need
-///   stronger durability.
+/// * **Durability is fail-closed.** A fresh tag is appended, flushed, and synced
+///   before it is admitted. If persistence fails, the call returns an error and
+///   the presentation is rejected rather than becoming replayable after restart.
+///   This is intentionally conservative and slower than an in-memory store.
 pub struct FileTagStore {
     inner: Mutex<FileTagInner>,
 }
@@ -100,7 +127,9 @@ struct FileTagInner {
 
 impl FileTagStore {
     /// Open (creating if absent) a spent-tag file at `path`, loading any tags
-    /// already recorded in it. Malformed lines are skipped (forward-compatible).
+    /// already recorded in it. Malformed non-empty lines are a startup error: a
+    /// replay ledger must fail closed instead of silently treating corrupted rows
+    /// as unspent.
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref();
         let mut spent = HashSet::new();
@@ -109,17 +138,34 @@ impl FileTagStore {
         // between the two), and a single open is also one fewer syscall.
         match File::open(path) {
             Ok(f) => {
-                for line in BufReader::new(f).lines() {
+                for (line_no, line) in BufReader::new(f).lines().enumerate() {
                     let line = line?;
                     let line = line.trim();
                     if line.is_empty() {
                         continue;
                     }
-                    if let Ok(bytes) = hex::decode(line) {
-                        if let Ok(tag) = Tag::try_from(bytes.as_slice()) {
-                            spent.insert(tag);
-                        }
-                    }
+                    let bytes = hex::decode(line).map_err(|e| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "malformed spent-tag line {} in {}: {e}",
+                                line_no + 1,
+                                path.display()
+                            ),
+                        )
+                    })?;
+                    let tag = Tag::try_from(bytes.as_slice()).map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "malformed spent-tag line {} in {}: expected 33 bytes, got {}",
+                                line_no + 1,
+                                path.display(),
+                                bytes.len()
+                            ),
+                        )
+                    })?;
+                    spent.insert(tag);
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // fresh start
@@ -147,17 +193,52 @@ impl FileTagStore {
 }
 
 impl SpentTagStore for FileTagStore {
-    fn record_if_new(&self, tag: Tag) -> bool {
+    fn record_if_new(&self, tag: Tag) -> Result<bool, StoreError> {
         let mut inner = self.inner.lock().expect("file tag store mutex poisoned");
-        if !inner.spent.insert(tag) {
-            return false;
+        if inner.spent.contains(&tag) {
+            return Ok(false);
         }
-        // Persist append-only. If the write fails, the tag stays in the
-        // in-memory set (so it is still rejected this run); only cross-restart
-        // durability of this one tag is lost — see the type's doc.
+
         let line = hex::encode(tag);
-        let _ = writeln!(inner.file, "{line}");
-        let _ = inner.file.flush();
-        true
+        writeln!(inner.file, "{line}")
+            .and_then(|_| inner.file.flush())
+            .and_then(|_| inner.file.sync_data())
+            .map_err(|e| StoreError::new(format!("could not persist spent tag: {e}")))?;
+        inner.spent.insert(tag);
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileTagInner, FileTagStore, SpentTagStore};
+    use std::collections::HashSet;
+    use std::fs::OpenOptions;
+    use std::sync::Mutex;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn file_store_fails_closed_when_append_fails() {
+        let file = OpenOptions::new()
+            .append(true)
+            .open("/dev/full")
+            .expect("/dev/full exists on linux");
+        let store = FileTagStore {
+            inner: Mutex::new(FileTagInner {
+                spent: HashSet::new(),
+                file,
+            }),
+        };
+        let tag = [42u8; 33];
+
+        let err = store
+            .record_if_new(tag)
+            .expect_err("/dev/full must make persistence fail");
+        assert!(err.to_string().contains("could not persist"), "{err}");
+        assert_eq!(
+            store.len(),
+            0,
+            "failed persistence must not mark the tag spent in memory"
+        );
     }
 }

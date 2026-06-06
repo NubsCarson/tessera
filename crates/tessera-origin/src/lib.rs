@@ -32,7 +32,7 @@ use tessera_arc::arc::{verify_presentation, Presentation};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 
 pub mod store;
-pub use store::{FileTagStore, InMemoryTagStore, SpentTagStore};
+pub use store::{FileTagStore, InMemoryTagStore, SpentTagStore, StoreError};
 
 /// The HTTP header carrying a hex-encoded ARC presentation.
 pub const PRESENTATION_HEADER: &str = "Tessera-Presentation";
@@ -48,6 +48,8 @@ pub enum RejectReason {
     InvalidProof,
     /// The presentation tag was already spent (replay / double-spend).
     DoubleSpend,
+    /// The spent-tag store could not safely record the presentation.
+    StoreUnavailable,
 }
 
 impl RejectReason {
@@ -58,6 +60,7 @@ impl RejectReason {
             RejectReason::Malformed => "malformed credential",
             RejectReason::InvalidProof => "invalid proof",
             RejectReason::DoubleSpend => "double-spend (replay)",
+            RejectReason::StoreUnavailable => "spent-tag store unavailable",
         }
     }
 }
@@ -190,9 +193,12 @@ impl OriginGuard {
         // Enforce single-use of each (credential, context, nonce) slot via the
         // configured spent-tag store (in-memory by default; durable/shared if
         // injected). `record_if_new` is atomic, so concurrent replays of one
-        // presentation yield exactly one admit.
-        if !self.store.record_if_new(tag) {
-            return Decision::Reject(RejectReason::DoubleSpend);
+        // presentation yield exactly one admit. If the store cannot decide or
+        // persist, fail closed rather than serving a replayable presentation.
+        match self.store.record_if_new(tag) {
+            Ok(true) => {}
+            Ok(false) => return Decision::Reject(RejectReason::DoubleSpend),
+            Err(_) => return Decision::Reject(RejectReason::StoreUnavailable),
         }
         Decision::Admit {
             tag: hex::encode(tag),

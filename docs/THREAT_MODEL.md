@@ -150,6 +150,14 @@ formula:
    because the set is small — this is a property of the math, not a bug, and it
    means **the issuance gate doubles as the anonymity-set lever** (see §6).
 
+3. In a multi-exit deployment, anonymity is also **per ARC key domain**. The
+   current custody decision is one issuer+exit key domain per independent exit
+   (`KEY_CUSTODY_DECISION.md`), so credentials are exit-scoped rather than
+   fleet-portable. That partitions the set by exit key, but it contains blast
+   radius: one compromised exit key does not forge for the whole fleet. A single
+   shared fleet key would grow the set but gives every exit the minting and
+   verification secret for every other exit.
+
 ### (d) Rate limiting / no over-presentation
 
 Three layers, all required:
@@ -203,7 +211,7 @@ is the minimum needed to enforce the budget, and it is confined to a single
 |---|---|
 | Forge a credential / mint one without issuance | **No.** Requires the server secrets; presentation proof would not verify. |
 | Over-present (use more than `limit` slots) | **No.** A nonce `≥ limit` cannot satisfy the range proof. |
-| Replay a presentation / reuse a nonce slot | **Caught.** Same `(m1, nonce, context)` ⇒ same tag ⇒ `TagStore` rejects (`DoubleSpend`). *Requires a correct, durable tag store — see §6.* |
+| Replay a presentation / reuse a nonce slot | **Caught.** Same `(m1, nonce, context)` ⇒ same tag ⇒ `TagStore` rejects (`DoubleSpend`); if the store cannot record safely, the guard rejects as `StoreUnavailable`. *Requires a correct, durable tag store — see §6.* |
 | Link itself across presentations | **N/A** — it gains nothing; it already knows its own activity. It cannot make the *server* link them. |
 | Tamper with a presentation in transit | Rejected as `InvalidProof` (Fiat-Shamir challenge won't recompute). |
 | Submit garbage bytes | Rejected as `Malformed`; deserializers are total and never panic (`wire.rs`, `group.rs` `deserialize_*` return `Result`; `sigma::verify` gates on `well_formed` and never panics). |
@@ -273,6 +281,13 @@ exit — once credentials are obtained over the wire (`tessera-issuer`,
 `serve_issuance` / `serve_issuance_paid`). The issuer holds the ARC server key
 (shared with the exit — keyed verification) and gates minting on proof-of-work or
 an on-chain `TokenMint` payment.
+
+That "shared with the exit" statement is scoped to one key domain. In a
+multi-exit network, each independent exit has its own issuer/key domain; a
+central issuer that can mint under every exit key is a privileged fleet custodian,
+not a decentralized verifier. If public verification by independent exits is a
+hard requirement, ARC is the wrong primitive for that fleet shape; evaluate BBS
+or another publicly verifiable anonymous credential scheme instead.
 
 What the issuer **sees**, stated bluntly: obtaining a credential is a **direct
 client→issuer connection**, so the issuer learns the **client's source IP and the

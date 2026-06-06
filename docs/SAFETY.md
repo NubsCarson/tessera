@@ -108,7 +108,15 @@ Before exposing any node:
    issuer and exit share it (keyed verification; `docs/DEPLOY.md:34`); treat both
    hosts as holding a signing secret.
 
-5. **Know your legal exposure.** Running an exit means egressing third-party
+5. **Do not clone one key into many exits.** One `TESSERA_KEY_FILE` is one
+   issuer+exit key domain. Independent exits need separate issuer/key files/key
+   pins; otherwise any exit compromise forges credentials for the whole fleet and
+   separate in-memory tag stores can admit the same presentation twice. The proxy
+   now fails closed on a second local exit that reaches the same established key
+   file inode, but architecture still matters across hosts and copied key
+   material.
+
+6. **Know your legal exposure.** Running an exit means egressing third-party
    traffic from your IP (§2). Understand your jurisdiction's intermediary/relay
    liability, logging obligations, and abuse-handling expectations *before* you
    start. A verifiable non-logging deployment (Intel TDX TEE via dstack,
@@ -116,7 +124,7 @@ Before exposing any node:
    **trust** axis but does **not** change your egress attribution or your legal
    posture. A clean egress IP remains external (`docs/DEPLOY.md:156-162`).
 
-6. **Mind the unauthenticated work surface.** The accept-and-parse layer runs
+7. **Mind the unauthenticated work surface.** The accept-and-parse layer runs
    before any credential check; the shipped accept-layer bounds are the
    `MAX_INFLIGHT` concurrency cap (`ABUSE_MODEL.md` #1) and the 30s socket
    read/write timeout (`ABUSE_MODEL.md` #2). (`ABUSE_MODEL.md` #3–#4 are

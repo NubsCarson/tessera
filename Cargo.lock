@@ -1015,6 +1015,7 @@ dependencies = [
 name = "tessera-proxy"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rand_core",
  "tessera-arc",
  "tessera-client",

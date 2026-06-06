@@ -91,7 +91,7 @@ let guard = OriginGuard::with_store(sk, pk, b"request-ctx", b"this-origin", 5, s
 ```
 
 Built-ins: `InMemoryTagStore` (default) and `FileTagStore` (durable, single-process —
-honest limits in its docs: not multi-process, unbounded growth, best-effort flush).
+honest limits in its docs: not multi-process, unbounded growth, per-write sync).
 **For multiple replicas or the edge, implement `SpentTagStore` over a shared
 backend** (Redis / Postgres / a Cloudflare Durable Object): a per-process set lets
 the same presentation be replayed against a different replica.

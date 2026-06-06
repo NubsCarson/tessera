@@ -7,14 +7,16 @@
 # Why a TEE here (the trust axis, not the clean-IP axis): the RELAY sees
 # {client, exit} and must not log or collude. In an attested enclave a client can
 # VERIFY the running node is exactly this open-source image before trusting it —
-# it physically cannot be modified to log. The ARC server key can also be DERIVED
-# from the dstack KMS and sealed to the enclave (never leaves it). The egress IP
-# is still the TEE host's (a datacenter IP) — TEE does NOT solve clean egress.
+# it physically cannot be modified to log. The ARC server key for this exit
+# domain can also be DERIVED from the dstack KMS and sealed to the enclave (never
+# leaves it). The egress IP is still the TEE host's (a datacenter IP) — TEE does
+# NOT solve clean egress.
 #
 # Scope note: this TEE variant intentionally wires only the relay + exit. The
-# issuer/client + shared-key bootstrap (the file-volume approach in
-# ../docker-compose.yaml) are DEFERRED here to the KMS-sealed key flow above, so
-# the asymmetry with the local compose is intentional, not an omission.
+# issuer/client + key-domain bootstrap (the file-volume approach in
+# ../docker-compose.yaml) are DEFERRED here to the KMS-sealed key flow above.
+# Additional independent exits must be separate key domains, not clones sharing
+# one ARC verifier secret.
 #
 # Generate the deployment manifest + deploy (dstack VMM CLI):
 #   ./vmm-cli.py compose --docker-compose deploy/dstack/docker-compose.yaml \

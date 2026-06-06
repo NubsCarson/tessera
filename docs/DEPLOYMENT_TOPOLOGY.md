@@ -25,8 +25,8 @@ configured entirely by env vars; no role holds *who* + *where* + *what* at once.
    │ :8120   │                                              │ :8121           │
    └────┬────┘                                              └────────┬────────┘
         │ you → local proxy                                          │
-        │ (TLS end-to-end past here; CONNECT only)         shares ONE ARC server key
-        ▼                                                            │ (keyed verification)
+        │ (TLS end-to-end past here; CONNECT only)         shares one ARC server key
+        ▼                                                            │ in this key domain
    ┌─────────┐  outer CONNECT exit   ┌─────────┐  inner CONNECT dest │
    │ RELAY   │ ───── opaque bytes ──▶│ EXIT    │ ───────────────────┘
    │ :8119   │                       │ :8118   │ ──(its own egress IP)──▶ destination
@@ -46,7 +46,7 @@ block 1–21), and the `tessera-relay` ASCII diagram, `crates/tessera-relay/src/
 | **Client proxy** | `tessera-client` | `127.0.0.1:8120` (code default, `tessera-client.rs:17,120`) | local `CONNECT` proxy the user points a browser/curl at (`crates/tessera-relay/src/bin/tessera-client.rs`) |
 | **Issuer** | `tessera-issuer` | `127.0.0.1:8121` | credential authority; PoW- or payment-gated ARC issuance (`crates/tessera-issuer/src/main.rs`) |
 | **Relay** | `tessera-relay` | `0.0.0.0:8119` set by compose `TESSERA_RELAY_LISTEN` (`docker-compose.yaml:60`); node mode has no code default (`main.rs:42-59`), the only code default is the local-demo `127.0.0.1:8119` (`main.rs:79`) | credential-blind first hop (`crates/tessera-relay/src/main.rs:42-59`) |
-| **Exit** | `tessera-proxy` | `0.0.0.0:8118` set by compose `TESSERA_LISTEN` (`docker-compose.yaml:46`); code default when unset is `127.0.0.1:8118` (`tessera-proxy/src/main.rs:36`) | credential-gated `CONNECT`; egresses from its own IP (`crates/tessera-proxy/src/main.rs`) |
+| **Exit** | `tessera-proxy` | `0.0.0.0:8118` set by compose `TESSERA_LISTEN` (`docker-compose.yaml:46`); code default when unset is `127.0.0.1:8118` (`DEFAULT_LISTEN` in `crates/tessera-proxy/src/main.rs`) | credential-gated `CONNECT`; egresses from its own IP (`crates/tessera-proxy/src/main.rs`) |
 
 The full loop is verified end-to-end in-process by
 `crates/tessera-relay/tests/network.rs` (credential over the wire → 200 through
@@ -73,8 +73,8 @@ the loop → auto re-issue → pin mismatch rejected), per `DEPLOY.md` lines 97�
    via `OriginGuard` *before* forwarding a byte (sign-then-serve; a bad / replayed /
    over-budget spend → `Decision::Reject` → **407** and never reaches the
    destination, `tessera-proxy/src/lib.rs:205-214`), then egresses `direct` or via
-   Tor (`TESSERA_UPSTREAM`,
-   `tessera-proxy/src/main.rs:69-94`). The destination sees the **exit's** IP.
+   Tor (`TESSERA_UPSTREAM`, resolved by `resolve_upstream` in
+   `crates/tessera-proxy/src/main.rs`). The destination sees the **exit's** IP.
 
 TLS is end-to-end through the whole chain (the tunnel is opaque CONNECT bytes),
 so **no node sees plaintext** — the runtime image carries `ca-certificates` only
@@ -85,16 +85,24 @@ for tooling, never to terminate TLS (`Dockerfile:24-26`).
 ARC is **keyed-verification**: the exit needs the issuer's *server secret* to
 verify presentations, so the **issuer and exit share one ARC server key**. They
 converge on it via a single `TESSERA_KEY_FILE` — `ensure_shared_key` is a
-single-winner create that cannot diverge (`tessera-issuer/src/main.rs:287-290`,
-`tessera-proxy/src/main.rs:191-192`; `ensure_shared_key` re-exported from
-`crates/tessera-issuer/src/lib.rs:40`). In the local compose this is a shared
-Docker volume (`deploy/docker-compose.yaml:35-36,50-51,83-87`).
+single-winner create that cannot diverge (`crates/tessera-issuer/src/keyfile.rs`,
+called from `crates/tessera-issuer/src/main.rs` and
+`crates/tessera-proxy/src/main.rs`). In the local compose this is a shared Docker
+volume (`deploy/docker-compose.yaml:35-36,50-51,83-87`).
 
 **Implication for the trust graph:** the issuer↔exit pair is *one keyed-verifier
 trust domain*, not two independent parties — they hold the same secret. A
 malicious exit and a malicious issuer are, cryptographically, the same actor (the
 "malicious origin operator" of `THREAT_MODEL.md` §3.4). The split that matters is
 **relay vs. {issuer+exit}**, not relay vs. issuer vs. exit as three peers.
+
+**Multi-exit decision:** one shared ARC server key is correct only for one
+single-exit key domain. Independent exits must each have their own issuer/key
+domain (`issuer-a + exit-a`, `issuer-b + exit-b`, ...). A credential is therefore
+exit/key-domain scoped, not automatically fleet-portable. Sharing one ARC key
+across an independent fleet would give every exit the minting-and-verification
+secret for every other exit and make one compromise a fleet-wide compromise. The
+normative decision is [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).
 
 The file-based key is fine on a trusted host / shared volume but is the weakest
 point of a multi-host deployment: the secret lands on disk. The intended fix is
@@ -132,7 +140,7 @@ of that node alone.
 | **Client proxy** | everything (it is the user's own machine) | nothing by others — it is *your* agent | n/a (local; bound to `127.0.0.1`, not a public service, `docker-compose.yaml:78-80`) |
 | **Issuer** | client **source IP + issuance time** (direct connection); that *some* credential was minted; (paid mode) the buyer's Ethereum address | gating issuance (PoW difficulty floor `MIN_DIFFICULTY=1`, refuses `0`/wide-open, `tessera-issuer/src/main.rs:48-50,178`); not over-issuing entitlements (durable ledger, paid mode) | which presentation/browsing a credential it signed maps to (ARC blind issuance); the destination; plaintext |
 | **Relay** | **{client peer, exit address}**; connection timing/volume | being credential-blind and **not logging or colluding** (the core split-trust assumption) | the destination (inside opaque bytes, `lib.rs:213-218`); the credential (`lib.rs:195-197`); plaintext; cannot be an open proxy (`lib.rs:222-223`) |
-| **Exit** | **{destination (inner CONNECT host:port), that a valid in-budget token was presented}**; its own egress IP is seen by the destination | verifying credentials (holds the shared ARC key); enforcing the per-credential budget (`OriginGuard`, `LIMIT=64`) and per-IP human-volume shaping (`VolumeShaper`, M5, `tessera-proxy/src/main.rs:206-215`); operating a **clean** egress IP (external — see below) | the client's IP/identity; plaintext |
+| **Exit** | **{destination (inner CONNECT host:port), that a valid in-budget token was presented}**; its own egress IP is seen by the destination | verifying credentials for its key domain (holds that exit domain's ARC key); enforcing the per-credential budget (`OriginGuard`, `LIMIT=64`) and per-IP human-volume shaping (`VolumeShaper`, M5, wired in `crates/tessera-proxy/src/main.rs`); operating a **clean** egress IP (external — see below) | the client's IP/identity; plaintext |
 
 (The split-trust ledger types make the asymmetry concrete: the relay's
 `Observation` (`crates/tessera-relay/src/lib.rs:97-103`) records the exit's
@@ -163,6 +171,11 @@ Joining those two views re-links a client to its destination.
   paid mode **requires** the pin and binds the buyer's control signature to the
   issuer pk, blocking a relay/MITM from wormholing the entitlement to a different
   issuer (`tessera-client.rs:191-195`; `THREAT_MODEL.md` §3.5 last paragraph).
+- **Across exits, the boundary is per key domain.** A multi-exit fleet is a set
+  of issuer+exit domains, not one shared verifier. The client must select and
+  pin the issuer key for the exit domain it intends to use. Fleet discovery and
+  route selection are future product work; the safe default is explicit
+  per-domain configuration.
 - **Issuer ⟂ Exit for *linkage* is N/A by construction.** Even full
   issuer↔exit collusion cannot link issuance to presentation, because ARC
   issuance is blind (`THREAT_MODEL.md` §3.2 "Link a presentation back to
@@ -202,6 +215,10 @@ limits" and `THREAT_MODEL.md` §4):
 - **Tor fronting of the relay** (so clients reach it anonymously) and **KMS-sealed
   key derivation** (so the shared ARC key never hits disk) are intended next steps,
   not yet wired into the compose (`DEPLOY.md` lines 153–160).
+- **Multi-exit routing/discovery is not built.** The repo now defines the safe
+  custody rule (per-exit key domains) and fail-closed single-domain proxy
+  guardrails, but it does not yet ship a replicated signed directory or automatic
+  client path selector.
 - **No post-quantum claim.** All security rests on discrete log over P-256
   (`THREAT_MODEL.md` §4 item 4).
 - **UNAUDITED.** Do not protect real users or funds with this yet.

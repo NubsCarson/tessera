@@ -72,10 +72,11 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | Channel/ZK/court demoted to optional-advanced tier (documented, kept) | ✅ | `dc56d41` |
 | Networked issuance (PoW-gated issuer node + over-the-wire credential acquisition) | ✅ | (this commit) — `tessera-issuer::net`, `tessera-client::obtain_credential` |
 | **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | (this commit) — `tessera-client` bin, proven by `tessera-relay/tests/network.rs` + a 4-process run to a real HTTPS site (200) |
-| Shared-key exit (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | (this commit) |
+| Single-exit shared-key domain (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | (this commit) |
+| Multi-exit key-custody decision + single-domain proxy guardrails | ✅ | (this commit) — per-exit key domains, key-domain lease, optional durable spent-tag file |
 | Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3` + (this commit) |
 | Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → issue) | ✅ | (this commit) — `tessera-issuer::mint` (ecrecover proof + std-only `eth_call` read + durable ledger), `serve_issuance_paid`/`obtain_credential_paid`; proven vs real **anvil** (`tests/anvil_entitled.rs`) |
-| Deployed **clean-IP** exit + Tor/Nym crowd + audit | 🔒 | external (the clean IP is now the *only* thing between this and a stranger using it) |
+| Deployed **clean-IP** exit + Tor/Nym crowd + signed fleet directory + distributed spent tags + audit | 🔒 | external (clean egress is one blocker; stranger-safe deployment also needs the listed network/audit work) |
 
 ## SHOULD — in progress
 
@@ -130,10 +131,10 @@ N14 cachegrind CT analysis · N15 PoW solver timing-leak doc.
 E1 3rd-party audit · E2 multi-party Groth16 ceremony · E3 clean residential egress IP
 at scale · E4 Tor/Nym anonymity set · E5 Nym mixnet integration · E6 perpetual anti-bot
 defense · E7 production PQ primitives · E8 mainnet deploy w/ real value · E9 cross-epoch
-SDA budget (open research) · E10 accountable hostile-exit (open research) · E11 relayer
-multi-instance consistency · E12 shielded pool (XL) · E13 carrier/CGNAT/Snowflake lanes ·
-E14 legal/liability model · E15 real-world anonymity-set measurement · E16 machine-checked
-soundness proof / full CT audit.
+SDA budget (open research) · E10 accountable hostile-exit (open research) · E11 signed /
+replicated multi-exit directory + distributed spent-tag consistency · E12 shielded pool
+(XL) · E13 carrier/CGNAT/Snowflake lanes · E14 legal/liability model · E15 real-world
+anonymity-set measurement · E16 machine-checked soundness proof / full CT audit.
 
 ## Authorship note
 

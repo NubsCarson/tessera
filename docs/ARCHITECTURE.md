@@ -26,7 +26,9 @@ split-trust loop · Tor transport · per-IP human-volume shaping.
 (buy/earn N unlinkable single-use tokens, spend one per request) · a
 **credential-gated clean exit reached *over Tor*** · per-IP human-volume shaping.
 No channel, no refund, no dispute window, no watchtower, no on-chain court for the
-common path, **no MPC ceremony**.
+common path, **no MPC ceremony**. With ARC as shipped, those tokens are scoped to
+one issuer+exit key domain; independent exits use separate keys rather than one
+shared fleet key (`KEY_CUSTODY_DECISION.md`).
 
 ## The decision, and why
 
@@ -73,6 +75,7 @@ The leaner architecture is **largely v0**:
 | Unlinkable, rate-limited token (= an ARC presentation) | ✅ built + tested (`tessera-arc`) |
 | Token earned via a cost gate (PoW issuance) | ✅ built (`tessera-issuer`) |
 | Per-request token-gated access (checked at the exit) | ✅ built + tested (`tessera-proxy` — the credential-gated exit, via `OriginGuard`) |
+| Per-exit key-domain custody (no shared fleet ARC key) | ✅ decision + guardrails (`KEY_CUSTODY_DECISION.md`, proxy key-domain lease) |
 | Reached over Tor | ✅ built + proven (`--tor`, the `tor-test`) |
 | Per-IP human-volume shaping | ✅ built + tested (`VolumeShaper`, M5) |
 | DoS-bounded accept layer | ✅ built (S3) |
