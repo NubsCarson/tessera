@@ -69,7 +69,7 @@ That is a deliberate choice you are making, not a bug.
 ### What the credential does and does not buy you here
 
 - The per-egress-IP **human-volume shaper** (`VolumeShaper`,
-  `crates/tessera-proxy/src/lib.rs:53`, applied by `serve_observed_shaped`) paces
+  `crates/tessera-proxy/src/shaping.rs:106`, applied by `serve_observed_shaped`) paces
   admitted tunnels into a human-plausible envelope per egress IP. Its purpose is
   to keep a *clean* egress IP clean and to bound burst volume — it is a volume
   control, **not** a content filter and **not** an abuse adjudicator.
@@ -114,7 +114,7 @@ Before exposing any node:
    start. A verifiable non-logging deployment (Intel TDX TEE via dstack,
    `docs/DEPLOY.md`) lets a client *attest* the node can't log — that nails the
    **trust** axis but does **not** change your egress attribution or your legal
-   posture. A clean egress IP remains external (`docs/DEPLOY.md:147-152`).
+   posture. A clean egress IP remains external (`docs/DEPLOY.md:156-162`).
 
 6. **Mind the unauthenticated work surface.** The accept-and-parse layer runs
    before any credential check; the shipped accept-layer bounds are the

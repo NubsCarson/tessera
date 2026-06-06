@@ -85,6 +85,13 @@ issued under the old epoch become un-co-signable (the freshness check fails),
 which is the intended behavior — a spend is valid only for the epoch it was
 challenged in.
 
+The relayer also enforces this 1024 budget at runtime: it tracks consumed nonces
+in a per-channel `seen_nonces` set capped at `MAX_NONCES_PER_EPOCH = 1024`
+(`channel.rs:24`), and once the set is full a further spend is rejected with
+`ChannelError::EpochBudgetExhausted` (`channel.rs:316-318`) until the epoch
+advances and clears it — the same per-epoch cap the circuit range-checks, doubling
+as a memory bound on the relayer's replay-tracking set.
+
 ## Invariants (tested)
 
 1. **Per-channel, per-epoch budget is exactly `idx ∈ [0, 1024)`** distinct

@@ -341,8 +341,11 @@ These are **not** provided. Treating any of them as solved is a deployment error
   constant-time *audit* (covering every secret-data operation, memory-access
   patterns, and compiler-emitted code across all crates) has been performed, so
   timing-channel resistance must be treated as **best-effort and unaudited**
-  until milestone 10's review lands. Re-verify against the current source rather
-  than trusting this paragraph.
+  until a third-party constant-time audit is performed. (Milestone 10's internal
+  hardening pass — which landed the known fix and produced this document — is
+  complete; a full external CT audit has not been done; see `GOAL.md` milestone
+  10 and its footnote.) Re-verify against the current source rather than trusting
+  this paragraph.
 
 - **ARC §10.2 proof-blob vector discrepancy.** The ARC draft's committed
   zero-knowledge **proof blobs** do **not** reproduce byte-for-byte under the
@@ -363,11 +366,16 @@ These are **not** provided. Treating any of them as solved is a deployment error
   that alter the wire format, the transcript, or the security properties. Any
   property here is "as of `-01`."
 
-- **Tag store is in-memory and non-durable as shipped.** Both `arc.rs::TagStore`
-  and `tessera-origin`'s guard hold seen tags in a process `HashSet` /
-  `Mutex<HashSet>`. A restart, a crash, or a second replica with its own set
-  **forgets spent tags and re-opens the double-spend window.** The code itself
-  flags this. (§6.)
+- **Tag store: the default backend is in-memory and non-durable.**
+  `arc.rs::TagStore` holds seen tags in a process `HashSet`; `tessera-origin`'s
+  guard holds a pluggable `store: Box<dyn SpentTagStore>`, defaulting to an
+  `InMemoryTagStore` (`Mutex<HashSet>`). A durable `FileTagStore` (append-only
+  file, durable across restarts) ships in the same crate, but only the default is
+  wired in unless a deployment opts in via `OriginGuard::with_store`. With the
+  default, a restart or a crash forgets spent tags and re-opens the double-spend
+  window; and because every shipped store (including `FileTagStore`) is
+  single-process, a second replica with its own set re-opens it regardless. The
+  code itself flags this. (§6.)
 
 - **Quantum-DL caveat (ARC §7.2)** — see §2(b)/§3.2/§4. The headline anonymity
   ceiling.
@@ -384,8 +392,11 @@ if the deployment gets these right:
 
 1. **The tag store is the enforcement boundary — make it durable, correctly
    keyed, and monotonic.**
-   - **Durable**: persist it. An in-memory set (as shipped) re-opens the
-     double-spend window on every restart.
+   - **Durable**: use a persistent store. The default in-memory set re-opens the
+     double-spend window on every restart; the shipped `FileTagStore` (or a
+     caller-supplied `SpentTagStore`, plugged via `OriginGuard::with_store`)
+     survives restarts within a single process. Cross-replica durability is a
+     separate concern — see the bullet below.
    - **Keyed by `(requestContext, presentationContext)`**: the tag's
      uniqueness/linkability is scoped to a context (`generatorT` derives from
      `presentationContext`). Partition the store by the same context pair the

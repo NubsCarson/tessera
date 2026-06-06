@@ -95,7 +95,7 @@ review-surface gauge.
 |---|---|---|---|
 | `tessera-wasm` | `wasm-bindgen` browser bindings: real `prepare_issuance` + `present()`, compiles to `wasm32`, headless node tests pass, interop-verified against the Rust origin. Ships an MV3 extension scaffold (loading it in a real browser is the human final mile). | 245 | 134 |
 | `tessera-tower-demo` | A runnable `axum` server using the `tessera-origin` `tower` middleware; its e2e test drives a real server on a multi-threaded `tokio` runtime over a real socket. | 108 | 95 |
-| `fuzz` | The nightly `cargo-fuzz` targets (6, see §6). | — | — |
+| `fuzz` | The nightly `cargo-fuzz` targets (7, see §6). | — | — |
 
 > The `~test LOC` column counts **separate test-file** LOC. `tessera-demo` and
 > `tessera-client` show `—` because their only tests live inline in `src/`
@@ -136,7 +136,7 @@ runs.
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked   # IETF KATs + robustness live here
 cargo bench --workspace --no-run --locked        # benches must compile
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
@@ -178,7 +178,7 @@ cargo llvm-cov --workspace --all-features \
 ```sh
 rustup toolchain install nightly
 cargo install cargo-fuzz
-cargo +nightly fuzz build                        # builds all 6 targets
+cargo +nightly fuzz build                        # builds every target
 for t in $(cargo +nightly fuzz list); do
   cargo +nightly fuzz run "$t" -- -max_total_time=30 -detect_leaks=0
 done
@@ -228,7 +228,7 @@ test functions + 78 Foundry tests + 7 fuzz targets**, all green; CI green on
 `main`. (A `#[test]` / `#[tokio::test]` / `#[wasm_bindgen_test]` grep across
 `crates/` + `fuzz/` counts 162; `contracts/test/*.sol` declares 78
 `test*`/`testFuzz*`/`invariant_*` functions. Reproduce both with the commands in
-§"Build & reproduce" below.)
+§5 ("Build, run, and reproduce every gate") above.)
 
 ### CI jobs (`.github/workflows/ci.yml`)
 
@@ -238,17 +238,18 @@ benches-compile + doc `-D warnings`) · `msrv` (build on 1.74.0) · `audit`
 (llvm-cov, library surface gated ≥80%) · `wasm` (wasm32 build + headless test) ·
 `tower-e2e` (real axum server) · `contracts` (forge build + test, incl. the
 cross-language vector + pinned ZK proof) · `slither` (Solidity static analysis,
-fail on High/Medium) · `fuzz` (build all targets + 30s smoke each).
+fail on High/Medium) · `fuzz` (build all targets + 30s smoke each) · `fuzz-deep`
+(daily/dispatch only: same targets, 300s/target deep pass).
 
 ### Rust test surface by crate
 
 | Crate | Notable suites | Approx tests |
 |---|---|---|
 | `tessera-arc` | `test_vectors.rs` (8 IETF KATs), `sigma_vectors.rs` (2: official `discrete_logarithm` + `dleq`), `roundtrip.rs` (10: issue/present/verify, over-limit, tamper, wrong-context, double-spend), `wire.rs` (5), `robustness.rs` (3, no-panic), `proof_vectors.rs` (5, incl. `#[ignore]`d ARC-blob KATs) | 33 |
-| `tessera-channel` | `protocol.rs`, `settlement_props.rs` (property-based, S4), `watchtower.rs`, `eth_vector.rs` (Rust↔Solidity sig vector), `no_mint.rs` ("decrement cannot mint", M7) | 38 |
-| `tessera-relay` | `network.rs` (all four nodes in-process: obtain→200→auto-reissue→pin-mismatch reject), `loop.rs`, `channel_loop.rs`, `cross_epoch.rs` (S2) | 23 |
+| `tessera-channel` | `protocol.rs`, `settlement_props.rs` (property-based, S4), `watchtower.rs`, `eth_vector.rs` (Rust↔Solidity sig vector), `no_mint.rs` ("decrement cannot mint", M7), `negative_protocol.rs` (negative-path rejections), `multi_spend.rs`, `poseidon_regression.rs` (Poseidon hash regression) | ~54 |
+| `tessera-relay` | `network.rs` (all four nodes in-process: obtain→200→auto-reissue→pin-mismatch reject), `loop.rs`, `channel_loop.rs`, `cross_epoch.rs` (S2) | ~24 |
 | `tessera-issuer` | `pow.rs` (PoW gate), `anvil_entitled.rs` (paid mode vs real anvil, opt-in) | 16 |
-| `tessera-origin` | `guard.rs` (admit/missing/malformed/replay/wrong-context), `store.rs` (double-spend survives restart), `tower_layer.rs` | 15 |
+| `tessera-origin` | `guard.rs` (admit/missing/malformed/replay/wrong-context), `store.rs` (double-spend survives restart), `tower_layer.rs`, `concurrency_double_spend.rs` (exactly-one admit under concurrent replay, in-memory + file store), `filetagstore_durability.rs` (spent tags survive a FileTagStore restart) | 19 |
 | `tessera-proxy` | `proxy.rs` (admit/reject + shaping flood) | 9 |
 | `tessera-wasm` | `wasm_roundtrip.rs`, `native_roundtrip.rs` | 6 (2 native + 4 wasm-bindgen) |
 | `tessera-tower-demo` | `e2e.rs` (real socket: admit/malformed/replay/fresh) | 1 (the e2e) |
@@ -256,8 +257,11 @@ fail on High/Medium) · `fuzz` (build all targets + 30s smoke each).
 
 ### Fuzz targets (`fuzz/fuzz_targets/`, libfuzzer)
 
-`deserialize_element` · `deserialize_scalar` · `wire_from_bytes` (the ARC wire
-codec) · `presentation_verify` (full `Presentation::from_bytes` + range-sum +
+`arc_lifecycle` (the full end-to-end ARC lifecycle, cross-crate, S21:
+request->response->finalize->present->verify; asserts no-panic, completeness,
+single-use, soundness-under-tampering, and the rate limit) · `deserialize_element`
+· `deserialize_scalar` · `wire_from_bytes` (the ARC wire codec) ·
+`presentation_verify` (full `Presentation::from_bytes` + range-sum +
 `sigma::verify`; must never panic and never verify random bytes) ·
 `origin_guard_check` (the guard) · `channel_wire` (relay/channel header
 decoders, S6). All deserializers and the guard are total — they return `Result`
@@ -266,7 +270,11 @@ and never panic; the fuzzer previously found and fixed a real `limit < 2` panic
 
 ### Foundry test surface (`contracts/test/`)
 
-`ChannelRegistry.t.sol` (court lifecycle) · `CourtInvariant.t.sol` (invariant +
+`ChannelRegistry.t.sol` (court lifecycle) · `CourtAdversarial.t.sol`
+(active-attacker court: `mallory` cannot spend the relayer-only bond /
+close-dispute-slash a non-party channel / replay-forge a sig / double-close a
+terminal channel / refund before the deadline / re-enter a payout to drain
+escrow — CEI + `nonReentrant`) · `CourtInvariant.t.sol` (invariant +
 128k-call interaction-matrix fuzz, S5) · `Reentrancy.t.sol` ·
 `CrossLanguageVector.t.sol` (real Rust-signed state via `ecrecover`) ·
 `RDecVerifier.t.sol` (pinned real Groth16 proof + malformed-proof negatives, S7) ·

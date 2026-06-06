@@ -4,7 +4,8 @@
 > document is the honest accounting of what that buys and - more importantly -
 > what it does **not**. It is research-grade and UNAUDITED. Every claim traces to
 > code; the hash-rate figures are explicitly labeled illustrative assumptions, not
-> measurements (see Sec 7 - there is **no** PoW benchmark in this repo today).
+> measurements (see Sec 7 - a PoW benchmark now exists, but its output has not been
+> tabulated here, so Sec 4's time table stays illustrative).
 
 The one-line summary, taken straight from the crate's own doc-comment
 ([`crates/tessera-issuer/src/lib.rs`](../crates/tessera-issuer/src/lib.rs)) and
@@ -90,7 +91,8 @@ also the floor `MIN_DIFFICULTY = 1` and the env override below). Difficulty 16 m
 
 To turn hashes into wall-clock time you need a hash rate, and **this repo does not
 measure one** (see Sec 7). The table below is purely illustrative arithmetic at a
-few *assumed* single-thread SHA-256 rates for this tiny ~46-byte input; real numbers
+few *assumed* single-thread SHA-256 rates for this tiny ~38-byte input (`POW_DST`
+14 B + nonce 16 B + counter 8 B); real numbers
 depend on CPU, SIMD, and whether the client parallelizes. Read these as orders of
 magnitude, not as benchmarks.
 
@@ -157,21 +159,24 @@ and should be documented as such to operators.
 
 ---
 
-## 7. On the absence of measured numbers
+## 7. On the (un-tabulated) measured numbers
 
-The task framing referenced citing measured PoW throughput from a benchmark at
-`benches/pow.rs`. **That benchmark does not exist in this repository.** The only
-Criterion bench present is [`crates/tessera-arc/benches/arc.rs`](../crates/tessera-arc/benches/arc.rs),
-which covers ARC issuance/presentation/verification - not the PoW hash loop. The
-`tessera-issuer` crate declares no `[[bench]]`. So, to stay honest:
+A Criterion PoW benchmark now exists at
+[`crates/tessera-issuer/benches/pow.rs`](../crates/tessera-issuer/benches/pow.rs)
+(declared as `[[bench]]` in the issuer's `Cargo.toml`). It measures `solve` at
+difficulties `8 / 12 / 16` (the client cost) and the single-hash `verify` (the
+server cost). Run it with `cargo bench -p tessera-issuer`. The sibling
+[`crates/tessera-arc/benches/arc.rs`](../crates/tessera-arc/benches/arc.rs) covers
+ARC issuance/presentation/verification, not the PoW hash loop. So, to stay honest:
 
-- Every hash-rate / wall-clock figure in Sec 4 is an **assumed** rate plugged into
-  `2^d`, not a measurement. The *hash-count* arithmetic (`2^d`, `N * 2^d`) is exact;
-  the *time* conversions are not grounded in this codebase.
-- **Recommended:** add a `crates/tessera-issuer/benches/pow.rs` (Criterion, modeled
-  on the `arc.rs` sibling) that measures `solve` at a few difficulties and the
-  single-hash `verify`, so this document's time table can be replaced with real,
-  machine-tagged numbers. Until then, the table stays labeled as illustrative.
+- The Sec 4 *time* table is **not** populated from that bench - it is still
+  illustrative arithmetic at *assumed* hash rates, and bench output is in any case
+  machine-specific. Every hash-rate / wall-clock figure in Sec 4 is an **assumed**
+  rate plugged into `2^d`, not a measurement. The *hash-count* arithmetic (`2^d`,
+  `N * 2^d`) is exact; the *time* conversions are not grounded in this codebase.
+- **Recommended:** run `cargo bench -p tessera-issuer` on the target hardware and
+  replace Sec 4's illustrative table with the resulting machine-tagged `solve` /
+  `verify` numbers. Until that is done, the table stays labeled as illustrative.
 
 ---
 
@@ -193,7 +198,7 @@ which covers ARC issuance/presentation/verification - not the PoW hash loop. The
 | Knob | Where | Effect |
 |---|---|---|
 | `TESSERA_POW_DIFFICULTY` | env, read in [`main.rs`](../crates/tessera-issuer/src/main.rs) | Per-credential difficulty (leading zero bits). Default `16`. A bad parse **fails fast** rather than silently disabling the gate. |
-| `MIN_DIFFICULTY = 1` | [`main.rs`](../crates/tessera-issuer/src/main.rs) | Floor enforced by the binary: refuses to run with a wide-open (`0`) gate, since `0` makes every solution valid. |
+| `MIN_DIFFICULTY = 1` | [`main.rs`](../crates/tessera-issuer/src/main.rs) | Floor enforced by the binary (`difficulty.max(MIN_DIFFICULTY)`): a configured `0` is silently raised to `1`, so the gate is never left wide open, since `0` makes every solution valid. |
 | `0..=64` clamp | `PowChallenge::new` in [`lib.rs`](../crates/tessera-issuer/src/lib.rs) | Hard ceiling at mint time; a `u64` counter cannot reliably search beyond `~2^64`. |
 | Fresh per-connection nonce | `handle_issuance` in [`net.rs`](../crates/tessera-issuer/src/net.rs) | A solved challenge can't be replayed onto another connection. |
 | `ChallengeStore` (issue/redeem) | [`lib.rs`](../crates/tessera-issuer/src/lib.rs) | One issuance per solved challenge (anti-replay). In-memory by default - a real deployment must persist it. |

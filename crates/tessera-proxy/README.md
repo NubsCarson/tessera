@@ -11,7 +11,7 @@ cargo run -p tessera-proxy           # direct upstream
 cargo run -p tessera-proxy -- --tor  # tunnel through Tor at 127.0.0.1:9050
 ```
 
-On startup it self-issues a credential, binds `127.0.0.1:8118` (or a random port), and prints a ready-to-paste `curl` command using the `Tessera-Presentation` proxy header. Requests with a valid single-use credential are admitted and tunneled; missing or invalid credentials get `407 Proxy Authentication Required`.
+On startup it self-issues a credential, binds `127.0.0.1:8118` (overridable via `TESSERA_LISTEN`; it exits rather than fall back to a random port), and prints a ready-to-paste `curl` command using the `Tessera-Presentation` proxy header. Requests with a valid single-use credential are admitted and tunneled; missing or invalid credentials get `407 Proxy Authentication Required`.
 
 ## Status
 

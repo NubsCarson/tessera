@@ -88,7 +88,7 @@ clean egress IP, a Tor/Nym crowd, a client UX, and an audit are external. See
 - `tessera-demo` — a real std-only HTTP origin + client; a narrated terminal
   walkthrough, a `--serve` browser hub (auto-opens; `/enter` mints fresh
   credentials), and a `--tor` onion-service path.
-- Hardening: 5 `cargo-fuzz` targets, a stable robustness/mutation test, criterion
+- Hardening: 6 `cargo-fuzz` targets, a stable robustness/mutation test, criterion
   benches, `docs/THREAT_MODEL.md`, and CI (fmt, clippy `-D warnings`, tests,
   docs, MSRV 1.74, `cargo-audit`, nightly fuzz).
 

@@ -77,7 +77,7 @@ If you read nothing else, read the **honest status** at the bottom.
 
 **Optional-advanced tier (built, tested, kept — use when pay-as-you-go-with-refund
 is genuinely needed):** the ZK Spilman channel (`tessera-channel`), the EVM court
-(`contracts/ChannelRegistry.sol`), on-chain ZK settlement (`circuits/`,
+(`contracts/src/ChannelRegistry.sol`), on-chain ZK settlement (`circuits/`,
 `cooperativeCloseZK`).
 
 **Buildable-here, not yet done** (tracked in `CEILING_PROGRESS.md`): the rest of

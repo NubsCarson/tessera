@@ -29,7 +29,7 @@ defined in `crates/tessera-arc/src/keys.rs`:
 - **`ServerPublicKey`** — three group elements `(X0, X1, X2)` derived by
   `public_key()` as `X0 = x0·G + x0Blinding·H`, `X1 = x1·H`, `X2 = x2·H`.
   Serialized as `3 * group::NE = 99` bytes. The issuer prints the first 8 bytes
-  as a fingerprint (`tessera-issuer/src/main.rs:67`); the client can pin it via
+  as a fingerprint (`tessera-issuer/src/main.rs:301`); the client can pin it via
   `TESSERA_ISSUER_PK`.
 
 The private key never needs to be transmitted on the wire — it only has to exist
@@ -53,9 +53,9 @@ is written to disk in the file-based path (§4).
 
 A fresh key pair comes from `ServerPrivateKey::setup(rng)` (`keys.rs:65`), the
 spec's `SetupServer()` — four `random_scalar` draws from a CSPRNG. Both the
-issuer and the exit seed this from `OsRng` (`tessera-issuer/src/main.rs:58`;
-in the proxy the `OsRng` is constructed at `tessera-proxy/src/main.rs:30` and
-consumed by `setup(&mut rng)` at `tessera-proxy/src/main.rs:55`). There is no key-derivation-from-seed path in the
+issuer and the exit seed this from `OsRng` (`tessera-issuer/src/main.rs:294`;
+in the proxy the `OsRng` is constructed at `tessera-proxy/src/main.rs:136` and
+consumed by `setup(&mut rng)` at `tessera-proxy/src/main.rs:193`). There is no key-derivation-from-seed path in the
 shipped code: a key is either freshly sampled or read back from disk.
 `from_scalars` is the explicit-key constructor the §10.2 test vectors require;
 production generation goes through `setup`, which samples four scalars and wraps
@@ -73,7 +73,7 @@ presentation fails `407` forever.
 The issuer and exit must hold the **same** key. The shipped mechanism is
 `tessera_issuer::ensure_shared_key(path)` in
 `crates/tessera-issuer/src/keyfile.rs`, called by both binaries against the same
-`TESSERA_KEY_FILE` (`tessera-issuer/src/main.rs:54`, `tessera-proxy/src/main.rs:54`).
+`TESSERA_KEY_FILE` (`tessera-issuer/src/main.rs:290`, `tessera-proxy/src/main.rs:192`).
 
 It is **single-winner and convergence-guaranteed** by design — it does not rely
 on the issuer starting before the exit, and it tolerates any startup ordering or
@@ -206,8 +206,9 @@ mutually anonymous (`THREAT_MODEL.md` §7.3). The consequences
   over-presentation.
 
 Mechanics in the shipped tooling: there is **no automated rotation / key-epoch
-mechanism** — "Key epochs / rotation on the wire" is explicitly listed as future
-work in `GOAL.md`. To rotate today you replace the contents of `TESSERA_KEY_FILE`
+mechanism** — key-epoch negotiation on the wire is not built (the server key
+carries no on-the-wire epoch identifier, so old and new keys cannot coexist), and
+remains future work. To rotate today you replace the contents of `TESSERA_KEY_FILE`
 (or, in a clustered file-based setup, delete it and let `ensure_shared_key`
 mint+converge a fresh one on next start) and restart the issuer and exit so both
 re-bootstrap on the new key. Because there is no on-the-wire epoch identifier,
