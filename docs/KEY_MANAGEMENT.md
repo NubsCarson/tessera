@@ -180,27 +180,28 @@ Its honest limits:
   no shared volume to converge on, so file-based distribution does not extend to
   it cleanly.
 
-### 4.2 dstack-KMS-sealed (the deployment upgrade — not yet wired)
+### 4.2 dstack-KMS-sealed (reserved provider — real client not wired)
 
 The intended upgrade, documented in `DEPLOY.md` §2 and
 `deploy/dstack/docker-compose.yaml`: in an Intel TDX enclave, **derive the shared
 ARC key from the dstack KMS and seal it to the enclave** so it never lands on a
 disk. The dstack guest-agent socket (`/var/run/dstack.sock`) is mounted into each
-node for exactly this — quotes and KMS key derivation. With remote attestation a
-client can verify the running node is exactly the open-source image before
-trusting it; combined with KMS-sealed keys, the key is bound to an attested
-measurement rather than to a readable file.
+node for quote/attestation plumbing and future KMS key derivation. With remote
+attestation a client can verify the running node is exactly the open-source
+image before trusting it; combined with KMS-sealed keys, the key is bound to an
+attested measurement rather than to a readable file.
 
 This is a **trust-axis** improvement (the relay/exit physically cannot be
 modified to log or to exfiltrate the key), not a clean-IP improvement — a TDX
 host is still a datacenter egress IP (`DEPLOY.md` "Honest limits").
 
-**Status — not implemented.** `deploy/dstack/docker-compose.yaml` intentionally
-wires only the relay and exit and **defers the issuer + shared-key bootstrap to
-the KMS-sealed flow** (its header calls the asymmetry deliberate). The actual KMS
-derivation is not in this tree: `DEPLOY.md` states "Wiring that KMS derivation is
-the next step." Do not read the dstack compose as a working sealed-key deployment
-today; it is the scaffold for one.
+**Status — reserved, fail-closed provider only.** The binaries now parse
+`TESSERA_KEY_PROVIDER=ephemeral|file|dstack-kms`. `ephemeral` and `file` are
+implemented; `dstack-kms` requires `TESSERA_DSTACK_KMS_KEY_ID` and then exits with
+`reserved but not implemented in this build`. `deploy/dstack/docker-compose.yaml`
+intentionally wires only relay+exit and mounts the socket for future
+attestation/KMS work. Do not read the dstack compose as a working sealed-key
+deployment today; it is the scaffold for one.
 
 ## 5. What breaks if the key leaks
 
@@ -250,18 +251,17 @@ mutually anonymous (`THREAT_MODEL.md` §7.3). The consequences
   keys/context, not by dropping live tags," since premature eviction is silent
   over-presentation.
 
-Mechanics in the shipped tooling: there is **no automated rotation / key-epoch
-mechanism** — key-epoch negotiation on the wire is not built (the server key
-carries no on-the-wire epoch identifier, so old and new keys cannot coexist), and
-remains future work. To rotate today you replace the contents of `TESSERA_KEY_FILE`
-(or, in a clustered file-based setup, delete it and let `ensure_shared_key`
-mint+converge a fresh one on next start) and restart the issuer and exit so both
-re-bootstrap on the new key. Because there is no on-the-wire epoch identifier,
-old and new keys cannot coexist gracefully; rotation is a hard cutover, and
-clients holding old credentials get `407` until they re-issue. The client already
-auto-re-issues when a credential's budget is spent (`DEPLOY.md` §1), but it does
-**not** currently negotiate a key epoch, so a rotation is operator-coordinated,
-not transparent.
+Mechanics in the shipped tooling: the signed exit directory carries a per-entry
+`key_epoch`, clients can persist it in `TESSERA_DIRECTORY_STATE_FILE`, and
+operators can require a floor with `TESSERA_DIRECTORY_MIN_KEY_EPOCH`. That
+prevents stale directory/key-domain rollback. It is **not** a dual-key wire
+rotation protocol: the ARC presentation itself carries no on-the-wire epoch
+identifier, so old and new keys cannot coexist gracefully. To rotate today you
+replace the contents of `TESSERA_KEY_FILE` (or delete it and let
+`ensure_shared_key` mint+converge a fresh one on next start), publish a signed
+directory with a higher `key_epoch`, and restart the issuer and exit so both
+re-bootstrap on the new key. Clients holding old credentials get `407` until
+they re-issue.
 
 ## 7. Operational checklist (S14)
 
@@ -274,9 +274,9 @@ not transparent.
 - **Treat the key file as MAC-key-grade secret.** It is plaintext at mode
   `0600`; control volume access, backups, and host-root reach accordingly.
 - **Single trusted host / shared volume only** for the file-based path. For a
-  real multi-host or TEE split, the KMS-sealed derivation (§4.2) is the intended
-  answer and is **not yet wired** — know that gap before deploying across a trust
-  boundary.
+  real multi-host or TEE split, the reserved `dstack-kms` provider (§4.2) is the
+  intended answer but intentionally fails closed until a real KMS client is
+  wired — know that gap before deploying across a trust boundary.
 - **Any suspected leak ⇒ immediate rotation** (§6): replace the key, restart both
   nodes, retire the matching spent-tag store, accept that all outstanding
   credentials are invalidated.

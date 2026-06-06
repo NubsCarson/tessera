@@ -16,3 +16,9 @@ categories.workspace = true
 tessera-arc = { path = "../tessera-arc" }
 hex.workspace = true
 k256 = { workspace = true }
+rand_core.workspace = true
+
+[[bin]]
+name = "tessera-directory"
+path = "src/main.rs"
+doc = false

@@ -11,8 +11,9 @@
 pub mod net;
 pub use net::{obtain_credential, obtain_credential_paid};
 pub use tessera_directory::{
-    DirectoryError, DirectorySignature, DirectorySnapshot, DirectoryState, DirectoryStateCheck,
-    ExitDirectoryEntry, SignedExitDirectory,
+    CapacityEnvelope, DirectoryError, DirectorySelectionPolicy, DirectorySignature,
+    DirectorySnapshot, DirectoryState, DirectoryStateCheck, ExitDirectoryEntry,
+    SignedExitDirectory,
 };
 
 use rand_core::RngCore;

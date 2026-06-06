@@ -2,19 +2,20 @@
 # See docs/DEPLOY.md. This differs from ../docker-compose.yaml in two ways:
 #   1. it uses a PUBLISHED image (a TEE pulls from a registry; build + push first),
 #   2. it mounts /var/run/dstack.sock — the dstack guest-agent socket — into each
-#      node, giving it TDX remote-attestation quotes + KMS key derivation.
+#      node for TDX remote-attestation quotes and future KMS key derivation.
 #
 # Why a TEE here (the trust axis, not the clean-IP axis): the RELAY sees
 # {client, exit} and must not log or collude. In an attested enclave a client can
 # VERIFY the running node is exactly this open-source image before trusting it —
 # it physically cannot be modified to log. The ARC server key for this exit
-# domain can also be DERIVED from the dstack KMS and sealed to the enclave (never
-# leaves it). The egress IP is still the TEE host's (a datacenter IP) — TEE does
-# NOT solve clean egress.
+# domain should eventually be DERIVED from the dstack KMS and sealed to the
+# enclave (never leaves it). In this build TESSERA_KEY_PROVIDER=dstack-kms is a
+# reserved, fail-closed provider; it is not a working KMS client. The egress IP is
+# still the TEE host's (a datacenter IP) — TEE does NOT solve clean egress.
 #
 # Scope note: this TEE variant intentionally wires only the relay + exit. The
-# issuer/client + key-domain bootstrap (the file-volume approach in
-# ../docker-compose.yaml) are DEFERRED here to the KMS-sealed key flow above.
+# issuer/client + real KMS key-domain bootstrap (the file-volume approach in
+# ../docker-compose.yaml) are DEFERRED here.
 # Additional independent exits must be separate key domains, not clones sharing
 # one ARC verifier secret.
 #

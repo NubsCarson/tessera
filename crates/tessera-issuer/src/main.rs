@@ -7,7 +7,10 @@
 //!
 //! Config (env):
 //!   `TESSERA_ISSUER_LISTEN`  bind address (default `127.0.0.1:8121`)
+//!   `TESSERA_KEY_PROVIDER`   `ephemeral` | `file` | `dstack-kms` (default inferred)
 //!   `TESSERA_KEY_FILE`       shared ARC server-key path (default: an ephemeral key)
+//!   `TESSERA_DSTACK_SOCKET`  dstack guest-agent socket for reserved KMS provider
+//!   `TESSERA_DSTACK_KMS_KEY_ID` key id for reserved KMS provider
 //!   `TESSERA_POW_DIFFICULTY` leading-zero-bit PoW cost per credential (default `16`)
 //!
 //! **Paid mode** (gate on an on-chain `TokenMint` purchase instead of PoW) — set
@@ -28,9 +31,8 @@
 use std::net::{TcpListener, ToSocketAddrs};
 
 use rand_core::OsRng;
-use tessera_arc::keys::ServerPrivateKey;
 use tessera_issuer::mint::{EthRpc, PaymentGate, RedemptionLedger, TOKENS_PER_CREDENTIAL};
-use tessera_issuer::{ensure_shared_key, serve_issuance, serve_issuance_paid};
+use tessera_issuer::{serve_issuance, serve_issuance_paid, KeyProviderConfig};
 
 /// Parse a `0x`-prefixed (or bare) 20-byte hex address.
 fn parse_addr(s: &str) -> Option<[u8; 20]> {
@@ -72,8 +74,8 @@ enum Gate {
 struct Config {
     /// The resolved-and-bindable listen address (string form preserved for output).
     listen: String,
-    /// Optional shared ARC key path (already checked to be usable, not waited on).
-    key_file: Option<String>,
+    /// ARC key provider (already checked for fail-fast prerequisites).
+    key_provider: KeyProviderConfig,
     /// The selected issuance gate.
     gate: Gate,
     /// Optional durable redemption-ledger path (paid mode only; validated usable).
@@ -83,10 +85,7 @@ struct Config {
 impl Config {
     /// A one-line human summary of the resolved config (for `--check`).
     fn summary(&self) -> String {
-        let key = match &self.key_file {
-            Some(p) => format!("shared key {p}"),
-            None => "ephemeral key (single-node only)".to_string(),
-        };
+        let key = self.key_provider.label();
         match &self.gate {
             Gate::Pow(d) => format!(
                 "listen {}  ·  {key}  ·  gate PoW ({d} leading zero bits)",
@@ -177,20 +176,9 @@ fn load_config() -> Result<Config, String> {
     }
     .max(MIN_DIFFICULTY);
 
-    // ── shared key file ─────────────────────────────────────────────────────
-    let key_file = match std::env::var("TESSERA_KEY_FILE") {
-        Ok(path) if !path.is_empty() => {
-            check_path_usable(&path, "TESSERA_KEY_FILE")?;
-            Some(path)
-        }
-        Ok(_) => {
-            return Err(
-                "TESSERA_KEY_FILE is set but empty (unset it for an ephemeral single-node issuer, or give it a path)"
-                    .to_string(),
-            );
-        }
-        Err(_) => None,
-    };
+    // ── ARC server-key provider ─────────────────────────────────────────────
+    let key_provider = KeyProviderConfig::from_env()?;
+    key_provider.preflight()?;
 
     // ── paid-mode gate ──────────────────────────────────────────────────────
     // Paid mode iff BOTH TESSERA_MINT_RPC and TESSERA_MINT_CONTRACT are set
@@ -244,7 +232,7 @@ fn load_config() -> Result<Config, String> {
 
     Ok(Config {
         listen,
-        key_file,
+        key_provider,
         gate,
         ledger,
     })
@@ -290,17 +278,12 @@ fn main() {
     // ── normal serving path ─────────────────────────────────────────────────
     // Establish the shared key now (may block briefly until convergence), or mint
     // an ephemeral single-node key.
-    let (sk, pk, key_src) = match &config.key_file {
-        Some(path) => {
-            // Convergent shared bootstrap: issuer + exit can never diverge.
-            let (sk, pk) = ensure_shared_key(path);
-            (sk, pk, format!("shared key {path}"))
-        }
-        None => {
-            let (sk, pk) = ServerPrivateKey::setup(&mut OsRng);
-            (sk, pk, "ephemeral key (single-node only)".to_string())
-        }
-    };
+    let mut rng = OsRng;
+    let (sk, pk) = config
+        .key_provider
+        .establish(&mut rng)
+        .unwrap_or_else(|msg| die(&msg));
+    let key_src = config.key_provider.label();
 
     let listener = bind_listener(&config.listen);
     let addr = listener.local_addr().expect("issuer addr");

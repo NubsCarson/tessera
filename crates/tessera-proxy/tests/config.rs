@@ -26,6 +26,14 @@ fn check_command(key_file: &std::path::Path, tag_file: &std::path::Path) -> Comm
     cmd
 }
 
+fn proxy_check() -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_tessera-proxy"));
+    cmd.arg("--check")
+        .env_clear()
+        .env("TESSERA_LISTEN", "127.0.0.1:0");
+    cmd
+}
+
 #[test]
 fn check_mode_reports_single_exit_topology_and_releases_lease() {
     let dir = temp_dir("check-ok");
@@ -144,5 +152,85 @@ fn check_mode_rejects_malformed_spent_tag_file() {
     assert!(stderr.contains("malformed spent-tag"), "{stderr}");
 
     let _ = std::fs::remove_file(format!("{}.exit.lock", key.to_string_lossy()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_mode_rejects_unknown_key_provider() {
+    let out = proxy_check()
+        .env("TESSERA_KEY_PROVIDER", "kms-ish")
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "unknown provider must fail\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not one of"), "{stderr}");
+}
+
+#[test]
+fn check_mode_rejects_file_provider_without_key_file() {
+    let out = proxy_check()
+        .env("TESSERA_KEY_PROVIDER", "file")
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "file provider without key file must fail\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("requires TESSERA_KEY_FILE"), "{stderr}");
+}
+
+#[test]
+fn check_mode_rejects_reserved_dstack_provider_before_locking_key_file() {
+    let dir = temp_dir("dstack-reserved");
+    let would_be_key = dir.join("server.key");
+    let lock = std::path::PathBuf::from(format!("{}.exit.lock", would_be_key.to_string_lossy()));
+
+    let out = proxy_check()
+        .env("TESSERA_KEY_PROVIDER", "dstack-kms")
+        .env("TESSERA_DSTACK_KMS_KEY_ID", "arc-key")
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "reserved dstack provider must fail closed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("reserved but not implemented"), "{stderr}");
+    assert!(
+        !lock.exists(),
+        "reserved dstack provider should fail before creating a key-domain lock"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_mode_rejects_ephemeral_provider_with_key_file() {
+    let dir = temp_dir("ephemeral-conflict");
+    let key = dir.join("server.key");
+    let out = proxy_check()
+        .env("TESSERA_KEY_PROVIDER", "ephemeral")
+        .env("TESSERA_KEY_FILE", &key)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "ephemeral provider with key file must fail\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("cannot be combined"), "{stderr}");
+
     let _ = std::fs::remove_dir_all(&dir);
 }

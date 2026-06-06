@@ -19,6 +19,7 @@
 //!   `TESSERA_DIRECTORY_SIGNERS` comma-separated SEC1 directory signer pk hex pins
 //!   `TESSERA_DIRECTORY_MIN_SIGNATURES` signature threshold (default `1`)
 //!   `TESSERA_DIRECTORY_STATE_FILE` optional anti-rollback state path
+//!   `TESSERA_DIRECTORY_MIN_KEY_EPOCH` optional minimum selected entry key epoch
 //!   `TESSERA_EXIT_ID`       optional directory entry id to select
 //!   `TESSERA_BUYER_KEY`     hex (32 bytes) secp256k1 secret → PAID mode (else PoW)
 //!   `TESSERA_ISSUER_PK`     hex pin: the issuer pk (or its fingerprint prefix, ≥ 8
@@ -38,7 +39,8 @@ use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::path::PathBuf;
 
 use tessera_client::{
-    obtain_credential, obtain_credential_paid, DirectoryState, SignedExitDirectory,
+    obtain_credential, obtain_credential_paid, DirectorySelectionPolicy, DirectoryState,
+    SignedExitDirectory,
 };
 use tessera_relay::{serve_client_proxy, CredentialSource};
 
@@ -102,6 +104,9 @@ struct DirectorySelection {
     entry_id: String,
     sequence: u64,
     min_signatures: usize,
+    key_epoch: u64,
+    available_sessions: u64,
+    max_sessions: u64,
     state_path: Option<PathBuf>,
 }
 
@@ -268,6 +273,7 @@ fn reject_stray_directory_env() {
     for var in [
         "TESSERA_DIRECTORY_SIGNERS",
         "TESSERA_DIRECTORY_MIN_SIGNATURES",
+        "TESSERA_DIRECTORY_MIN_KEY_EPOCH",
         "TESSERA_DIRECTORY_STATE_FILE",
         "TESSERA_DIRECTORY_SIGNER_PK",
         "TESSERA_EXIT_ID",
@@ -336,6 +342,27 @@ fn load_directory_threshold() -> usize {
     }
 }
 
+fn load_directory_min_key_epoch() -> Option<u64> {
+    match std::env::var("TESSERA_DIRECTORY_MIN_KEY_EPOCH") {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                die("config error: TESSERA_DIRECTORY_MIN_KEY_EPOCH cannot be empty");
+            }
+            let epoch = trimmed.parse::<u64>().unwrap_or_else(|e| {
+                die(&format!(
+                    "config error: TESSERA_DIRECTORY_MIN_KEY_EPOCH is not a positive integer ({e})"
+                ))
+            });
+            if epoch == 0 {
+                die("config error: TESSERA_DIRECTORY_MIN_KEY_EPOCH must be non-zero");
+            }
+            Some(epoch)
+        }
+        Err(_) => None,
+    }
+}
+
 fn load_directory_route(
     path_var: &'static str,
     path: String,
@@ -361,6 +388,9 @@ fn load_directory_route(
 
     let signers = load_directory_signers(path_var);
     let min_signatures = load_directory_threshold();
+    let selection_policy = DirectorySelectionPolicy {
+        min_key_epoch: load_directory_min_key_epoch(),
+    };
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         die(&format!(
             "config error: could not read {path_var}={path}: {e}"
@@ -385,7 +415,7 @@ fn load_directory_route(
             ))
         });
         state
-            .check_and_record(directory.snapshot.sequence)
+            .check_snapshot_and_record(&directory.snapshot)
             .unwrap_or_else(|e| die(&format!("config error: exit directory rejected: {e}")));
     }
 
@@ -394,7 +424,7 @@ fn load_directory_route(
         .filter(|s| !s.trim().is_empty());
     let entry = directory
         .snapshot
-        .select(selected_id.as_deref())
+        .select_with_policy(selected_id.as_deref(), &selection_policy)
         .unwrap_or_else(|e| {
             die(&format!(
                 "config error: exit directory selection failed: {e}"
@@ -423,6 +453,9 @@ fn load_directory_route(
         entry_id: entry.id.clone(),
         sequence: directory.snapshot.sequence,
         min_signatures,
+        key_epoch: entry.capacity.key_epoch,
+        available_sessions: entry.capacity.available_sessions,
+        max_sessions: entry.capacity.max_sessions,
         state_path,
     };
     (
@@ -436,11 +469,14 @@ fn load_directory_route(
 
 fn directory_summary(directory: &DirectorySelection) -> String {
     format!(
-        " directory={} entry={} seq={} threshold={}{}",
+        " directory={} entry={} seq={} threshold={} key_epoch={} capacity={}/{}{}",
         directory.path.display(),
         directory.entry_id,
         directory.sequence,
         directory.min_signatures,
+        directory.key_epoch,
+        directory.available_sessions,
+        directory.max_sessions,
         directory_state_summary(directory)
     )
 }
@@ -555,11 +591,14 @@ fn main() {
     println!("  route: you → (this proxy) → RELAY {relay_addr} → EXIT {exit_addr} → destination");
     if let Some(directory) = &directory {
         println!(
-            "  directory: {} entry={} seq={} threshold={}{} (issuer key pinned from signed snapshot)",
+            "  directory: {} entry={} seq={} threshold={} key_epoch={} capacity={}/{}{} (issuer key pinned from signed snapshot)",
             directory.path.display(),
             directory.entry_id,
             directory.sequence,
             directory.min_signatures,
+            directory.key_epoch,
+            directory.available_sessions,
+            directory.max_sessions,
             directory_state_summary(directory)
         );
     }

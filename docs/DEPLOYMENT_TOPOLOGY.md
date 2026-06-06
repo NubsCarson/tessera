@@ -107,10 +107,11 @@ normative decision is [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).
 The file-based key is fine on a trusted host / shared volume but is the weakest
 point of a multi-host deployment: the secret lands on disk. The intended fix is
 to **derive the shared key from the dstack KMS and seal it to the enclaves** so it
-never touches a disk (`DEPLOY.md` lines 162–167); wiring that derivation is
-explicitly the next step and is **not done** — the TEE compose
-(`deploy/dstack/docker-compose.yaml`) deliberately wires only relay + exit and
-defers the issuer/client + key bootstrap (`dstack/docker-compose.yaml:14-17`).
+never touches a disk. The binaries parse `TESSERA_KEY_PROVIDER=dstack-kms`, but
+that provider is reserved and fails closed until a real dstack KMS client is
+implemented. The TEE compose (`deploy/dstack/docker-compose.yaml`) deliberately
+wires only relay + exit and mounts the dstack socket for future
+attestation/KMS work.
 
 ## 4. Where the client → issuer IP exposure sits
 
@@ -214,9 +215,9 @@ limits" and `THREAT_MODEL.md` §4):
 - **PoW is a cost knob, not Sybil resistance.** Issuance gating throttles bulk
   minting but does not give a per-human guarantee; an adversary with compute
   still scales (`THREAT_MODEL.md` §4 item 3).
-- **Tor fronting of the relay** (so clients reach it anonymously) and **KMS-sealed
-  key derivation** (so the shared ARC key never hits disk) are intended next steps,
-  not yet wired into the compose (`DEPLOY.md` lines 153–160).
+- **Tor fronting of the relay** (so clients reach it anonymously) and **real
+  KMS-sealed key derivation** (so the shared ARC key never hits disk) are
+  intended next steps; the `dstack-kms` provider currently fails closed.
 - **Live multi-exit directory operation is not built.** The repo now defines the
   safe custody rule (per-exit key domains), fail-closed single-domain proxy
   guardrails, and a client-side signed snapshot verifier/selector. It does not

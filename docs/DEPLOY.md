@@ -47,7 +47,10 @@ the local `cargo run` demos):
 |---|---|---|
 | `TESSERA_ISSUER_LISTEN` | issuer | bind address (default `127.0.0.1:8121`) |
 | `TESSERA_POW_DIFFICULTY` | issuer | leading-zero-bit PoW cost per credential (default `16`) |
+| `TESSERA_KEY_PROVIDER` | issuer, exit | `ephemeral` \| `file` \| `dstack-kms`; unset infers `file` when `TESSERA_KEY_FILE` is set, else `ephemeral` |
 | `TESSERA_KEY_FILE` | issuer, exit | ARC server-key path for this **single exit key domain** (issuer creates, exit loads) |
+| `TESSERA_DSTACK_SOCKET` | issuer, exit | dstack guest-agent socket for reserved `dstack-kms` provider (default `/var/run/dstack.sock`) |
+| `TESSERA_DSTACK_KMS_KEY_ID` | issuer, exit | required key id when `TESSERA_KEY_PROVIDER=dstack-kms`; this provider currently fails closed |
 | `TESSERA_SPENT_TAG_FILE` | exit | optional durable spent-tag file for one exit; unset = in-memory |
 | `TESSERA_LISTEN` | exit | bind address (e.g. `0.0.0.0:8118`) |
 | `TESSERA_UPSTREAM` | exit | `direct` \| `tor` \| `tor:HOST:PORT` |
@@ -60,6 +63,8 @@ the local `cargo run` demos):
 | `TESSERA_DIRECTORY_FILE` | client | signed exit-directory snapshot; if set, supplies issuer/relay/exit/issuer pin |
 | `TESSERA_DIRECTORY_SIGNERS` | client | comma-separated SEC1 directory signer public-key pins (hex) |
 | `TESSERA_DIRECTORY_MIN_SIGNATURES` | client | directory signature threshold (default `1`) |
+| `TESSERA_DIRECTORY_STATE_FILE` | client | optional anti-rollback state for directory sequence and per-exit key epoch |
+| `TESSERA_DIRECTORY_MIN_KEY_EPOCH` | client | optional minimum selected exit key epoch |
 | `TESSERA_DIRECTORY_STATE_FILE` | client | optional anti-rollback state file for monotonic directory sequence |
 | `TESSERA_EXIT_ID` | client | optional exact directory entry id to select |
 | `TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT` | issuer | **paid mode**: gate issuance on an on-chain `TokenMint` purchase (RPC URL + contract address) instead of PoW |
@@ -179,7 +184,9 @@ vmm-cli.py deploy --name tessera --compose app-compose.json --vcpu 2 --memory 2G
 verifiable; the dstack **gateway** gives it an attestation-tied TLS endpoint. A
 client (or anyone) then checks the TDX quote against the expected image
 measurement before routing through it. `deploy/dstack/docker-compose.yaml` mounts
-the `dstack.sock` so each node can fetch its quote / derive keys; see the
+the `dstack.sock` for quote/attestation plumbing and future KMS derivation; the
+current `TESSERA_KEY_PROVIDER=dstack-kms` path is explicit but fail-closed until
+a real dstack KMS client is implemented. See the
 [dstack docs](https://github.com/dstack-tee/dstack) for the exact VMM/gateway
 setup on your host.
 
@@ -198,12 +205,14 @@ setup on your host.
   blocklist Tor still needs a clean exit IP, which no code (or enclave)
   manufactures (see [`IP_EGRESS_IDEAS.md`](./IP_EGRESS_IDEAS.md)). TEE + clean
   residential egress is the ideal and the hard part.
-- **Key distribution is file-based here.** The issuer + exit converge on one ARC
-  server key via a shared `TESSERA_KEY_FILE` (`tessera_issuer::ensure_shared_key`
-  — a single-winner create that can't diverge). That is fine on a trusted host /
-  shared volume; a real multi-host or TEE deployment should instead **derive the
-  shared key from the dstack KMS and seal it to the enclaves** so it never lands
-  on a disk. Wiring that KMS derivation is the next step.
+- **Key distribution is file-based here.** The shipped providers are
+  `ephemeral` and `file`; with `file`, the issuer + exit converge on one ARC
+  server key via a shared `TESSERA_KEY_FILE`
+  (`tessera_issuer::ensure_shared_key` — a single-winner create that can't
+  diverge). `TESSERA_KEY_PROVIDER=dstack-kms` is reserved and fails closed with
+  a clear "not implemented" error. A real multi-host or TEE deployment should
+  implement that provider to **derive the shared key from the dstack KMS and seal
+  it to the enclaves** so it never lands on a disk.
 - **Multi-exit custody is per-exit, not fleet-shared.** One `TESSERA_KEY_FILE`
   is one issuer+exit key domain. Independent exits need separate issuer/key
   files/key pins; see [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).

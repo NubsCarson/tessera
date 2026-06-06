@@ -74,8 +74,8 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | Networked issuance (PoW-gated issuer node + over-the-wire credential acquisition) | ✅ | (this commit) — `tessera-issuer::net`, `tessera-client::obtain_credential` |
 | **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | (this commit) — `tessera-client` bin, proven by `tessera-relay/tests/network.rs` + a 4-process run to a real HTTPS site (200) |
 | Single-exit shared-key domain (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | (this commit) |
-| Multi-exit key-custody decision + single-domain proxy guardrails + signed directory verifier/client selector | ✅ | (this commit) — per-exit key domains, key-domain lease, optional durable spent-tag file, `tessera-directory`, `tessera-client` directory mode |
-| Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3` + (this commit) |
+| Multi-exit key-custody decision + single-domain proxy guardrails + signed directory verifier/client selector | ✅ | (this commit) — per-exit key domains, key-domain lease, optional durable spent-tag file, `tessera-directory` CLI, signed capacity/key-epoch policy, `tessera-client` directory mode |
+| Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3` + (this commit); dstack KMS provider is reserved/fail-closed, not a real KMS client |
 | Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → issue) | ✅ | (this commit) — `tessera-issuer::mint` (ecrecover proof + std-only `eth_call` read + durable ledger), `serve_issuance_paid`/`obtain_credential_paid`; proven vs real **anvil** (`tests/anvil_entitled.rs`) |
 | Deployed **clean-IP** exit + Tor/Nym crowd + live mirrored directory operation + distributed spent tags + audit | 🔒 | external (clean egress is one blocker; stranger-safe deployment also needs the listed network/audit work; local signed directory verification/selection is built) |
 

@@ -17,9 +17,13 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tessera_arc::keys::ServerPrivateKey;
-use tessera_client::{obtain_credential, obtain_credential_paid, TesseraClient};
+use tessera_client::{
+    obtain_credential, obtain_credential_paid, CapacityEnvelope, DirectorySnapshot,
+    ExitDirectoryEntry, SignedExitDirectory, TesseraClient,
+};
 use tessera_issuer::mint::{
     address_of, InMemoryEntitlement, PaymentGate, RedemptionLedger, TOKENS_PER_CREDENTIAL,
 };
@@ -102,6 +106,44 @@ fn spawn_network(limit: u64) -> SocketAddr {
     client_addr
 }
 
+struct ExitDomain {
+    issuer_addr: String,
+    relay_addr: SocketAddr,
+    exit_addr: SocketAddr,
+    issuer_pk: Vec<u8>,
+}
+
+fn spawn_exit_domain(limit: u64) -> ExitDomain {
+    let (sk, pk) = ServerPrivateKey::setup(&mut rand_core::OsRng);
+    let sk_exit = ServerPrivateKey::from_bytes(&sk.serialize()).unwrap();
+
+    let exit_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let exit_addr = exit_listener.local_addr().unwrap();
+    let guard = Arc::new(OriginGuard::new(
+        sk_exit,
+        pk,
+        REQUEST_CTX,
+        PRESENT_CTX,
+        limit,
+    ));
+    serve_exit(exit_listener, guard, Upstream::Direct);
+
+    let relay_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let relay_addr = relay_listener.local_addr().unwrap();
+    serve_relay(relay_listener, exit_addr, None);
+
+    let issuer_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let issuer_addr = issuer_listener.local_addr().unwrap().to_string();
+    serve_issuance(issuer_listener, sk, pk, DIFFICULTY);
+
+    ExitDomain {
+        issuer_addr,
+        relay_addr,
+        exit_addr,
+        issuer_pk: pk.serialize().to_vec(),
+    }
+}
+
 /// Drive one request through the client proxy to `dest`; returns true iff the
 /// tunnel established (`200`) and the echo round-tripped (`PONG`).
 fn request_through(proxy: SocketAddr, dest: SocketAddr) -> bool {
@@ -170,6 +212,131 @@ fn issuer_pk_pin_mismatch_is_rejected() {
     let good_prefix = pk.serialize()[..8].to_vec();
     let ok = obtain_credential(&issuer_addr, REQUEST_CTX, Some(&good_prefix));
     assert!(ok.is_ok(), "the correct issuer-pk pin must be accepted");
+}
+
+#[test]
+fn signed_directory_selects_one_exit_domain_and_cross_domain_credentials_fail() {
+    let echo = spawn_echo();
+    let domain_a = spawn_exit_domain(64);
+    let domain_b = spawn_exit_domain(64);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let signer = k256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+    let snapshot = DirectorySnapshot::new(
+        1,
+        now.saturating_sub(60),
+        now + 3600,
+        vec![
+            ExitDirectoryEntry::current_protocols_with_capacity(
+                "exit-a",
+                domain_a.relay_addr.to_string(),
+                domain_a.exit_addr.to_string(),
+                domain_a.issuer_addr.clone(),
+                domain_a.issuer_pk.clone(),
+                10,
+                true,
+                CapacityEnvelope::new(1, 10, 10, 3600, 1000).unwrap(),
+            )
+            .unwrap(),
+            ExitDirectoryEntry::current_protocols_with_capacity(
+                "exit-b",
+                domain_b.relay_addr.to_string(),
+                domain_b.exit_addr.to_string(),
+                domain_b.issuer_addr.clone(),
+                domain_b.issuer_pk.clone(),
+                20,
+                true,
+                CapacityEnvelope::new(1, 10, 10, 3600, 1000).unwrap(),
+            )
+            .unwrap(),
+        ],
+    )
+    .unwrap();
+    let directory = SignedExitDirectory::sign(snapshot, std::slice::from_ref(&signer)).unwrap();
+    directory
+        .verify_at(
+            &[signer
+                .verifying_key()
+                .to_encoded_point(true)
+                .as_bytes()
+                .to_vec()],
+            1,
+            now,
+        )
+        .unwrap();
+
+    let selected = directory.snapshot.select(None).unwrap();
+    assert_eq!(selected.id, "exit-b", "default route uses highest weight");
+    let credential = obtain_credential(
+        &selected.issuer_addr,
+        REQUEST_CTX,
+        Some(&selected.issuer_pk),
+    )
+    .expect("selected directory issuer key pin must match");
+    let mut client = TesseraClient::new(credential, PRESENT_CTX, 64);
+    let header = client.presentation_header(&mut rand_core::OsRng).unwrap();
+    let mut stream = open_through_relay(
+        selected.relay_addr.parse().unwrap(),
+        selected.exit_addr.parse().unwrap(),
+        &echo.to_string(),
+        &header,
+    )
+    .expect("selected domain route opens");
+    stream.write_all(b"PING\n").unwrap();
+    let mut buf = [0u8; 5];
+    stream.read_exact(&mut buf).unwrap();
+    assert_eq!(&buf, b"PONG\n", "selected domain reaches origin");
+
+    let credential_a = obtain_credential(
+        &domain_a.issuer_addr,
+        REQUEST_CTX,
+        Some(&domain_a.issuer_pk),
+    )
+    .expect("domain A issuance works");
+    let mut client_a = TesseraClient::new(credential_a, PRESENT_CTX, 64);
+    let header_a = client_a.presentation_header(&mut rand_core::OsRng).unwrap();
+    assert!(
+        open_through_relay(
+            domain_b.relay_addr,
+            domain_b.exit_addr,
+            &echo.to_string(),
+            &header_a
+        )
+        .is_err(),
+        "domain A credential must not verify at domain B exit"
+    );
+
+    let wrong_issuer_pin = obtain_credential(
+        &domain_a.issuer_addr,
+        REQUEST_CTX,
+        Some(&domain_b.issuer_pk),
+    );
+    assert!(
+        wrong_issuer_pin.is_err(),
+        "directory entry with issuer_addr=A but issuer_pk=B must fail during issuance pin check"
+    );
+
+    let credential_b = obtain_credential(
+        &domain_b.issuer_addr,
+        REQUEST_CTX,
+        Some(&domain_b.issuer_pk),
+    )
+    .expect("domain B issuance works");
+    let mut client_b = TesseraClient::new(credential_b, PRESENT_CTX, 64);
+    let header_b = client_b.presentation_header(&mut rand_core::OsRng).unwrap();
+    assert!(
+        open_through_relay(
+            domain_a.relay_addr,
+            domain_a.exit_addr,
+            &echo.to_string(),
+            &header_b
+        )
+        .is_err(),
+        "directory entry with issuer=B but exit=A must fail at exit verification"
+    );
 }
 
 #[test]

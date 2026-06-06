@@ -8,7 +8,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,8 @@ const MAGIC: &str = "tessera-exit-directory-v1";
 const STATE_MAGIC: &str = "tessera-directory-state-v1";
 const MIN_SIGNER_PK_LEN: usize = 33;
 const ISSUER_PK_LEN: usize = 3 * NE;
+const DEFAULT_CAPACITY_WINDOW_SECONDS: u64 = 3600;
+const DEFAULT_MAX_DESTINATIONS_PER_WINDOW: u64 = 1000;
 
 /// A directory parse, validation, signature, selection, or state error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +48,90 @@ impl Display for DirectoryError {
 
 impl std::error::Error for DirectoryError {}
 
+/// Signed capacity and key-epoch metadata for one exit key domain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapacityEnvelope {
+    /// Monotonic per-exit ARC key epoch. Clients persist this to reject rollback.
+    pub key_epoch: u64,
+    /// Currently advertised available client sessions.
+    pub available_sessions: u64,
+    /// Maximum client sessions this exit is willing to advertise for the window.
+    pub max_sessions: u64,
+    /// Capacity-policy accounting window in seconds.
+    pub window_seconds: u64,
+    /// Maximum distinct destinations per accounting window for this exit.
+    pub max_destinations_per_window: u64,
+}
+
+impl CapacityEnvelope {
+    /// Build and validate a capacity envelope.
+    pub fn new(
+        key_epoch: u64,
+        available_sessions: u64,
+        max_sessions: u64,
+        window_seconds: u64,
+        max_destinations_per_window: u64,
+    ) -> Result<Self, DirectoryError> {
+        let envelope = Self {
+            key_epoch,
+            available_sessions,
+            max_sessions,
+            window_seconds,
+            max_destinations_per_window,
+        };
+        envelope.validate("capacity")?;
+        Ok(envelope)
+    }
+
+    /// Conservative default for entries that use the current protocol labels.
+    pub fn current_default() -> Self {
+        Self {
+            key_epoch: 1,
+            available_sessions: 1,
+            max_sessions: 1,
+            window_seconds: DEFAULT_CAPACITY_WINDOW_SECONDS,
+            max_destinations_per_window: DEFAULT_MAX_DESTINATIONS_PER_WINDOW,
+        }
+    }
+
+    fn validate(&self, label: &str) -> Result<(), DirectoryError> {
+        if self.key_epoch == 0 {
+            return Err(DirectoryError::new(format!(
+                "{label} key_epoch must be non-zero"
+            )));
+        }
+        if self.max_sessions == 0 {
+            return Err(DirectoryError::new(format!(
+                "{label} max_sessions must be non-zero"
+            )));
+        }
+        if self.available_sessions > self.max_sessions {
+            return Err(DirectoryError::new(format!(
+                "{label} available_sessions {} exceeds max_sessions {}",
+                self.available_sessions, self.max_sessions
+            )));
+        }
+        if self.window_seconds == 0 {
+            return Err(DirectoryError::new(format!(
+                "{label} window_seconds must be non-zero"
+            )));
+        }
+        if self.max_destinations_per_window == 0 {
+            return Err(DirectoryError::new(format!(
+                "{label} max_destinations_per_window must be non-zero"
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Client-side policy applied after a signed directory snapshot verifies.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirectorySelectionPolicy {
+    /// Reject entries below this per-exit ARC key epoch, when set.
+    pub min_key_epoch: Option<u64>,
+}
+
 /// One independently operated exit key domain advertised by a directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExitDirectoryEntry {
@@ -63,6 +149,8 @@ pub struct ExitDirectoryEntry {
     pub weight: u64,
     /// Whether this exit is accepting new client sessions.
     pub accepting_new_clients: bool,
+    /// Signed capacity and per-exit key-epoch metadata.
+    pub capacity: CapacityEnvelope,
     /// Issuance protocol label expected by this entry.
     pub issue_protocol: String,
     /// Relay protocol label expected by this entry.
@@ -82,6 +170,7 @@ impl ExitDirectoryEntry {
         issuer_pk: Vec<u8>,
         weight: u64,
         accepting_new_clients: bool,
+        capacity: CapacityEnvelope,
         issue_protocol: impl Into<String>,
         relay_protocol: impl Into<String>,
         credential_protocol: impl Into<String>,
@@ -94,6 +183,7 @@ impl ExitDirectoryEntry {
             issuer_pk,
             weight,
             accepting_new_clients,
+            capacity,
             issue_protocol: issue_protocol.into(),
             relay_protocol: relay_protocol.into(),
             credential_protocol: credential_protocol.into(),
@@ -112,6 +202,30 @@ impl ExitDirectoryEntry {
         weight: u64,
         accepting_new_clients: bool,
     ) -> Result<Self, DirectoryError> {
+        Self::current_protocols_with_capacity(
+            id,
+            relay_addr,
+            exit_addr,
+            issuer_addr,
+            issuer_pk,
+            weight,
+            accepting_new_clients,
+            CapacityEnvelope::current_default(),
+        )
+    }
+
+    /// Build an entry using the current Tessera protocol labels and capacity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn current_protocols_with_capacity(
+        id: impl Into<String>,
+        relay_addr: impl Into<String>,
+        exit_addr: impl Into<String>,
+        issuer_addr: impl Into<String>,
+        issuer_pk: Vec<u8>,
+        weight: u64,
+        accepting_new_clients: bool,
+        capacity: CapacityEnvelope,
+    ) -> Result<Self, DirectoryError> {
         Self::new(
             id,
             relay_addr,
@@ -120,6 +234,7 @@ impl ExitDirectoryEntry {
             issuer_pk,
             weight,
             accepting_new_clients,
+            capacity,
             "issue-net/v1",
             "relay-connect/v1",
             "arcv1-p256",
@@ -165,12 +280,14 @@ impl ExitDirectoryEntry {
                 self.id
             )));
         }
+        self.capacity
+            .validate(&format!("entry {} capacity", self.id))?;
         Ok(())
     }
 
     fn canonical_line(&self) -> String {
         format!(
-            "entry={}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "entry={}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.id,
             self.relay_addr,
             self.exit_addr,
@@ -178,6 +295,11 @@ impl ExitDirectoryEntry {
             hex::encode(&self.issuer_pk),
             self.weight,
             if self.accepting_new_clients { "1" } else { "0" },
+            self.capacity.key_epoch,
+            self.capacity.available_sessions,
+            self.capacity.max_sessions,
+            self.capacity.window_seconds,
+            self.capacity.max_destinations_per_window,
             self.issue_protocol,
             self.relay_protocol,
             self.credential_protocol
@@ -261,8 +383,28 @@ impl DirectorySnapshot {
         Ok(text.into_bytes())
     }
 
+    /// Parse an unsigned directory snapshot in canonical text form.
+    pub fn parse_unsigned(text: &str) -> Result<Self, DirectoryError> {
+        parse_unsigned_snapshot(text)
+    }
+
+    /// Serialize this unsigned snapshot in canonical text form.
+    pub fn to_text(&self) -> Result<String, DirectoryError> {
+        String::from_utf8(self.canonical_payload()?)
+            .map_err(|e| DirectoryError::new(format!("canonical payload was not utf8: {e}")))
+    }
+
     /// Select an accepting entry by id, or pick the highest-weight accepting entry.
     pub fn select(&self, id: Option<&str>) -> Result<&ExitDirectoryEntry, DirectoryError> {
+        self.select_with_policy(id, &DirectorySelectionPolicy::default())
+    }
+
+    /// Select an entry using an explicit client policy.
+    pub fn select_with_policy(
+        &self,
+        id: Option<&str>,
+        policy: &DirectorySelectionPolicy,
+    ) -> Result<&ExitDirectoryEntry, DirectoryError> {
         self.validate()?;
         match id {
             Some(id) => {
@@ -274,12 +416,25 @@ impl DirectorySnapshot {
                         "directory entry {id} is not accepting new clients"
                     )));
                 }
+                if entry.capacity.available_sessions == 0 {
+                    return Err(DirectoryError::new(format!(
+                        "directory entry {id} has no available session capacity"
+                    )));
+                }
+                if let Some(min_epoch) = policy.min_key_epoch {
+                    if entry.capacity.key_epoch < min_epoch {
+                        return Err(DirectoryError::new(format!(
+                            "directory entry {id} key epoch {} is below required {min_epoch}",
+                            entry.capacity.key_epoch
+                        )));
+                    }
+                }
                 Ok(entry)
             }
             None => self
                 .entries
                 .iter()
-                .filter(|e| e.accepting_new_clients)
+                .filter(|e| entry_selectable(e, policy))
                 .max_by(|a, b| a.weight.cmp(&b.weight).then_with(|| b.id.cmp(&a.id)))
                 .ok_or_else(|| DirectoryError::new("directory has no accepting entries")),
         }
@@ -339,51 +494,11 @@ impl SignedExitDirectory {
 
     /// Parse a line-oriented signed directory snapshot.
     pub fn parse(text: &str) -> Result<Self, DirectoryError> {
-        let mut lines = text.lines();
-        match lines.next() {
-            Some(MAGIC) => {}
-            _ => return Err(DirectoryError::new("missing directory magic")),
-        }
+        let ParsedDirectoryText {
+            snapshot,
+            signatures,
+        } = parse_directory_text(text, true)?;
 
-        let sequence = parse_u64_line(lines.next(), "sequence=", "missing sequence line")?;
-        let valid_from_unix = parse_u64_line(
-            lines.next(),
-            "valid_from_unix=",
-            "missing valid_from_unix line",
-        )?;
-        let valid_until_unix = parse_u64_line(
-            lines.next(),
-            "valid_until_unix=",
-            "missing valid_until_unix line",
-        )?;
-
-        let mut entries = Vec::new();
-        let mut signatures = Vec::new();
-        let mut saw_signature = false;
-        for line in lines {
-            if let Some(rest) = line.strip_prefix("signature=") {
-                saw_signature = true;
-                signatures.push(parse_signature(rest)?);
-            } else if let Some(rest) = line.strip_prefix("entry=") {
-                if saw_signature {
-                    return Err(DirectoryError::new("entry appears after signature"));
-                }
-                entries.push(parse_entry(rest)?);
-            } else if line.trim().is_empty() {
-                return Err(DirectoryError::new(
-                    "blank lines are not allowed in directory",
-                ));
-            } else {
-                return Err(DirectoryError::new(format!(
-                    "unknown directory line: {line}"
-                )));
-            }
-        }
-        if signatures.is_empty() {
-            return Err(DirectoryError::new("missing directory signature"));
-        }
-        let snapshot =
-            DirectorySnapshot::new(sequence, valid_from_unix, valid_until_unix, entries)?;
         Ok(Self {
             snapshot,
             signatures,
@@ -500,15 +615,16 @@ pub enum DirectoryStateCheck {
 pub struct DirectoryState {
     path: PathBuf,
     last_sequence: Option<u64>,
+    last_key_epochs: BTreeMap<String, u64>,
 }
 
 impl DirectoryState {
     /// Open or create a directory state file.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, DirectoryError> {
         let path = path.as_ref().to_path_buf();
-        let last_sequence = match std::fs::read_to_string(&path) {
-            Ok(text) => Some(parse_state(&text)?),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        let state = match std::fs::read_to_string(&path) {
+            Ok(text) => parse_state(&text)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => StateFile::default(),
             Err(e) => {
                 return Err(DirectoryError::new(format!(
                     "could not read directory state {}: {e}",
@@ -518,7 +634,8 @@ impl DirectoryState {
         };
         Ok(Self {
             path,
-            last_sequence,
+            last_sequence: state.last_sequence,
+            last_key_epochs: state.last_key_epochs,
         })
     }
 
@@ -537,8 +654,74 @@ impl DirectoryState {
                 return Ok(DirectoryStateCheck::Same);
             }
         }
-        self.write(sequence)?;
+        self.write(sequence, &self.last_key_epochs)?;
         self.last_sequence = Some(sequence);
+        Ok(DirectoryStateCheck::Advanced)
+    }
+
+    /// Reject lower sequence numbers and per-entry key-epoch rollback.
+    pub fn check_snapshot_and_record(
+        &mut self,
+        snapshot: &DirectorySnapshot,
+    ) -> Result<DirectoryStateCheck, DirectoryError> {
+        snapshot.validate()?;
+        let sequence = snapshot.sequence;
+        let mut snapshot_epochs = BTreeMap::new();
+        for entry in &snapshot.entries {
+            snapshot_epochs.insert(entry.id.clone(), entry.capacity.key_epoch);
+        }
+
+        if let Some(last) = self.last_sequence {
+            if sequence < last {
+                return Err(DirectoryError::new(format!(
+                    "directory rollback rejected: sequence {sequence} < last accepted {last}"
+                )));
+            }
+            if sequence == last && !self.last_key_epochs.is_empty() {
+                for (id, epoch) in &snapshot_epochs {
+                    match self.last_key_epochs.get(id) {
+                        Some(last_epoch) if epoch < last_epoch => {
+                            return Err(DirectoryError::new(format!(
+                                "directory key-epoch rollback rejected for {id}: epoch {epoch} < last accepted {last_epoch}"
+                            )));
+                        }
+                        Some(last_epoch) if epoch > last_epoch => {
+                            return Err(DirectoryError::new(format!(
+                                "directory key epoch for {id} changed from {last_epoch} to {epoch} without advancing sequence {sequence}"
+                            )));
+                        }
+                        Some(_) => {}
+                        None => {
+                            return Err(DirectoryError::new(format!(
+                                "directory entry {id} appeared without advancing sequence {sequence}"
+                            )));
+                        }
+                    }
+                }
+                return Ok(DirectoryStateCheck::Same);
+            }
+            if sequence == last {
+                self.write(sequence, &snapshot_epochs)?;
+                self.last_key_epochs = snapshot_epochs;
+                return Ok(DirectoryStateCheck::Same);
+            }
+        }
+
+        let mut merged_epochs = self.last_key_epochs.clone();
+        for (id, epoch) in &snapshot_epochs {
+            if let Some(last_epoch) = merged_epochs.get(id) {
+                if epoch < last_epoch {
+                    return Err(DirectoryError::new(format!(
+                        "directory key-epoch rollback rejected for {id}: epoch {epoch} < last accepted {last_epoch}"
+                    )));
+                }
+            }
+            merged_epochs.insert(id.clone(), *epoch);
+        }
+
+        self.write(sequence, &merged_epochs)?;
+        self.last_sequence = Some(sequence);
+        self.last_key_epochs = merged_epochs;
         Ok(DirectoryStateCheck::Advanced)
     }
 
@@ -547,7 +730,16 @@ impl DirectoryState {
         self.last_sequence
     }
 
-    fn write(&self, sequence: u64) -> Result<(), DirectoryError> {
+    /// Return the last accepted key epoch for an entry, if known.
+    pub fn last_key_epoch(&self, entry_id: &str) -> Option<u64> {
+        self.last_key_epochs.get(entry_id).copied()
+    }
+
+    fn write(
+        &self,
+        sequence: u64,
+        key_epochs: &BTreeMap<String, u64>,
+    ) -> Result<(), DirectoryError> {
         let parent = self.path.parent().filter(|p| !p.as_os_str().is_empty());
         if let Some(parent) = parent {
             if !parent.is_dir() {
@@ -571,7 +763,14 @@ impl DirectoryState {
                 ))
             })?;
         write!(file, "{STATE_MAGIC}\nlast_sequence={sequence}\n")
-            .and_then(|_| file.flush())
+            .map_err(|e| DirectoryError::new(format!("could not write directory state: {e}")))?;
+        for (id, epoch) in key_epochs {
+            validate_token("state entry id", id)?;
+            writeln!(file, "entry_epoch={id}|{epoch}").map_err(|e| {
+                DirectoryError::new(format!("could not write directory state: {e}"))
+            })?;
+        }
+        file.flush()
             .and_then(|_| file.sync_data())
             .map_err(|e| DirectoryError::new(format!("could not write directory state: {e}")))?;
         std::fs::rename(&tmp, &self.path).map_err(|e| {
@@ -583,6 +782,29 @@ impl DirectoryState {
         })?;
         Ok(())
     }
+}
+
+#[derive(Default)]
+struct StateFile {
+    last_sequence: Option<u64>,
+    last_key_epochs: BTreeMap<String, u64>,
+}
+
+struct ParsedDirectoryText {
+    snapshot: DirectorySnapshot,
+    signatures: Vec<DirectorySignature>,
+}
+
+fn entry_selectable(entry: &ExitDirectoryEntry, policy: &DirectorySelectionPolicy) -> bool {
+    if !entry.accepting_new_clients || entry.capacity.available_sessions == 0 {
+        return false;
+    }
+    if let Some(min_epoch) = policy.min_key_epoch {
+        if entry.capacity.key_epoch < min_epoch {
+            return false;
+        }
+    }
+    true
 }
 
 fn validate_field(name: &str, value: &str) -> Result<(), DirectoryError> {
@@ -643,11 +865,78 @@ fn parse_u64_line(line: Option<&str>, prefix: &str, missing: &str) -> Result<u64
         .map_err(|e| DirectoryError::new(format!("{prefix} value is not a u64: {e}")))
 }
 
+fn parse_unsigned_snapshot(text: &str) -> Result<DirectorySnapshot, DirectoryError> {
+    let ParsedDirectoryText {
+        snapshot,
+        signatures,
+    } = parse_directory_text(text, false)?;
+    if !signatures.is_empty() {
+        return Err(DirectoryError::new(
+            "unsigned directory snapshot must not contain signatures",
+        ));
+    }
+    Ok(snapshot)
+}
+
+fn parse_directory_text(
+    text: &str,
+    require_signature: bool,
+) -> Result<ParsedDirectoryText, DirectoryError> {
+    let mut lines = text.lines();
+    match lines.next() {
+        Some(MAGIC) => {}
+        _ => return Err(DirectoryError::new("missing directory magic")),
+    }
+
+    let sequence = parse_u64_line(lines.next(), "sequence=", "missing sequence line")?;
+    let valid_from_unix = parse_u64_line(
+        lines.next(),
+        "valid_from_unix=",
+        "missing valid_from_unix line",
+    )?;
+    let valid_until_unix = parse_u64_line(
+        lines.next(),
+        "valid_until_unix=",
+        "missing valid_until_unix line",
+    )?;
+
+    let mut entries = Vec::new();
+    let mut signatures = Vec::new();
+    let mut saw_signature = false;
+    for line in lines {
+        if let Some(rest) = line.strip_prefix("signature=") {
+            saw_signature = true;
+            signatures.push(parse_signature(rest)?);
+        } else if let Some(rest) = line.strip_prefix("entry=") {
+            if saw_signature {
+                return Err(DirectoryError::new("entry appears after signature"));
+            }
+            entries.push(parse_entry(rest)?);
+        } else if line.trim().is_empty() {
+            return Err(DirectoryError::new(
+                "blank lines are not allowed in directory",
+            ));
+        } else {
+            return Err(DirectoryError::new(format!(
+                "unknown directory line: {line}"
+            )));
+        }
+    }
+    if require_signature && signatures.is_empty() {
+        return Err(DirectoryError::new("missing directory signature"));
+    }
+    let snapshot = DirectorySnapshot::new(sequence, valid_from_unix, valid_until_unix, entries)?;
+    Ok(ParsedDirectoryText {
+        snapshot,
+        signatures,
+    })
+}
+
 fn parse_entry(rest: &str) -> Result<ExitDirectoryEntry, DirectoryError> {
     let parts: Vec<_> = rest.split('|').collect();
-    if parts.len() != 10 {
+    if parts.len() != 15 {
         return Err(DirectoryError::new(
-            "entry must have 10 fields: id|relay|exit|issuer|issuer_pk|weight|accepting|issue|relay_proto|credential",
+            "entry must have 15 fields: id|relay|exit|issuer|issuer_pk|weight|accepting|key_epoch|available_sessions|max_sessions|window_seconds|max_destinations_per_window|issue|relay_proto|credential",
         ));
     }
     let issuer_pk = hex::decode(parts[4])
@@ -664,6 +953,13 @@ fn parse_entry(rest: &str) -> Result<ExitDirectoryEntry, DirectoryError> {
             )));
         }
     };
+    let capacity = CapacityEnvelope::new(
+        parse_entry_u64(parts[7], "key_epoch")?,
+        parse_entry_u64(parts[8], "available_sessions")?,
+        parse_entry_u64(parts[9], "max_sessions")?,
+        parse_entry_u64(parts[10], "window_seconds")?,
+        parse_entry_u64(parts[11], "max_destinations_per_window")?,
+    )?;
     ExitDirectoryEntry::new(
         parts[0],
         parts[1],
@@ -672,10 +968,16 @@ fn parse_entry(rest: &str) -> Result<ExitDirectoryEntry, DirectoryError> {
         issuer_pk,
         weight,
         accepting_new_clients,
-        parts[7],
-        parts[8],
-        parts[9],
+        capacity,
+        parts[12],
+        parts[13],
+        parts[14],
     )
+}
+
+fn parse_entry_u64(raw: &str, name: &str) -> Result<u64, DirectoryError> {
+    raw.parse::<u64>()
+        .map_err(|e| DirectoryError::new(format!("entry {name} is not a u64: {e}")))
 }
 
 fn parse_signature(rest: &str) -> Result<DirectorySignature, DirectoryError> {
@@ -699,17 +1001,51 @@ fn parse_signature(rest: &str) -> Result<DirectorySignature, DirectoryError> {
     })
 }
 
-fn parse_state(text: &str) -> Result<u64, DirectoryError> {
+fn parse_state(text: &str) -> Result<StateFile, DirectoryError> {
     let mut lines = text.lines();
     match lines.next() {
         Some(STATE_MAGIC) => {}
         _ => return Err(DirectoryError::new("bad directory state magic")),
     }
     let seq = parse_u64_line(lines.next(), "last_sequence=", "missing last_sequence")?;
-    if lines.next().is_some() {
-        return Err(DirectoryError::new("trailing data in directory state"));
+    let mut state = StateFile {
+        last_sequence: Some(seq),
+        last_key_epochs: BTreeMap::new(),
+    };
+    for line in lines {
+        if let Some(rest) = line.strip_prefix("entry_epoch=") {
+            let (id, epoch) = rest
+                .split_once('|')
+                .ok_or_else(|| DirectoryError::new("entry_epoch must be id|epoch"))?;
+            validate_token("state entry id", id)?;
+            let epoch = epoch
+                .parse::<u64>()
+                .map_err(|e| DirectoryError::new(format!("entry_epoch is not a u64: {e}")))?;
+            if epoch == 0 {
+                return Err(DirectoryError::new(
+                    "entry_epoch key epoch must be non-zero",
+                ));
+            }
+            if state
+                .last_key_epochs
+                .insert(id.to_string(), epoch)
+                .is_some()
+            {
+                return Err(DirectoryError::new(format!(
+                    "duplicate entry_epoch for {id}"
+                )));
+            }
+        } else if line.trim().is_empty() {
+            return Err(DirectoryError::new(
+                "blank lines are not allowed in directory state",
+            ));
+        } else {
+            return Err(DirectoryError::new(format!(
+                "unknown directory state line: {line}"
+            )));
+        }
     }
-    Ok(seq)
+    Ok(state)
 }
 
 #[cfg(test)]
@@ -729,6 +1065,10 @@ mod tests {
 
     fn issuer_pk(byte: u8) -> Vec<u8> {
         vec![byte; ISSUER_PK_LEN]
+    }
+
+    fn capacity(epoch: u64, available: u64, max: u64) -> CapacityEnvelope {
+        CapacityEnvelope::new(epoch, available, max, 3600, 1000).unwrap()
     }
 
     fn snapshot(sequence: u64) -> DirectorySnapshot {
@@ -870,6 +1210,88 @@ mod tests {
     }
 
     #[test]
+    fn exhausted_capacity_entries_are_not_selected() {
+        let snapshot = DirectorySnapshot::new(
+            1,
+            1,
+            2,
+            vec![ExitDirectoryEntry::current_protocols_with_capacity(
+                "full",
+                "127.0.0.1:1",
+                "127.0.0.1:2",
+                "127.0.0.1:3",
+                issuer_pk(1),
+                100,
+                true,
+                capacity(1, 0, 100),
+            )
+            .unwrap()],
+        )
+        .unwrap();
+        assert!(snapshot.select(None).is_err());
+        assert!(snapshot.select(Some("full")).is_err());
+    }
+
+    #[test]
+    fn selection_policy_rejects_stale_key_epoch() {
+        let snapshot = DirectorySnapshot::new(
+            1,
+            1,
+            2,
+            vec![
+                ExitDirectoryEntry::current_protocols_with_capacity(
+                    "old",
+                    "127.0.0.1:1",
+                    "127.0.0.1:2",
+                    "127.0.0.1:3",
+                    issuer_pk(1),
+                    100,
+                    true,
+                    capacity(1, 10, 10),
+                )
+                .unwrap(),
+                ExitDirectoryEntry::current_protocols_with_capacity(
+                    "new",
+                    "127.0.0.1:4",
+                    "127.0.0.1:5",
+                    "127.0.0.1:6",
+                    issuer_pk(2),
+                    10,
+                    true,
+                    capacity(3, 10, 10),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let policy = DirectorySelectionPolicy {
+            min_key_epoch: Some(2),
+        };
+        assert_eq!(
+            snapshot.select_with_policy(None, &policy).unwrap().id,
+            "new"
+        );
+        let err = snapshot
+            .select_with_policy(Some("old"), &policy)
+            .expect_err("explicit stale selection must fail");
+        assert!(err.to_string().contains("below required"), "{err}");
+    }
+
+    #[test]
+    fn capacity_is_signed_and_tamper_checked() {
+        let k1 = signing_key(7);
+        let signed = SignedExitDirectory::sign(snapshot(3), std::slice::from_ref(&k1)).unwrap();
+        let mut text = signed.to_text().unwrap();
+        text = text.replace("|1|1|1|3600|1000|", "|1|0|1|3600|1000|");
+        let parsed = SignedExitDirectory::parse(&text).unwrap();
+
+        let err = parsed
+            .verify_at(&[signer_pk(&k1)], 1, 150)
+            .expect_err("capacity tampering must break the signature");
+        assert!(err.to_string().contains("did not verify"), "{err}");
+    }
+
+    #[test]
     fn rollback_state_rejects_lower_sequence() {
         let dir = std::env::temp_dir().join(format!(
             "tessera-directory-state-{}-{}",
@@ -894,6 +1316,58 @@ mod tests {
         assert!(err.to_string().contains("rollback"), "{err}");
         let reopened = DirectoryState::open(&dir).unwrap();
         assert_eq!(reopened.last_sequence(), Some(10));
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn rollback_state_rejects_key_epoch_rollback() {
+        let dir = std::env::temp_dir().join(format!(
+            "tessera-directory-state-epoch-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut state = DirectoryState::open(&dir).unwrap();
+        let mut advanced = snapshot(10);
+        advanced.entries[0].capacity.key_epoch = 3;
+        state.check_snapshot_and_record(&advanced).unwrap();
+        assert_eq!(state.last_key_epoch("exit-b"), Some(3));
+
+        let mut rolled_back = snapshot(11);
+        rolled_back.entries[0].capacity.key_epoch = 2;
+        let err = state
+            .check_snapshot_and_record(&rolled_back)
+            .expect_err("lower key epoch must fail closed even with a higher sequence");
+        assert!(err.to_string().contains("key-epoch rollback"), "{err}");
+
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn rollback_state_rejects_epoch_change_without_sequence_advance() {
+        let dir = std::env::temp_dir().join(format!(
+            "tessera-directory-state-same-epoch-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut state = DirectoryState::open(&dir).unwrap();
+        state.check_snapshot_and_record(&snapshot(10)).unwrap();
+
+        let mut changed = snapshot(10);
+        changed.entries[0].capacity.key_epoch = 2;
+        let err = state
+            .check_snapshot_and_record(&changed)
+            .expect_err("same-sequence epoch changes must fail closed");
+        assert!(
+            err.to_string().contains("without advancing sequence"),
+            "{err}"
+        );
+
         let _ = std::fs::remove_file(&dir);
     }
 }

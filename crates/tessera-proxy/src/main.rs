@@ -24,7 +24,7 @@ use rand_core::OsRng;
 use tessera_arc::arc::{create_credential_response, Credential};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 use tessera_client::{begin_issuance, TesseraClient};
-use tessera_issuer::ensure_shared_key;
+use tessera_issuer::KeyProviderConfig;
 use tessera_origin::{FileTagStore, OriginGuard};
 use tessera_proxy::{serve_observed_shaped, ShapingConfig, Upstream, VolumeShaper};
 
@@ -314,26 +314,6 @@ fn check_path_usable(path: &str, what: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate `TESSERA_KEY_FILE`: it is optional, but if *set* it must be non-empty
-/// and point at a usable filesystem location. A present-but-blank value is almost
-/// always a misconfigured container env and would silently downgrade to an
-/// ephemeral key, breaking issuer/exit key convergence. Returns the non-empty
-/// path if one was set.
-fn validate_key_file() -> Option<String> {
-    match std::env::var("TESSERA_KEY_FILE") {
-        Ok(path) if !path.is_empty() => {
-            if let Err(msg) = check_path_usable(&path, "TESSERA_KEY_FILE") {
-                die(&format!("tessera-{ROLE}: config error: {msg}"));
-            }
-            Some(path)
-        }
-        Ok(_) => die(&format!(
-            "tessera-{ROLE}: config error: TESSERA_KEY_FILE is set but empty (unset it for an ephemeral self-issuing exit, or give it a path)"
-        )),
-        Err(_) => None,
-    }
-}
-
 /// Optional durable spent-tag file for a single exit. This survives restarts but
 /// is still explicitly not a multi-process/distributed tag store.
 fn validate_spent_tag_file() -> Option<String> {
@@ -365,6 +345,7 @@ fn main() {
     // these — see docs/DEPLOY.md):
     //   TESSERA_LISTEN   bind address (default 127.0.0.1:8118; a node sets 0.0.0.0:PORT)
     //   TESSERA_UPSTREAM "direct" | "tor" | "tor:HOST:PORT" (default direct; `--tor` => tor)
+    //   TESSERA_KEY_PROVIDER "ephemeral" | "file" | "dstack-kms" (default inferred)
     //   TESSERA_KEY_FILE shared ARC server-key path — set it (same value as the
     //                    issuer's) so the exit verifies credentials minted by the
     //                    issuer; unset => ephemeral self-issuing exit (the demo).
@@ -378,7 +359,12 @@ fn main() {
     let listen = std::env::var("TESSERA_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.into());
     validate_addr("TESSERA_LISTEN", &listen);
     let UpstreamPlan { upstream, tor } = resolve_upstream(tor_arg);
-    let key_file = validate_key_file();
+    let key_provider = KeyProviderConfig::from_env().unwrap_or_else(|msg| {
+        die(&format!("tessera-{ROLE}: config error: {msg}"));
+    });
+    key_provider.preflight().unwrap_or_else(|msg| {
+        die(&format!("tessera-{ROLE}: config error: {msg}"));
+    });
     let spent_tag_file = validate_spent_tag_file();
 
     // ---- --check: non-serving preflight (validate + bind + drop, then exit) ----
@@ -396,8 +382,8 @@ fn main() {
                 // Prove the key domain is not already held by another local exit,
                 // then return normally so the lease is dropped. This does not
                 // establish a missing key file.
-                let _key_domain_lease = key_file
-                    .as_deref()
+                let _key_domain_lease = key_provider
+                    .key_file_path()
                     .map(KeyDomainLease::acquire_preflight)
                     .transpose()
                     .unwrap_or_else(|msg| die(&format!("tessera-{ROLE}: config error: {msg}")));
@@ -415,10 +401,7 @@ fn main() {
                     Upstream::Direct => "direct".to_string(),
                     Upstream::Tor(p) => format!("tor via {p}"),
                 };
-                let key = match &key_file {
-                    Some(p) => format!("shared:{p}"),
-                    None => "ephemeral".to_string(),
-                };
+                let key = key_provider.label();
                 let tags = match &spent_tag_file {
                     Some(p) => format!("file:{p}"),
                     None => "memory".to_string(),
@@ -452,16 +435,15 @@ fn main() {
     let addr = listener.local_addr().expect("addr");
 
     // Convergent shared-key bootstrap: the exit loads the SAME ARC key as the
-    // issuer (they can never diverge — see tessera_issuer::ensure_shared_key).
-    let (sk, pk) = match &key_file {
-        Some(path) => ensure_shared_key(path),
-        None => ServerPrivateKey::setup(&mut rng),
-    };
+    // issuer for file-backed domains; unsupported providers fail closed.
+    let (sk, pk) = key_provider.establish(&mut rng).unwrap_or_else(|msg| {
+        die(&format!("tessera-{ROLE}: config error: {msg}"));
+    });
     // One shared ARC key domain is one live exit in this build. Hold an advisory
     // lock on the established key file's inode for the process lifetime; this
     // closes local symlink/hardlink/path-alias bypasses.
-    let _key_domain_lease = key_file
-        .as_deref()
+    let _key_domain_lease = key_provider
+        .key_file_path()
         .map(KeyDomainLease::acquire_existing_key)
         .transpose()
         .unwrap_or_else(|msg| die(&format!("tessera-{ROLE}: config error: {msg}")));

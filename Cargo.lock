@@ -989,6 +989,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "k256",
+ "rand_core",
  "tessera-arc",
 ]
 
