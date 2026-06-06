@@ -16,8 +16,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Result, Write};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -27,8 +27,10 @@ use tessera_origin::{Decision, OriginGuard, PRESENTATION_HEADER};
 
 pub mod policy;
 pub mod shaping;
+pub mod transport;
 pub use policy::{is_blocked_addr, PortRule, TargetPolicy, TargetReject};
 pub use shaping::{ShapingConfig, ShapingDecision, VolumeShaper};
+pub use transport::{Dialer, TcpDialer, TorSocksDialer};
 
 use policy::Precheck;
 
@@ -43,13 +45,14 @@ const MAX_INFLIGHT: usize = 1024;
 /// Read/write timeout on a tunnel socket (S3): a slow-roll / idle peer cannot pin
 /// a worker thread + fd forever — the blocking copy/parse loops unblock on it.
 /// Applied symmetrically to BOTH the accepted client socket and the upstream
-/// socket, so a stalled upstream cannot pin a handler either.
-const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
+/// socket (the latter inside each [`transport::Dialer`]), so a stalled upstream
+/// cannot pin a handler either.
+pub(crate) const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Bound on the upstream `connect` (S3): a black-holed destination cannot pin a
 /// handler for the kernel's full SYN-retry window (~127s) holding a concurrency
-/// permit. Applies to the Direct dial and the SOCKS5 proxy dial.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// permit. Applied by each [`transport::Dialer`] (Direct dial and SOCKS5 dial).
+pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// RAII permit for the [`MAX_INFLIGHT`] concurrency cap: decrements the active
 /// counter when the handler thread returns, on every path.
@@ -71,6 +74,19 @@ pub enum Upstream {
     Direct,
     /// Route through a SOCKS5 proxy (e.g. Tor at `127.0.0.1:9050`).
     Tor(String),
+}
+
+impl Upstream {
+    /// The runtime dial mechanism for this configured upstream: a [`TcpDialer`]
+    /// for [`Direct`](Upstream::Direct), a [`TorSocksDialer`] for
+    /// [`Tor`](Upstream::Tor). `Upstream` stays the operator-facing config knob;
+    /// [`Dialer`] is the mechanism the handler invokes.
+    pub fn dialer(&self) -> Box<dyn Dialer> {
+        match self {
+            Upstream::Direct => Box::new(TcpDialer),
+            Upstream::Tor(proxy) => Box::new(TorSocksDialer::new(proxy.clone())),
+        }
+    }
 }
 
 /// What the exit observed about one *admitted* tunnel: the peer socket it
@@ -331,6 +347,11 @@ fn handle_connect(
     // locally just to classify it would leak the destination to our local resolver
     // — exactly what routing over Tor is meant to avoid — so we pass the name
     // through unresolved. (Documented in docs/CLEAN_ONION_EGRESS.md.)
+    // The transport is chosen by the configured `Upstream`; the SSRF/target policy
+    // (resolve-then-pin for Direct, deliberate don't-resolve for Tor) stays here so
+    // the dialer abstracts only the transport, never the policy. Each dialer arms
+    // its own connect/idle timeouts (S3).
+    let dialer = upstream.dialer();
     let upstream_conn = match upstream {
         Upstream::Direct => {
             let ip = match &precheck {
@@ -346,14 +367,18 @@ fn handle_connect(
                     }
                 },
             };
-            TcpStream::connect_timeout(&SocketAddr::new(ip, port), CONNECT_TIMEOUT)
+            // Dial the *pinned* address (the dialer re-parses the IP literal with
+            // no DNS, preserving the rebinding defense).
+            dialer.connect(&ip.to_string(), port)
         }
-        Upstream::Tor(proxy) => {
+        Upstream::Tor(_) => {
+            // Pass the name UNRESOLVED to the Tor proxy (it resolves from its own
+            // vantage; local resolution would leak the destination's DNS).
             let target_host = match &precheck {
                 Precheck::Pinned(ip) => ip.to_string(),
                 Precheck::Hostname(h) => h.clone(),
             };
-            socks5_connect(proxy, &target_host, port)
+            dialer.connect(&target_host, port)
         }
     };
     let upstream_conn = match upstream_conn {
@@ -363,10 +388,6 @@ fn handle_connect(
             return Ok(());
         }
     };
-    // S3: bound the upstream socket too, symmetrically with the accepted client
-    // socket, so a stalled/silent upstream cannot pin this tunnel's threads + fds.
-    let _ = upstream_conn.set_read_timeout(Some(SOCKET_TIMEOUT));
-    let _ = upstream_conn.set_write_timeout(Some(SOCKET_TIMEOUT));
 
     stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
     stream.flush()?;
@@ -540,54 +561,4 @@ fn copy_capped(
             Err(_) => return Stop::Eof,
         }
     }
-}
-
-/// Minimal SOCKS5 CONNECT (no auth, domain target) — enough to reach any host
-/// (including a `.onion` or `api.anthropic.com`) through the local Tor port.
-fn socks5_connect(proxy: &str, host: &str, port: u16) -> Result<TcpStream> {
-    // Bound both the proxy dial and the handshake reads (S3): a black-holed or
-    // hung SOCKS proxy must not pin this handler. handle_connect re-arms the idle
-    // timeout for the data phase after this returns.
-    let addr = proxy
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| Error::other("SOCKS5: proxy address resolved to nothing"))?;
-    let mut s = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
-    let _ = s.set_read_timeout(Some(SOCKET_TIMEOUT));
-    let _ = s.set_write_timeout(Some(SOCKET_TIMEOUT));
-    s.write_all(&[0x05, 0x01, 0x00])?;
-    let mut method = [0u8; 2];
-    s.read_exact(&mut method)?;
-    if method != [0x05, 0x00] {
-        return Err(Error::other("SOCKS5: no acceptable method"));
-    }
-    let host_bytes = host.as_bytes();
-    if host_bytes.len() > 255 {
-        return Err(Error::other("SOCKS5: host too long"));
-    }
-    let mut req = vec![0x05, 0x01, 0x00, 0x03, host_bytes.len() as u8];
-    req.extend_from_slice(host_bytes);
-    req.extend_from_slice(&port.to_be_bytes());
-    s.write_all(&req)?;
-    let mut head = [0u8; 4];
-    s.read_exact(&mut head)?;
-    if head[1] != 0x00 {
-        return Err(Error::other(format!(
-            "SOCKS5 connect failed (REP={})",
-            head[1]
-        )));
-    }
-    let bnd = match head[3] {
-        0x01 => 4,
-        0x04 => 16,
-        0x03 => {
-            let mut l = [0u8; 1];
-            s.read_exact(&mut l)?;
-            l[0] as usize
-        }
-        _ => return Err(Error::other("SOCKS5: bad ATYP")),
-    };
-    let mut skip = vec![0u8; bnd + 2];
-    s.read_exact(&mut skip)?;
-    Ok(s)
 }
