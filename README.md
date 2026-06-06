@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/NubsCarson/tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/NubsCarson/tessera/actions/workflows/ci.yml)
 [![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV 1.74](https://img.shields.io/badge/MSRV-1.74-blue.svg)](#build)
+[![MSRV 1.74](https://img.shields.io/badge/MSRV-1.74-blue.svg)](#build--run)
 ![status: research-grade, unaudited](https://img.shields.io/badge/status-research--grade%20%C2%B7%20unaudited-orange.svg)
 
 **Admit a web request on an unlinkable token it can prove — never on its IP.**
@@ -33,7 +33,9 @@ network.
 
 **It IS, today (tested, CI-green):**
 - a from-scratch **ARC (P-256)** anonymous-credential core, proven **byte-for-byte
-  against the IETF test vectors**;
+  against the IETF test vectors** — a **keyed-verification (KVAC)** scheme: the
+  issuer is the verifier (verification needs the server private key), so
+  presentations are **not publicly verifiable** (see [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md));
 - a runnable, self-hostable **credential-gated proxy** — admit on a token, tunnel
   TLS end-to-end, optionally over Tor — plus a narrated end-to-end demo;
 - a tested **2-hop split-trust access loop**, **per-IP human-volume shaping**, an
@@ -139,7 +141,10 @@ roadmap.
 A Cargo workspace of **ten crates** (eight workspace members + two excluded,
 listed separately below) — a verifiable crypto core plus the tooling around it.
 Per [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) the **recommended default**
-is the token-gated path (ARC token + the 2-hop loop over Tor + shaping); the ZK
+is the token-gated path (ARC token + a credential-gated clean exit reached over
+Tor + per-IP shaping); the custom 2-hop loop is **dropped from that target
+default** (let Tor provide the anonymity hops), though the **as-shipped**
+`deploy/` docker network still runs the relay+exit 2-hop loop today. The ZK
 payment **channel / EVM court are an optional-advanced tier**, kept and tested
 for when pay-as-you-go-with-refund is genuinely needed.
 
@@ -168,12 +173,14 @@ Plus an out-of-workspace wasm client (its own excluded workspace, like `fuzz/`):
 
 ## Standards
 
-Tessera tracks three IETF drafts and is validated against their official test
-vectors:
+Tessera tracks three IETF drafts. The ARC arithmetic and the Sigma proof layer
+are validated against the authoritative official test vectors; the Fiat-Shamir
+transform has no standalone vector set and is exercised **indirectly**, through
+the Sigma Protocol vectors (the FS-transformed non-interactive proofs):
 
-- [`draft-ietf-privacypass-arc-crypto-01`](https://datatracker.ietf.org/doc/draft-ietf-privacypass-arc-crypto/) — the ARC protocol (Yun, Wood, Faz-Hernández)
-- [`draft-irtf-cfrg-sigma-protocols-01`](https://datatracker.ietf.org/doc/draft-irtf-cfrg-sigma-protocols/) — the zero-knowledge proof system
-- [`draft-irtf-cfrg-fiat-shamir-01`](https://datatracker.ietf.org/doc/draft-irtf-cfrg-fiat-shamir/) — the non-interactive transform
+- [`draft-ietf-privacypass-arc-crypto-01`](https://datatracker.ietf.org/doc/draft-ietf-privacypass-arc-crypto/) — the ARC protocol (Yun, Wood, Faz-Hernández); arithmetic vectors proven byte-exact (the §10.2 *proof* blobs are `#[ignore]`d — see [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md))
+- [`draft-irtf-cfrg-sigma-protocols-01`](https://datatracker.ietf.org/doc/draft-irtf-cfrg-sigma-protocols/) — the zero-knowledge proof system; verifier proven byte-for-byte against the official Sigma vectors
+- [`draft-irtf-cfrg-fiat-shamir-01`](https://datatracker.ietf.org/doc/draft-irtf-cfrg-fiat-shamir/) — the non-interactive transform; no separate KAT set, validated via the Sigma vectors above
 
 ## Status
 
@@ -223,8 +230,10 @@ This is **research-grade, draft-tracking code**. It has **not** been
 third-party audited; the known secret-dependent path (the range-proof bit
 decomposition) is constant-time-hardened via `subtle`, but there has been **no
 end-to-end constant-time audit**; and the underlying specs are IETF *drafts*
-that may change. **Do not use it to protect real users yet.** The
-path to that is milestone 10 in [`GOAL.md`](./GOAL.md). The cryptographic
+that may change. **Do not use it to protect real users yet.** The path to that
+is a **third-party security audit** — the internal hardening pass
+([`GOAL.md`](./GOAL.md) milestone 10) is **done**, but that is explicitly *not* an
+external audit. The cryptographic
 primitives come from the audited [RustCrypto](https://github.com/RustCrypto)
 project; the protocol logic on top is what still needs review.
 

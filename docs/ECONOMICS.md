@@ -46,7 +46,11 @@ Each request is one channel decrement of `cost`:
    then serves, then issues a proof-of-relay receipt.
 4. Settlement pays the relayer `B0 − balance` against the **highest-seq
    doubly-signed state for which it can also show a receipt**; cumulative, so one
-   late receipt-less state is simply not claimable.
+   late receipt-less state is simply not claimable. **(Receipt-gating is a
+   property of the *off-chain* settlement model, `settlement.rs`; the deployed
+   on-chain `ChannelRegistry` settles on the highest doubly-signed `seq` and does
+   *not* verify receipts — on-chain proof-of-relay is the future ZK `R_dec` path.
+   See [`RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) §2.)**
 
 **What the user can lose in the worst case: one in-flight request's `cost`.** The
 user authorizes exactly one decrement at a time and only treats a request as

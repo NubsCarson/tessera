@@ -260,8 +260,11 @@ R_dec circuit are a kept-and-tested **optional-advanced tier**, not the default.
   with the Poseidon one, or the cleartext signing domain with the ZK one.
 - **Do NOT present the channel / `ChannelRegistry` / `RDecVerifier` / R_dec as
   the default or as deployable-with-value** — it is the optional-advanced tier,
-  Phase 2a is plain crypto (not ZK, no money movement), and the ZK pieces are
-  scaffolding.
+  Phase 2a is plain crypto (not ZK, no money movement), and the ZK pieces run
+  and are tested (a pinned Groth16 `R_dec` proof verifies on-chain, and
+  `cooperativeCloseZK` settles end-to-end without a cleartext balance) but are
+  generated from a **TEST-ONLY single-party trusted setup**, so they are still
+  not deployable-with-value.
 - **Do NOT claim relationship anonymity for the default docker-compose
   topology.** It provides none if the relay and exit are run by one operator
   (`docs/DEPLOYMENT_TOPOLOGY.md` §6). The split-trust property only holds across

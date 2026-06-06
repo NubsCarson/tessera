@@ -80,8 +80,9 @@ below):
   SNARK attests `C_next` is a well-formed commitment, and `C_next` arrives as a
   public signal, so the court only has to bind it with `ecrecover`. Scoping the
   Poseidon commitment to the ZK world is therefore the sounder reconciliation,
-  and it keeps **all 23 pre-existing 2c forge tests + the Rust↔Solidity sig
-  vector green with zero regeneration**.
+  and it keeps **every pre-existing Phase-2c court test green with zero
+  regeneration** — the ZK path is purely additive, and the Rust↔Solidity
+  cross-language sig vector still passes unchanged.
 
   **Honest cost of this choice:** it is not *literally* "one commitment for the
   whole protocol" — the cleartext path still uses the SHA-256 commitment. It is

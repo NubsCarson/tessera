@@ -352,8 +352,11 @@ These are **not** provided. Treating any of them as solved is a deployment error
   pinned reference's Fiat-Shamir wiring, while **every arithmetic vector matches
   exactly** (8/8 in `tests/test_vectors.rs`). Assessed as an **upstream
   vector/reference inconsistency** (the Sigma POC's challenge squeeze churned
-  `+16`→`+32`), not a Tessera bug — independently confirmed by showing the
-  pinned reference's own `verify()` rejects its own committed blob. The proof
+  `+16`→`+32`), not a Tessera bug — corroborated in
+  [`ARC_PROOF_VECTOR_DISCREPANCY.md`](./ARC_PROOF_VECTOR_DISCREPANCY.md): the
+  instance label and the simulated commitment match an independent
+  reimplementation, the transcript reproduces the official Sigma challenge, and a
+  brute-force squeeze-length sweep finds no match for the committed blob. The proof
   layer is therefore validated against the **authoritative** IETF Sigma Protocol
   vectors (`tests/sigma_vectors.rs`: official `discrete_logarithm` + `dleq`,
   accept-good/reject-tampered), which exercise the identical transcript
