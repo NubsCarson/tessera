@@ -102,6 +102,14 @@ enforceable rather than assumed (`channel.rs:1`–`9`).
    is capped at one request (`tests/protocol.rs:231`,
    `withholding_without_receipt_refunds_user`). It is the off-chain stand-in for
    the HOPR ticket / Groth16 proof π of the full design (`relay.rs:9`, `lib.rs`).
+   **Crucially, receipt-gating is a property of the *off-chain* settlement model
+   only:** `settle()` filters claimable states by `RelayAck` (`settlement.rs:116`),
+   but the **deployed on-chain `ChannelRegistry` does *not* verify receipts** —
+   `cooperativeClose` / `settleDispute` pay the relayer `B0 − balance` for any
+   *doubly-signed* state, receipt or not. On-chain proof-of-relay is the future
+   ZK `R_dec` path (`cooperativeCloseZK`, a TEST-ONLY trusted setup), not the
+   cleartext court. So *withholding-is-unprofitable* binds in the off-chain claim
+   model; the on-chain court does not currently enforce it.
 3. **It is one-sided commitment, not mutual escrow of the message.** Between the
    user's `spend` and the relayer's `verify_and_cosign` there is a window where the
    user has revealed a signed decrement and the relayer has not yet committed. The

@@ -164,6 +164,12 @@ rather than rediscovered.
 - **Issuance / token.** There is none; the channel settles in the chain's native
   asset. Sybil-resistance of relayer *identity* is an application policy
   ([`THREAT_MODEL.md`](./THREAT_MODEL.md)).
+- **Clean egress-IP supply.** A genuinely clean, residential-class egress IP at
+  scale is the binding *external* cost of the whole system — one of the three
+  irreducibly-external gaps no code can manufacture ([`CLAUDE.md`](../CLAUDE.md) /
+  [`AGENTS.md`](../AGENTS.md)). Its acquisition/rotation economics are an
+  operator/transport concern, deliberately unpriced here: Tessera prices
+  *admission* and *relay*, not the IP supply underneath them.
 
 ## 9. Honest bottom line
 
