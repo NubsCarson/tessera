@@ -104,7 +104,7 @@ per context; exceeding it is caught.
    proven a bit (`D[i] = b[i]·D[i] + s2[i]·H`, which forces `b[i]∈{0,1}`) and the
    verifier checks the homomorphic sum `nonceCommit == Σ bases[i]·D[i]`
    (`proofs.rs::verify_presentation_proof`). A nonce `≥ limit` has no satisfying
-   proof. *Tested adversarially*: `tests/roundtrip.rs::overlimit_nonce_is_refused_by_the_range_proof`
+   proof. *Tested adversarially*: `tests/roundtrip.rs::overlimit_nonce_is_refused_by_the_range_proof_not_just_the_counter`
    forges a presentation at `nonce == limit` and the verifier rejects it.
 2. **Deterministic tag + double-spend store** — `limit` accepted presentations
    require `limit` distinct in-range nonces (≤ `limit`); reusing a slot repeats
@@ -113,7 +113,7 @@ per context; exceeding it is caught.
 
 **Assumption.** Σ special-soundness (§5) + DL (binding of the bit/nonce
 commitments) + ROM. The tag-store guarantee additionally needs the store to be
-**durable and consistent** in deployment (THREAT_MODEL §6.1) — an operational,
+**durable and consistent** in deployment (THREAT_MODEL §6, item 1) — an operational,
 not cryptographic, requirement.
 
 **Gap.** Range-proof binding rests on DL; quantum caveat. The shipped tag store
@@ -153,14 +153,14 @@ verified* here:
 - End-to-end round-trips + negative cases (issue/present/verify, over-limit,
   tamper, wrong-context, double-spend) — `tests/roundtrip.rs`.
 - Deserializers + the guard never panic on arbitrary input (`tests/robustness.rs`
-  + 5 `cargo-fuzz` targets).
+  + the `cargo-fuzz` targets in `fuzz/fuzz_targets/` — run `cargo +nightly fuzz build` to list).
 
 ## Post-quantum (§PQ)
 
 Every assumption above is classical. **Shor's algorithm breaks discrete log**,
 which (a) forges credentials and breaks proof soundness, and (b) enables the §2
 issuance-unlinkability partition. There is **no** post-quantum claim. A PQ path
-is scoped in [`ROADMAP.md`](./ROADMAP.md) (track 4) / a future `POST_QUANTUM.md`.
+is scoped in [`ROADMAP.md`](./ROADMAP.md) (track 4) / [`POST_QUANTUM.md`](./POST_QUANTUM.md).
 
 ## Gaps to a formal proof — the honest list
 

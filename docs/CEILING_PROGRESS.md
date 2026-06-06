@@ -71,7 +71,7 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | Leaner-default e2e proof (token + 2-hop loop + M5 shaping, no channel) | ✅ | (this commit) |
 | Channel/ZK/court demoted to optional-advanced tier (documented, kept) | ✅ | `dc56d41` |
 | Networked issuance (PoW-gated issuer node + over-the-wire credential acquisition) | ✅ | (this commit) — `tessera-issuer::net`, `tessera-client::obtain_credential` |
-| **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | (this commit) — `tessera-client` bin, proven by `tests/network.rs` + a 4-process run to a real HTTPS site (200) |
+| **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | (this commit) — `tessera-client` bin, proven by `tessera-relay/tests/network.rs` + a 4-process run to a real HTTPS site (200) |
 | Shared-key exit (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | (this commit) |
 | Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3` + (this commit) |
 | Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → issue) | ✅ | (this commit) — `tessera-issuer::mint` (ecrecover proof + std-only `eth_call` read + durable ledger), `serve_issuance_paid`/`obtain_credential_paid`; proven vs real **anvil** (`tests/anvil_entitled.rs`) |
@@ -105,7 +105,7 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 | S22 | Honest-relayer atomicity spec (doc) | ✅ | [`docs/RELAYER_CHEAT_MATRIX.md`](./RELAYER_CHEAT_MATRIX.md) (atomicity §) |
 | S23 | CI: cargo-deny | ✅ | `deny.toml` + the `deny` CI job (advisories/bans/licenses/sources) |
 | S24 | CI: deeper fuzz (300s/target) | ✅ | the `fuzz-deep` CI job (300s/target, schedule + workflow_dispatch gated) |
-| S25 | CI: Slither static analysis | ✅ | the `contracts` CI job (Slither, fails on High/Medium) |
+| S25 | CI: Slither static analysis | ✅ | the `slither` CI job (fails on High/Medium) |
 | S26 | CI: coverage report | ✅ | the `coverage` CI job (cargo-llvm-cov) |
 | S27 | `#![deny(missing_docs)]` all crates | ✅ | all 8 library crates; `cargo doc -D warnings` clean |
 | S28 | Known-limitations + claim-boundary in README | ✅ | README "What this is / what it is NOT" + the IP-blind caveat + "Security status" |

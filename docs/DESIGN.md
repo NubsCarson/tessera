@@ -26,6 +26,8 @@ behavioral anti-bot remains an arms race that, worst case, degrades to a CAPTCHA
 
 ## 1. Architecture (one flow)
 
+> **Scope note:** this is the *ambitious-first* flow (the §0 "proposed direction"); the shielded-pool, Loopix/Sphinx mixnet, and residential-egress nodes below are **proposed/unbuilt** (the `ShieldedPool` is future work, see §10 "**Then:**"). The **built, recommended-default** path is the leaner **ARC-token-over-Tor** loop — credential-gated clean exit, **no channel, no shielded pool, no mixnet, no on-chain court on the common path** — see [`ARCHITECTURE.md`](./ARCHITECTURE.md). Everything here is research-grade and UNAUDITED.
+
 ```
 CLIENT (real-browser persona; holds an anonymous credential)
   │  funds once: ETH → shielded pool (unlinkable) → opens a ZK payment channel
@@ -45,7 +47,7 @@ ON-CHAIN  (court only): pool open/close, bonds, slashing on provable fraud, per-
 Layers are **decoupled**: transport hides the client; egress provides reach; the credential pays +
 admits + rate-limits; on-chain is a dispute court, never a per-request path.
 
-## 2. Payment layer — ZK Spilman channel (the corrected core)
+## 2. Payment layer — ZK Spilman channel (the optional-advanced tier — see ARCHITECTURE.md; the recommended default is the ARC token-gated path)
 
 **Primitive:** a **ZK Spilman channel** — unidirectional, monotone-decrementing, single payee (the
 relayer). *Not* Lightning/eltoo/Poon-Dryja. Key realization: **a network-access rail needs a payee,
@@ -172,7 +174,7 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
   `RefundUser`), with chain-facing sigs now **EVM-native secp256k1/`ecrecover`** (keccak digest;
   identity = the 20-byte ETH address). `contracts/ChannelRegistry.sol` (Foundry) mirrors it:
   open/cooperative-close/unilateral+challenge/slash-equivocation/refund-on-timeout, all verified by
-  `ecrecover`, **with a Rust↔Solidity cross-language vector proven on-chain** (61 forge tests; a real
+  `ecrecover`, **with a Rust↔Solidity cross-language vector proven on-chain** (the full Foundry suite — run `forge test`; a real
   Rust-signed state closes a channel). **✅ M1 (relayer on-chain bond) done:** the relayer now funds
   separate slashable collateral (`fundRelayerBond`), returned on every honest close and forfeited to
   the user — together with the escrow — on provable relayer equivocation (`slashRelayerEquivocation`,

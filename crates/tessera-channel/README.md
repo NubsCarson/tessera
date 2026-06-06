@@ -40,15 +40,22 @@ boundary:
 | **2a** | The off-chain channel **protocol / state machine** — user-signed states, sign-then-serve co-signing, proof-of-relay, off-chain dispute resolution | ✅ **yes — this is it** |
 | **2b** | The Groth16 `R_dec` **ZK circuit** that *hides the balance* | ❌ **not here** |
 | **2c** | The EVM `ChannelRegistry` dispute/settlement court | ✅ **the Solidity court is in [`contracts/`](../../contracts)**; this crate now produces the secp256k1/`ecrecover`-verifiable signatures it consumes |
-| **2c** | The `ShieldedPool` (unlinkable funding) + Groth16 dispute verifier | ❌ **not here** |
+| **2c** | The `ShieldedPool` (unlinkable funding) + Groth16 dispute verifier | ❌ **not here** — `ShieldedPool` does not exist yet; the Groth16 `RDecVerifier` *does* exist in [`contracts/`](../../contracts) but from a **TEST-ONLY trusted setup**, not in this crate |
 
 Concretely, the things this crate **does not do** and does not pretend to:
 
 - **No zero-knowledge.** `cost`, `balance` and `seq` are in the clear and checked
   arithmetically. The Phase 2b ZK layer will later prove the *same* transition in
   zero-knowledge; it only adds **balance privacy**, it does **not** change the
-  protocol correctness proven here. The state commitment is a plain SHA-256
-  where the full design uses a Poseidon-in-circuit commitment.
+  protocol correctness proven here. The signed cleartext state commitment is a
+  plain SHA-256 where the full design uses a Poseidon-in-circuit commitment. The
+  ZK-path **commitment scaffolding does now ship** here, though: [`src/poseidon.rs`](src/poseidon.rs)
+  computes the Poseidon-over-BN254 state commitment, and
+  [`ChannelState::poseidon_commitment`](src/state.rs) / [`zk_state_digest`](src/state.rs)
+  expose it as the field element / signed digest the Phase 2b-i `R_dec` circuit
+  proves (cross-pinned to [`circuits/R_dec.circom`](../../circuits/R_dec.circom) by
+  `tests/poseidon_regression.rs` and the `rdec_vector` example). It is a commitment
+  + digest, **not** a prover — no proofs are generated or verified in this crate.
 - **No chain *in this crate*. No money moves *here*.** `tessera-channel` itself
   has no `ChannelRegistry`, no CLTV, no bonds, no gas: "Escrow", "open",
   "refund-on-timeout" and "slash" are **verdicts** ([`settle`](src/settlement.rs)
@@ -56,7 +63,11 @@ Concretely, the things this crate **does not do** and does not pretend to:
   [`contracts/`](../../contracts) is the on-chain court that *enforces* those
   verdicts (escrow, cooperative/unilateral close, equivocation slash,
   refund-on-timeout) and verifies this crate's signatures with `ecrecover`. There
-  is still **no `ShieldedPool`** (unlinkable funding) and **no Groth16 verifier**.
+  is still **no `ShieldedPool`** (unlinkable funding). A Groth16 `RDecVerifier` for
+  the `R_dec` ZK-settlement path now *does* exist in [`contracts/`](../../contracts)
+  and is wired into `ChannelRegistry.cooperativeCloseZK`, but it is generated from a
+  **TEST-ONLY single-party trusted setup** (it needs a real multi-party MPC ceremony
+  before any value) — and none of it is in *this* crate.
 - **No transport / onion / mixnet.** "Serve" (the relayer forwarding the packet)
   is modeled as a returned `Served` marker / a `RelayAck` receipt, not real
   forwarding. That lives in `tessera-relay` / the transport layer.
@@ -132,9 +143,13 @@ verifies in Rust and in the Solidity court**. That match is pinned, not assumed:
 - A **non-forking linear rollback** (the user re-presenting an *older*
   doubly-signed state, rather than forking) produces **no attributable object** —
   exactly as `DESIGN.md` §2 admits. It is covered there by `seq` + countersig +
-  a **watchtower**, which is a stated safety component and is **out of scope**
-  here. `settle` takes the highest doubly-signed `seq` it is *given* as truth; it
-  cannot, from the states alone, know an older state was substituted.
+  a **watchtower**. The watchtower's pure decision core now ships here
+  ([`src/watchtower.rs`](src/watchtower.rs): hold the highest doubly-signed state,
+  challenge a stale on-chain close with it); the **live wrapper** (polling the
+  chain and broadcasting the `challenge` tx within the court window) is the
+  operational integration still **out of scope** here. `settle` itself takes the
+  highest doubly-signed `seq` it is *given* as truth; it cannot, from the states
+  alone, know an older state was substituted.
 - The proof-of-relay model is **per-claim, single-receipt**: the relayer is paid
   against the highest-`seq` doubly-signed state for which it can show a receipt
   (the cumulative balance prices in every prior unit). A more granular per-unit
@@ -161,7 +176,15 @@ verifies in Rust and in the Solidity court**. That match is pinned, not assumed:
   (`issue_challenge` / `verify_and_cosign` / `issue_relay_ack`).
 - [`src/settlement.rs`](src/settlement.rs) — the off-chain court: `settle` →
   `Verdict::{Settle, SlashUser, RefundUser}`.
+- [`src/poseidon.rs`](src/poseidon.rs) — the **Phase 2b-i** Poseidon-over-BN254
+  commitments (`state_commitment` / `chan_id_from_key` / `freshness_tag` /
+  `rate_nullifier`), `new_circom`-pinned byte-for-byte to circomlib so the field
+  elements match the `R_dec` circuit. Commitment scaffolding only — no proving.
+- [`src/watchtower.rs`](src/watchtower.rs) — the watchtower's pure decision core
+  (`Watchtower` / `WatchtowerAction`): hold the highest doubly-signed state and
+  decide whether to challenge a stale on-chain unilateral close. The live
+  chain-polling/broadcast wrapper is out of scope (see Honest limits).
 
 Std host crate, `#![forbid(unsafe_code)]`, MSRV 1.74, deps from the workspace set
 (`k256` with the `ecdsa` feature, `sha3` for keccak256, `sha2`, `rand_core`,
-`hex`).
+`hex`, and `light-poseidon` + `ark-bn254` + `ark-ff` for the Poseidon commitment).

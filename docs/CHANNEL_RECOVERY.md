@@ -22,7 +22,7 @@ ChannelState { chan_id: [u8;32], balance: u64, seq: u64, salt: [u8;32] }
 ```
 
 The on-the-wire unit of truth is not the struct but its **commitment**
-`S_i = SHA256("tessera-channel/state/v1" || chan_id || balance || seq || salt)`
+`S_i = SHA256(len || "tessera-channel/state/v1" || chan_id || balance || seq || salt)`
 (`ChannelState::commitment`). Parties do not sign the struct; they sign a digest folded
 over that commitment — the *chain-facing* `keccak256` digest
 `ChannelState::state_digest` (`= keccak256(len || "tessera-channel/state-sig/v1" || S_i)`),

@@ -57,21 +57,21 @@ macros at all.
 
 ### 2.1 Exit — `tessera-proxy` ([`src/main.rs`](../crates/tessera-proxy/src/main.rs))
 
-All output is the startup banner (lines 86–102), printed once before the accept
+All output is the startup banner (lines 228–244), printed once before the accept
 loop. It prints the **bind address**, the route mode (`direct` / `via Tor`), a
 **freshly minted demo credential** to paste into an example `curl`, and usage
 text. None of it is request-derived. After the banner the process just sleeps
-(line 104–106); the accept loop logs nothing per connection.
+(line 247, `std::thread::sleep`); the accept loop logs nothing per connection.
 
 ### 2.2 Relay — `tessera-relay` ([`src/main.rs`](../crates/tessera-relay/src/main.rs))
 
 Two cases:
 
 - **Deploy mode** (both `TESSERA_RELAY_LISTEN` and `TESSERA_EXIT_ADDR` set,
-  lines 53–57): one startup line printing the relay's bind address and its
+  lines 224–227): one startup line printing the relay's bind address and its
   fixed exit address (`-> exit {exit_addr}`). The exit address is the relay's
   one legitimate forwarding target; printing it is not a privacy leak.
-- **Local all-in-one demo** (lines 96–121): a multi-line banner describing the
+- **Local all-in-one demo** (lines 267–292): a multi-line banner describing the
   loop, the relay/exit addresses, a single demo presentation header, and the
   honest "this proves the loop LOCALLY … a real Tor-403 site needs a real clean
   egress IP" caveat.
@@ -86,9 +86,9 @@ header"). The channel-mode handler (`handle_channel`,
 
 ### 2.3 Issuer — `tessera-issuer` ([`src/main.rs`](../crates/tessera-issuer/src/main.rs))
 
-Startup banner (lines 82–113): the issuer's **bind address**, the key source and
+Startup banner (lines 303–332): the issuer's **bind address**, the key source and
 an **8-byte public-key fingerprint** (`hex::encode(&pk.serialize()[..8])`,
-line 67 — public material, the same fingerprint clients pin via
+line 301 — public material, the same fingerprint clients pin via
 `TESSERA_ISSUER_PK`), the gate mode (PoW difficulty, or PAID + the public
 `TokenMint` address), and client setup hints. Nothing per issuance.
 
@@ -102,11 +102,11 @@ buyer identifier. This only fires in PAID mode and only on disk failure.
 
 Runs on the **user's own machine**, so its output is the least sensitive (it is
 the one party already allowed to know everything about itself). It prints to
-**stderr**: a TOFU warning when no `TESSERA_ISSUER_PK` pin is set (lines 64–67),
-"obtaining a … credential from issuer {issuer}…" (lines 72–82, names the issuer
-host the user themselves configured), and "credential obtained." (line 84). To
-**stdout**: a startup banner (lines 101–110) including the user's own route
-(`you → proxy → RELAY → EXIT → destination`) and the honest issuance-IP caveat.
+**stderr**: a TOFU warning when no `TESSERA_ISSUER_PK` pin is set (lines 244–249),
+"obtaining a … credential from issuer {issuer}…" (lines 266 and 276–277, names the
+issuer host the user themselves configured), and "credential obtained." (line 284). To
+**stdout**: a startup banner (lines 300–309) including the user's own route
+(`you → (this proxy) → RELAY → EXIT → destination`) and the honest issuance-IP caveat.
 No per-request output.
 
 ### 2.5 Tower demo — `tessera-tower-demo` ([`src/main.rs`](../crates/tessera-tower-demo/src/main.rs))
@@ -136,10 +136,11 @@ integration test (`tests/loop.rs`) reads to *prove* the split — e.g. assert th
 relay's `Observer.targets()` only ever contains the exit, never the destination.
 Crucially, the two binaries that run relay/exit serve loops — `tessera-proxy`
 and `tessera-relay` — **never wire an observer**: the exit uses
-`serve`/`serve_observed_shaped` with observer `None` (`tessera-proxy/src/main.rs:73`;
-and `tessera-relay/src/main.rs:76` via `tessera_proxy::serve`, which is
-`serve_observed(.., None)` — [`proxy/src/lib.rs:94`](../crates/tessera-proxy/src/lib.rs)),
-and the relay uses `tessera_relay::serve(.., None)` (`tessera-relay/src/main.rs:57,83`).
+`serve_observed_shaped` with observer `None` (`tessera-proxy/src/main.rs:215`;
+and in the all-in-one relay binary via `tessera_proxy::serve`, which is
+`serve_observed(.., None)` — [`proxy/src/lib.rs:94`](../crates/tessera-proxy/src/lib.rs) —
+called as `serve_exit(..)` at `tessera-relay/src/main.rs:247`),
+and the relay uses `tessera_relay::serve(.., None)` (`tessera-relay/src/main.rs:228,254`).
 The `tessera-issuer` binary has no observer at all. So the observers record
 nothing in any shipped node. They are an assertion harness, not telemetry, and an
 operator **MUST NOT** wire a persisting observer into a real node (it would record
@@ -187,9 +188,9 @@ Notes for the reviewer:
 
 | Emitter | Could it link client↔dest / leak the protected half? | Verdict |
 |---|---|---|
-| Exit startup banner (`proxy/main.rs:86–102`) | No request data; the demo header is a *minted* credential, not a presented one | **Safe** |
-| Relay startup banner (`relay/main.rs:53–57, 96–121`) | Prints relay+exit addresses (relay's legitimate next hop) and a demo header; never a destination | **Safe** |
-| Issuer banner (`issuer/main.rs:82–113`) | Bind addr + public key fingerprint + gate mode; no issuance data | **Safe** |
+| Exit startup banner (`proxy/main.rs:228–244`) | No request data; the demo header is a *minted* credential, not a presented one | **Safe** |
+| Relay startup banner (`relay/main.rs:224–227, 267–292`) | Prints relay+exit addresses (relay's legitimate next hop) and a demo header; never a destination | **Safe** |
+| Issuer banner (`issuer/main.rs:303–332`) | Bind addr + public key fingerprint + gate mode; no issuance data | **Safe** |
 | Issuer ledger WARN (`mint.rs:346,351`) | Prints an `io::Error`, not a buyer/address; PAID mode + disk-fault only | **Safe** |
 | Client banner/stderr (`tessera-client.rs`) | Runs on the user's own host; names the user's own issuer/route | **Safe (local)** |
 | `Observer` / `ExitObservation` | *Would* record dest (exit) or client (relay) if persisted — but is `None` in every node | **Safe as shipped; do not wire into prod** |

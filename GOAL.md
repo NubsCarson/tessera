@@ -57,7 +57,7 @@ A milestone is **done** only when it is *proven*, not merely written. Concretely
 | 7 | **`tessera-origin`** — transport-agnostic `OriginGuard` that verifies a presentation header and enforces the limit + double-spend, ignoring source IP | `tests/guard.rs`: admit/missing/malformed/replay/wrong-context, distinct tags | ✅ **proven** |
 | 8 | **`tessera-client`** — obtains a credential, mints a presentation header per request | exercised by the demo + guard tests | ✅ **proven** |
 | 9 | **Tor binding** — expose the origin as an onion service; client connects over a real Tor circuit (SOCKS5); admitted purely on the credential | `cargo run -p tessera-demo -- --tor` builds a real `.onion`; live round-trip needs host Tor egress | ✅ **implemented** ‡ |
-| 10 | **Hardening pass** — constant-time fix, fuzzing of all deserializers, criterion benchmarks, threat-model doc | 18-finding adversarial audit applied; 5 fuzz targets run clean (found+fixed 1 panic); stable robustness test; benches; `docs/THREAT_MODEL.md` | ✅ **done** (audit, not external) § |
+| 10 | **Hardening pass** — constant-time fix, fuzzing of all deserializers, criterion benchmarks, threat-model doc | 18-finding adversarial audit applied; cargo-fuzz targets run clean (found+fixed 1 panic); stable robustness test; benches; `docs/THREAT_MODEL.md` | ✅ **done** (audit, not external) § |
 
 † The original gate ("every §10.2 ARC *proof* blob byte-exact") is blocked by
 an upstream test-vector inconsistency: the committed ARC proof blobs do not
@@ -71,8 +71,8 @@ blobs are regenerated. Full write-up + reproduction in
 § "Done" here means the internal hardening pass landed: an 18-finding
 adversarial multi-agent audit (constant-time, soundness, panic-safety,
 cleanliness) was applied; the secret-dependent range-proof bit decomposition is
-now branchless (`subtle`); 5 `cargo-fuzz` targets cover every deserializer +
-`sigma::verify` + the origin guard and run clean (the fuzzer found and we fixed a
+now branchless (`subtle`); `cargo-fuzz` targets cover every deserializer +
+`sigma::verify` + the origin guard + the channel wire + the full ARC lifecycle and run clean (the fuzzer found and we fixed a
 real `limit < 2` panic); a stable-toolchain robustness test gives CI no-panic
 coverage; criterion benches exist; and `docs/THREAT_MODEL.md` is published. This
 is **not** a third-party security audit — that remains the bar before protecting
@@ -150,9 +150,9 @@ An adversarial review panel triaged the remaining ideas. These are intentionally
 - **Key epochs / rotation on the wire**, **batch verification**, **ristretto255
   ciphersuite**, **wasm build** — each is a real protocol-surface or scope
   expansion better done with a concrete driving use case.
-- **`#![deny(missing_docs)]`** — the one remaining cosmetic item; ~52 pub items
-  would need doc lines. A pre-0.1.0 docs pass, not blocking.
 
-(Since shipped, no longer deferred: `zeroize`-on-key-drop — `keys.rs` zeroizes
-the secret scalars on `Drop`; `CONTRIBUTING.md` / `CHANGELOG.md` / README badges;
+(Since shipped, no longer deferred: `#![deny(missing_docs)]` — now on all 8
+library crates and doc-gated in CI (`cargo doc --no-deps` under
+`RUSTDOCFLAGS=-D warnings`); `zeroize`-on-key-drop — `keys.rs` zeroizes the
+secret scalars on `Drop`; `CONTRIBUTING.md` / `CHANGELOG.md` / README badges;
 per-crate READMEs; and the proof-of-work issuance gate + Tor proxy above.)

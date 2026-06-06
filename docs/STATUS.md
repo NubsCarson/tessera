@@ -51,17 +51,12 @@
 
 ## Verification (counts, re-measured for this doc)
 
-- **Rust:** 135 `#[test]` functions across the **host-workspace** crates (run by
-  `cargo test`); the host workspace contains no `#[tokio::test]` (the lone
-  `#[tokio::test]` in the repo is the excluded `tessera-tower-demo` e2e). The two
-  excluded crates run in their own CI jobs: `tessera-tower-demo` (1
-  `#[tokio::test]`) and `tessera-wasm` (4 `#[wasm_bindgen_test]` + 2 native
-  `#[test]`).
-- **Foundry:** 61 test/invariant/fuzz functions across the six
-  `contracts/test/*.t.sol` files.
-- **Fuzz:** 6 `cargo-fuzz` targets (`fuzz/fuzz_targets/`): the wire/codec
-  decoders, the scalar/element deserializers, `presentation_verify`, and the
-  origin-guard check.
+- **Rust:** ~159 `#[test]` functions across the **host-workspace** crates (re-measured ~159 passing under `cargo test --workspace --all-features`; run the suite for the exact figure); the host workspace contains no `#[tokio::test]` (the lone `#[tokio::test]` in the repo is the parenthesized `#[tokio::test(flavor = "multi_thread", ...)]` in the excluded `tessera-tower-demo` e2e). The two excluded crates run in their own CI jobs: `tessera-tower-demo` (1 `#[tokio::test]`) and `tessera-wasm` (4 `#[wasm_bindgen_test]` + 2 native `#[test]`).
+- **Foundry:** ~78 test/invariant/fuzz functions across the seven
+  `contracts/test/*.t.sol` suites (ChannelRegistry, CourtAdversarial,
+  CourtInvariant, CrossLanguageVector, RDecVerifier, Reentrancy, TokenMint);
+  run `forge test` for the exact figure.
+- **Fuzz:** 7 `cargo-fuzz` targets (`fuzz/fuzz_targets/`): `arc_lifecycle`, `channel_wire`, `wire_from_bytes`, the scalar/element deserializers (`deserialize_scalar`/`deserialize_element`), `presentation_verify`, and `origin_guard_check`.
 - **CI gates (host):** `cargo test`, `cargo clippy --all-targets --all-features
   --locked -- -D warnings`, `cargo fmt --check`, `cargo doc --workspace`
   (`-D warnings`). All 8 library crates carry `#![deny(missing_docs)]`; the 7
@@ -74,15 +69,17 @@
 
 ## Reconciliations (where the other docs need reading-in-this-light)
 
-- **Test counts.** [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md) snapshot
-  says "~138 Rust workspace tests + 61 Foundry tests + 6 fuzz targets." That
-  all-in figure reconciles exactly: **135** host-workspace `#[test]` + **2**
-  excluded-crate `tessera-wasm` native `#[test]` (`native_roundtrip.rs`) + **1**
-  excluded-crate `tessera-tower-demo` `#[tokio::test]` = **138**. STATUS.md's
-  per-component "where it lives" rows count the **135** host markers (run by
-  `cargo test`); the 3 excluded-crate tests (plus the 4 `#[wasm_bindgen_test]`
-  headless-node tests) run in their own CI jobs. Foundry (61) and fuzz (6) match
-  exactly. The two docs agree.
+- **Test counts.** [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md)'s snapshot
+  states "~162 Rust test functions + 78 Foundry tests + 7 fuzz targets." Treat
+  these as approximate, re-measured aggregates, not pins — per `CLAUDE.md`/`AGENTS.md`,
+  run the suite rather than trusting any stated count. The ~162 all-in Rust figure
+  is the host-workspace tests run by `cargo test` plus the excluded-crate tests that
+  run in their own CI jobs: `tessera-wasm` (native `#[test]` in `native_roundtrip.rs`
+  plus 4 `#[wasm_bindgen_test]` headless-node tests) and `tessera-tower-demo`
+  (`#[tokio::test]` e2e). STATUS.md's per-component "where it lives" rows count only
+  the host markers; the excluded crates are gated separately. Foundry (78, across the
+  seven `contracts/test/*.t.sol` suites) and fuzz (7 targets) match what CEILING
+  reports. So measured the same way, the two docs agree.
 - **TEE status nuance.** README §"Run it yourself" presents the dstack TEE as the
   verifiable-relay deploy; [`docs/DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md)
   §3 is the precise statement and governs: the TEE compose wires **only relay +

@@ -43,20 +43,20 @@ block 1–21), and the `tessera-relay` ASCII diagram, `crates/tessera-relay/src/
 
 | Node | Binary | Bind (compose / node mode) | Crate role |
 |---|---|---|---|
-| **Client proxy** | `tessera-client` | `127.0.0.1:8120` (code default, `tessera-client.rs:17,44`) | local `CONNECT` proxy the user points a browser/curl at (`crates/tessera-relay/src/bin/tessera-client.rs`) |
+| **Client proxy** | `tessera-client` | `127.0.0.1:8120` (code default, `tessera-client.rs:17,120`) | local `CONNECT` proxy the user points a browser/curl at (`crates/tessera-relay/src/bin/tessera-client.rs`) |
 | **Issuer** | `tessera-issuer` | `127.0.0.1:8121` | credential authority; PoW- or payment-gated ARC issuance (`crates/tessera-issuer/src/main.rs`) |
 | **Relay** | `tessera-relay` | `0.0.0.0:8119` set by compose `TESSERA_RELAY_LISTEN` (`docker-compose.yaml:60`); node mode has no code default (`main.rs:42-59`), the only code default is the local-demo `127.0.0.1:8119` (`main.rs:79`) | credential-blind first hop (`crates/tessera-relay/src/main.rs:42-59`) |
-| **Exit** | `tessera-proxy` | `0.0.0.0:8118` set by compose `TESSERA_LISTEN` (`docker-compose.yaml:46`); code default when unset is `127.0.0.1:8118` (`tessera-proxy/src/main.rs:41`) | credential-gated `CONNECT`; egresses from its own IP (`crates/tessera-proxy/src/main.rs`) |
+| **Exit** | `tessera-proxy` | `0.0.0.0:8118` set by compose `TESSERA_LISTEN` (`docker-compose.yaml:46`); code default when unset is `127.0.0.1:8118` (`tessera-proxy/src/main.rs:36`) | credential-gated `CONNECT`; egresses from its own IP (`crates/tessera-proxy/src/main.rs`) |
 
 The full loop is verified end-to-end in-process by
 `crates/tessera-relay/tests/network.rs` (credential over the wire → 200 through
-the loop → auto re-issue → pin mismatch rejected), per `DEPLOY.md` lines 88–91.
+the loop → auto re-issue → pin mismatch rejected), per `DEPLOY.md` lines 97–100.
 
 ## 2. Data flow & what stays opaque
 
 1. **Client → Issuer (direct).** The client obtains a credential, paying the PoW
    (`obtain_credential`) or proving an on-chain entitlement (`obtain_credential_paid`,
-   `tessera-client.rs:70-83`). **This connection is direct**, so the issuer sees
+   `tessera-client.rs:34,264-283`). **This connection is direct**, so the issuer sees
    the client's source IP (§4). ARC issuance is blind: the issuer cannot tie the
    credential it signs to any later presentation.
 2. **Client → Relay (outer CONNECT).** The client proxy opens an *outer*
@@ -74,7 +74,7 @@ the loop → auto re-issue → pin mismatch rejected), per `DEPLOY.md` lines 88�
    over-budget spend → `Decision::Reject` → **407** and never reaches the
    destination, `tessera-proxy/src/lib.rs:205-214`), then egresses `direct` or via
    Tor (`TESSERA_UPSTREAM`,
-   `tessera-proxy/src/main.rs:42-49`). The destination sees the **exit's** IP.
+   `tessera-proxy/src/main.rs:69-94`). The destination sees the **exit's** IP.
 
 TLS is end-to-end through the whole chain (the tunnel is opaque CONNECT bytes),
 so **no node sees plaintext** — the runtime image carries `ca-certificates` only
@@ -85,8 +85,8 @@ for tooling, never to terminate TLS (`Dockerfile:24-26`).
 ARC is **keyed-verification**: the exit needs the issuer's *server secret* to
 verify presentations, so the **issuer and exit share one ARC server key**. They
 converge on it via a single `TESSERA_KEY_FILE` — `ensure_shared_key` is a
-single-winner create that cannot diverge (`tessera-issuer/src/main.rs:51-56`,
-`tessera-proxy/src/main.rs:53-56`; `ensure_shared_key` re-exported from
+single-winner create that cannot diverge (`tessera-issuer/src/main.rs:287-290`,
+`tessera-proxy/src/main.rs:191-192`; `ensure_shared_key` re-exported from
 `crates/tessera-issuer/src/lib.rs:40`). In the local compose this is a shared
 Docker volume (`deploy/docker-compose.yaml:35-36,50-51,83-87`).
 
@@ -99,7 +99,7 @@ malicious exit and a malicious issuer are, cryptographically, the same actor (th
 The file-based key is fine on a trusted host / shared volume but is the weakest
 point of a multi-host deployment: the secret lands on disk. The intended fix is
 to **derive the shared key from the dstack KMS and seal it to the enclaves** so it
-never touches a disk (`DEPLOY.md` lines 153–158); wiring that derivation is
+never touches a disk (`DEPLOY.md` lines 162–167); wiring that derivation is
 explicitly the next step and is **not done** — the TEE compose
 (`deploy/dstack/docker-compose.yaml`) deliberately wires only relay + exit and
 defers the issuer/client + key bootstrap (`dstack/docker-compose.yaml:14-17`).
@@ -109,7 +109,7 @@ defers the issuer/client + key bootstrap (`dstack/docker-compose.yaml:14-17`).
 Obtaining a credential is a **direct client→issuer connection**, so the issuer
 learns the **client's source IP and the time of issuance** — stated bluntly in
 `THREAT_MODEL.md` §3.5, `DEPLOY.md` "Honest limits", and the binary's own doc
-comment (`tessera-client.rs:8-11`, runtime warning `:107-109`). ARC issuance
+comment (`tessera-client.rs:8-11`, runtime warning `:306-308`). ARC issuance
 unlinkability still holds: the issuer **cannot** tie that IP to any later
 presentation/browsing. But the *act* of issuance is not hidden by this protocol.
 
@@ -130,9 +130,9 @@ of that node alone.
 | Node | Learns | Trusted for | Cannot see / cannot do |
 |---|---|---|---|
 | **Client proxy** | everything (it is the user's own machine) | nothing by others — it is *your* agent | n/a (local; bound to `127.0.0.1`, not a public service, `docker-compose.yaml:78-80`) |
-| **Issuer** | client **source IP + issuance time** (direct connection); that *some* credential was minted; (paid mode) the buyer's Ethereum address | gating issuance (PoW difficulty floor `MIN_DIFFICULTY=1`, refuses `0`/wide-open, `tessera-issuer/src/main.rs:38-49`); not over-issuing entitlements (durable ledger, paid mode) | which presentation/browsing a credential it signed maps to (ARC blind issuance); the destination; plaintext |
+| **Issuer** | client **source IP + issuance time** (direct connection); that *some* credential was minted; (paid mode) the buyer's Ethereum address | gating issuance (PoW difficulty floor `MIN_DIFFICULTY=1`, refuses `0`/wide-open, `tessera-issuer/src/main.rs:48-50,178`); not over-issuing entitlements (durable ledger, paid mode) | which presentation/browsing a credential it signed maps to (ARC blind issuance); the destination; plaintext |
 | **Relay** | **{client peer, exit address}**; connection timing/volume | being credential-blind and **not logging or colluding** (the core split-trust assumption) | the destination (inside opaque bytes, `lib.rs:213-218`); the credential (`lib.rs:195-197`); plaintext; cannot be an open proxy (`lib.rs:222-223`) |
-| **Exit** | **{destination (inner CONNECT host:port), that a valid in-budget token was presented}**; its own egress IP is seen by the destination | verifying credentials (holds the shared ARC key); enforcing the per-credential budget (`OriginGuard`, `LIMIT=64`) and per-IP human-volume shaping (`VolumeShaper`, M5, `tessera-proxy/src/main.rs:64-73`); operating a **clean** egress IP (external — see below) | the client's IP/identity; plaintext |
+| **Exit** | **{destination (inner CONNECT host:port), that a valid in-budget token was presented}**; its own egress IP is seen by the destination | verifying credentials (holds the shared ARC key); enforcing the per-credential budget (`OriginGuard`, `LIMIT=64`) and per-IP human-volume shaping (`VolumeShaper`, M5, `tessera-proxy/src/main.rs:206-215`); operating a **clean** egress IP (external — see below) | the client's IP/identity; plaintext |
 
 (The split-trust ledger types make the asymmetry concrete: the relay's
 `Observation` (`crates/tessera-relay/src/lib.rs:97-103`) records the exit's
@@ -153,7 +153,7 @@ Joining those two views re-links a client to its destination.
   distrusting parties and must not log.** This is exactly why the TEE variant
   exists: an attested enclave lets a client *verify* the relay is running this
   open-source image and *physically cannot* be modified to log
-  (`DEPLOY.md` lines 104–110; `dstack/docker-compose.yaml:7-12`). The TEE
+  (`DEPLOY.md` lines 115–119; `dstack/docker-compose.yaml:7-12`). The TEE
   addresses the **trust** axis (non-logging relay), **not** the clean-egress axis.
 - **Issuer + Exit are *inside* one boundary, not across it.** They already share
   the ARC key (§3); treating them as separate non-colluding parties buys nothing.
@@ -162,7 +162,7 @@ Joining those two views re-links a client to its destination.
   issuer key (`TESSERA_ISSUER_PK`) so a substituted/MITM issuer is rejected;
   paid mode **requires** the pin and binds the buyer's control signature to the
   issuer pk, blocking a relay/MITM from wormholing the entitlement to a different
-  issuer (`tessera-client.rs:58-62`; `THREAT_MODEL.md` §3.5 last paragraph).
+  issuer (`tessera-client.rs:191-195`; `THREAT_MODEL.md` §3.5 last paragraph).
 - **Issuer ⟂ Exit for *linkage* is N/A by construction.** Even full
   issuer↔exit collusion cannot link issuance to presentation, because ARC
   issuance is blind (`THREAT_MODEL.md` §3.2 "Link a presentation back to
