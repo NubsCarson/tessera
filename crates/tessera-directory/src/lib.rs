@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use k256::ecdsa::signature::{Signer, Verifier};
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
+use sha2::{Digest, Sha256};
 use tessera_arc::group::NE;
 
 const MAGIC: &str = "tessera-exit-directory-v1";
@@ -47,6 +48,36 @@ impl Display for DirectoryError {
 }
 
 impl std::error::Error for DirectoryError {}
+
+/// Parse comma-separated SEC1 directory signer public-key pins from hex.
+pub fn parse_signer_pins_csv(raw: &str) -> Result<Vec<Vec<u8>>, DirectoryError> {
+    if raw.trim().is_empty() {
+        return Err(DirectoryError::new(
+            "directory signer pin list cannot be empty",
+        ));
+    }
+    raw.split(',')
+        .enumerate()
+        .map(|(idx, part)| {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                return Err(DirectoryError::new(format!(
+                    "directory signer pin entry {} is empty",
+                    idx + 1
+                )));
+            }
+            let hex_str = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+            let signer = hex::decode(hex_str).map_err(|e| {
+                DirectoryError::new(format!(
+                    "directory signer pin entry {} is not valid hex: {e}",
+                    idx + 1
+                ))
+            })?;
+            validate_signer_pk(&signer)?;
+            Ok(signer)
+        })
+        .collect()
+}
 
 /// Signed capacity and key-epoch metadata for one exit key domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -385,13 +416,26 @@ impl DirectorySnapshot {
 
     /// Parse an unsigned directory snapshot in canonical text form.
     pub fn parse_unsigned(text: &str) -> Result<Self, DirectoryError> {
-        parse_unsigned_snapshot(text)
+        let ParsedDirectoryText {
+            snapshot,
+            signatures,
+        } = parse_directory_text(text, false)?;
+        if !signatures.is_empty() {
+            return Err(DirectoryError::new(
+                "unsigned directory snapshot must not contain signatures",
+            ));
+        }
+        Ok(snapshot)
     }
 
     /// Serialize this unsigned snapshot in canonical text form.
     pub fn to_text(&self) -> Result<String, DirectoryError> {
         String::from_utf8(self.canonical_payload()?)
             .map_err(|e| DirectoryError::new(format!("canonical payload was not utf8: {e}")))
+    }
+
+    fn canonical_hash_hex(&self) -> Result<String, DirectoryError> {
+        Ok(hex::encode(Sha256::digest(self.canonical_payload()?)))
     }
 
     /// Select an accepting entry by id, or pick the highest-weight accepting entry.
@@ -411,23 +455,8 @@ impl DirectorySnapshot {
                 let entry = self.entries.iter().find(|e| e.id == id).ok_or_else(|| {
                     DirectoryError::new(format!("directory has no entry with id {id}"))
                 })?;
-                if !entry.accepting_new_clients {
-                    return Err(DirectoryError::new(format!(
-                        "directory entry {id} is not accepting new clients"
-                    )));
-                }
-                if entry.capacity.available_sessions == 0 {
-                    return Err(DirectoryError::new(format!(
-                        "directory entry {id} has no available session capacity"
-                    )));
-                }
-                if let Some(min_epoch) = policy.min_key_epoch {
-                    if entry.capacity.key_epoch < min_epoch {
-                        return Err(DirectoryError::new(format!(
-                            "directory entry {id} key epoch {} is below required {min_epoch}",
-                            entry.capacity.key_epoch
-                        )));
-                    }
+                if let Some(err) = selection_error(entry, policy) {
+                    return Err(err);
                 }
                 Ok(entry)
             }
@@ -615,6 +644,7 @@ pub enum DirectoryStateCheck {
 pub struct DirectoryState {
     path: PathBuf,
     last_sequence: Option<u64>,
+    last_snapshot_hash: Option<String>,
     last_key_epochs: BTreeMap<String, u64>,
 }
 
@@ -635,6 +665,7 @@ impl DirectoryState {
         Ok(Self {
             path,
             last_sequence: state.last_sequence,
+            last_snapshot_hash: state.last_snapshot_hash,
             last_key_epochs: state.last_key_epochs,
         })
     }
@@ -654,8 +685,9 @@ impl DirectoryState {
                 return Ok(DirectoryStateCheck::Same);
             }
         }
-        self.write(sequence, &self.last_key_epochs)?;
+        self.write(sequence, None, &self.last_key_epochs)?;
         self.last_sequence = Some(sequence);
+        self.last_snapshot_hash = None;
         Ok(DirectoryStateCheck::Advanced)
     }
 
@@ -666,6 +698,7 @@ impl DirectoryState {
     ) -> Result<DirectoryStateCheck, DirectoryError> {
         snapshot.validate()?;
         let sequence = snapshot.sequence;
+        let snapshot_hash = snapshot.canonical_hash_hex()?;
         let mut snapshot_epochs = BTreeMap::new();
         for entry in &snapshot.entries {
             snapshot_epochs.insert(entry.id.clone(), entry.capacity.key_epoch);
@@ -677,33 +710,22 @@ impl DirectoryState {
                     "directory rollback rejected: sequence {sequence} < last accepted {last}"
                 )));
             }
-            if sequence == last && !self.last_key_epochs.is_empty() {
-                for (id, epoch) in &snapshot_epochs {
-                    match self.last_key_epochs.get(id) {
-                        Some(last_epoch) if epoch < last_epoch => {
-                            return Err(DirectoryError::new(format!(
-                                "directory key-epoch rollback rejected for {id}: epoch {epoch} < last accepted {last_epoch}"
-                            )));
-                        }
-                        Some(last_epoch) if epoch > last_epoch => {
-                            return Err(DirectoryError::new(format!(
-                                "directory key epoch for {id} changed from {last_epoch} to {epoch} without advancing sequence {sequence}"
-                            )));
-                        }
-                        Some(_) => {}
-                        None => {
-                            return Err(DirectoryError::new(format!(
-                                "directory entry {id} appeared without advancing sequence {sequence}"
-                            )));
-                        }
+            if sequence == last {
+                match &self.last_snapshot_hash {
+                    Some(last_hash) if &snapshot_hash == last_hash => {
+                        return Ok(DirectoryStateCheck::Same);
+                    }
+                    Some(last_hash) => {
+                        return Err(DirectoryError::new(format!(
+                            "directory same-sequence equivocation rejected: sequence {sequence} snapshot hash {snapshot_hash} != last accepted {last_hash}"
+                        )));
+                    }
+                    None => {
+                        return Err(DirectoryError::new(format!(
+                            "directory same-sequence snapshot rejected: state for sequence {sequence} does not include a snapshot hash; publish a higher sequence"
+                        )));
                     }
                 }
-                return Ok(DirectoryStateCheck::Same);
-            }
-            if sequence == last {
-                self.write(sequence, &snapshot_epochs)?;
-                self.last_key_epochs = snapshot_epochs;
-                return Ok(DirectoryStateCheck::Same);
             }
         }
 
@@ -719,8 +741,9 @@ impl DirectoryState {
             merged_epochs.insert(id.clone(), *epoch);
         }
 
-        self.write(sequence, &merged_epochs)?;
+        self.write(sequence, Some(&snapshot_hash), &merged_epochs)?;
         self.last_sequence = Some(sequence);
+        self.last_snapshot_hash = Some(snapshot_hash);
         self.last_key_epochs = merged_epochs;
         Ok(DirectoryStateCheck::Advanced)
     }
@@ -738,6 +761,7 @@ impl DirectoryState {
     fn write(
         &self,
         sequence: u64,
+        snapshot_hash: Option<&str>,
         key_epochs: &BTreeMap<String, u64>,
     ) -> Result<(), DirectoryError> {
         let parent = self.path.parent().filter(|p| !p.as_os_str().is_empty());
@@ -764,6 +788,12 @@ impl DirectoryState {
             })?;
         write!(file, "{STATE_MAGIC}\nlast_sequence={sequence}\n")
             .map_err(|e| DirectoryError::new(format!("could not write directory state: {e}")))?;
+        if let Some(hash) = snapshot_hash {
+            validate_snapshot_hash(hash)?;
+            writeln!(file, "snapshot_hash={hash}").map_err(|e| {
+                DirectoryError::new(format!("could not write directory state: {e}"))
+            })?;
+        }
         for (id, epoch) in key_epochs {
             validate_token("state entry id", id)?;
             writeln!(file, "entry_epoch={id}|{epoch}").map_err(|e| {
@@ -787,6 +817,7 @@ impl DirectoryState {
 #[derive(Default)]
 struct StateFile {
     last_sequence: Option<u64>,
+    last_snapshot_hash: Option<String>,
     last_key_epochs: BTreeMap<String, u64>,
 }
 
@@ -796,15 +827,34 @@ struct ParsedDirectoryText {
 }
 
 fn entry_selectable(entry: &ExitDirectoryEntry, policy: &DirectorySelectionPolicy) -> bool {
-    if !entry.accepting_new_clients || entry.capacity.available_sessions == 0 {
-        return false;
+    selection_error(entry, policy).is_none()
+}
+
+fn selection_error(
+    entry: &ExitDirectoryEntry,
+    policy: &DirectorySelectionPolicy,
+) -> Option<DirectoryError> {
+    if !entry.accepting_new_clients {
+        return Some(DirectoryError::new(format!(
+            "directory entry {} is not accepting new clients",
+            entry.id
+        )));
+    }
+    if entry.capacity.available_sessions == 0 {
+        return Some(DirectoryError::new(format!(
+            "directory entry {} has no available session capacity",
+            entry.id
+        )));
     }
     if let Some(min_epoch) = policy.min_key_epoch {
         if entry.capacity.key_epoch < min_epoch {
-            return false;
+            return Some(DirectoryError::new(format!(
+                "directory entry {} key epoch {} is below required {min_epoch}",
+                entry.id, entry.capacity.key_epoch
+            )));
         }
     }
-    true
+    None
 }
 
 fn validate_field(name: &str, value: &str) -> Result<(), DirectoryError> {
@@ -863,19 +913,6 @@ fn parse_u64_line(line: Option<&str>, prefix: &str, missing: &str) -> Result<u64
         .ok_or_else(|| DirectoryError::new(missing))?;
     raw.parse::<u64>()
         .map_err(|e| DirectoryError::new(format!("{prefix} value is not a u64: {e}")))
-}
-
-fn parse_unsigned_snapshot(text: &str) -> Result<DirectorySnapshot, DirectoryError> {
-    let ParsedDirectoryText {
-        snapshot,
-        signatures,
-    } = parse_directory_text(text, false)?;
-    if !signatures.is_empty() {
-        return Err(DirectoryError::new(
-            "unsigned directory snapshot must not contain signatures",
-        ));
-    }
-    Ok(snapshot)
 }
 
 fn parse_directory_text(
@@ -1010,10 +1047,16 @@ fn parse_state(text: &str) -> Result<StateFile, DirectoryError> {
     let seq = parse_u64_line(lines.next(), "last_sequence=", "missing last_sequence")?;
     let mut state = StateFile {
         last_sequence: Some(seq),
+        last_snapshot_hash: None,
         last_key_epochs: BTreeMap::new(),
     };
     for line in lines {
-        if let Some(rest) = line.strip_prefix("entry_epoch=") {
+        if let Some(hash) = line.strip_prefix("snapshot_hash=") {
+            validate_snapshot_hash(hash)?;
+            if state.last_snapshot_hash.replace(hash.to_string()).is_some() {
+                return Err(DirectoryError::new("duplicate snapshot_hash line"));
+            }
+        } else if let Some(rest) = line.strip_prefix("entry_epoch=") {
             let (id, epoch) = rest
                 .split_once('|')
                 .ok_or_else(|| DirectoryError::new("entry_epoch must be id|epoch"))?;
@@ -1046,6 +1089,18 @@ fn parse_state(text: &str) -> Result<StateFile, DirectoryError> {
         }
     }
     Ok(state)
+}
+
+fn validate_snapshot_hash(hash: &str) -> Result<(), DirectoryError> {
+    let bytes = hex::decode(hash)
+        .map_err(|e| DirectoryError::new(format!("snapshot_hash is not valid hex: {e}")))?;
+    if bytes.len() != 32 {
+        return Err(DirectoryError::new(format!(
+            "snapshot_hash must be 32 bytes, got {}",
+            bytes.len()
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1364,7 +1419,58 @@ mod tests {
             .check_snapshot_and_record(&changed)
             .expect_err("same-sequence epoch changes must fail closed");
         assert!(
-            err.to_string().contains("without advancing sequence"),
+            err.to_string().contains("same-sequence equivocation"),
+            "{err}"
+        );
+
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn rollback_state_rejects_same_sequence_snapshot_mutation() {
+        let dir = std::env::temp_dir().join(format!(
+            "tessera-directory-state-same-hash-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut state = DirectoryState::open(&dir).unwrap();
+        let original = snapshot(10);
+        state.check_snapshot_and_record(&original).unwrap();
+        assert_eq!(
+            state.check_snapshot_and_record(&original).unwrap(),
+            DirectoryStateCheck::Same
+        );
+
+        let mut changed_addr = snapshot(10);
+        changed_addr.entries[0].relay_addr = "127.0.0.1:9999".to_string();
+        let err = state
+            .check_snapshot_and_record(&changed_addr)
+            .expect_err("same-sequence address changes must fail closed");
+        assert!(
+            err.to_string().contains("same-sequence equivocation"),
+            "{err}"
+        );
+
+        let mut changed_capacity = snapshot(10);
+        changed_capacity.entries[0].capacity.available_sessions = 0;
+        let err = state
+            .check_snapshot_and_record(&changed_capacity)
+            .expect_err("same-sequence capacity changes must fail closed");
+        assert!(
+            err.to_string().contains("same-sequence equivocation"),
+            "{err}"
+        );
+
+        let mut removed_entry = snapshot(10);
+        removed_entry.entries.pop();
+        let err = state
+            .check_snapshot_and_record(&removed_entry)
+            .expect_err("same-sequence entry removal must fail closed");
+        assert!(
+            err.to_string().contains("same-sequence equivocation"),
             "{err}"
         );
 

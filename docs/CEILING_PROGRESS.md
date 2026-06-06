@@ -17,7 +17,7 @@
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
 - **SHOULD tier: 33/34** — hardening + completeness. The ONLY open item is **S34** (PIR / green-routing / x402 egress lanes) — the irreducibly-external clean-egress frontier, not buildable here.
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** 187 host-workspace Rust `#[test]` markers + 78 Foundry
+- **Verification:** 214 host-workspace Rust `#[test]` markers + 78 Foundry
   tests + 7 fuzz targets, all green; CI green on `main`.
 
 ## MUST — done
@@ -64,32 +64,32 @@ Pre-ship readiness review (26-agent, 5-lens) → all blockers fixed → tagged `
 
 ## Architecture pivot (the leaner ecash-token + Tor path — `docs/ARCHITECTURE.md`)
 
-| Item | Status | Commit |
+| Item | Status | Evidence |
 |---|---|---|
 | Decision doc (what we built vs. leaner path, why) | ✅ | `dc56d41` |
 | Performance/latency analysis (speed matters; pivot is faster) | ✅ | `f5dc1c2` |
-| ETH-paid token mint rail (`TokenMint.sol` + 13 forge tests) | ✅ | (this commit) |
-| Leaner-default e2e proof (token + 2-hop loop + M5 shaping, no channel) | ✅ | (this commit) |
+| ETH-paid token mint rail (`TokenMint.sol` + 13 forge tests) | ✅ | `21ccd78`; `contracts/src/TokenMint.sol`, `contracts/test/TokenMint.t.sol` |
+| Leaner-default e2e proof (token + 2-hop loop + M5 shaping, no channel) | ✅ | `bf9f56c`; `crates/tessera-relay/tests/network.rs` |
 | Channel/ZK/court demoted to optional-advanced tier (documented, kept) | ✅ | `dc56d41` |
-| Networked issuance (PoW-gated issuer node + over-the-wire credential acquisition) | ✅ | (this commit) — `tessera-issuer::net`, `tessera-client::obtain_credential` |
-| **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | (this commit) — `tessera-client` bin, proven by `tessera-relay/tests/network.rs` + a 4-process run to a real HTTPS site (200) |
-| Single-exit shared-key domain (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | (this commit) |
-| Multi-exit key-custody decision + single-domain proxy guardrails + signed directory verifier/client selector | ✅ | (this commit) — per-exit key domains, key-domain lease, optional durable spent-tag file, `tessera-directory` CLI, signed capacity/key-epoch policy, `tessera-client` directory mode |
-| Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3` + (this commit); dstack KMS provider is reserved/fail-closed, not a real KMS client |
-| Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → issue) | ✅ | (this commit) — `tessera-issuer::mint` (ecrecover proof + std-only `eth_call` read + durable ledger), `serve_issuance_paid`/`obtain_credential_paid`; proven vs real **anvil** (`tests/anvil_entitled.rs`) |
+| Networked issuance (PoW-gated issuer node + over-the-wire credential acquisition) | ✅ | `bf9f56c`; `tessera-issuer::net`, `tessera-client::obtain_credential` |
+| **Runnable client UX** (local CONNECT proxy: obtain → present → route → auto-reissue) | ✅ | `bf9f56c`; `crates/tessera-relay/src/bin/tessera-client.rs`, `crates/tessera-relay/tests/network.rs` |
+| Single-exit shared-key domain (issuer↔exit ARC key sharing, `TESSERA_KEY_FILE`) | ✅ | `f52d03b`; `tessera-issuer` / `tessera-proxy` key-file validation |
+| Multi-exit key-custody decision + single-domain proxy guardrails + signed directory verifier/client selector | ✅ | `f52d03b`, `5250875`, `e08f7eb`; per-exit key domains, key-domain lease, optional durable spent-tag file, `tessera-directory` CLI, signed capacity/key-epoch policy, `tessera-client` directory mode |
+| Containerized **full network** (issuer+relay+exit+client) + dstack TEE deploy path | ✅ | `f462be3`; `deploy/docker-compose.yaml`, `deploy/dstack/docker-compose.yaml` |
+| Paid mint wired (issuer ⟵ `TokenMint.sol` ETH purchase → issue) | ✅ | `89f218e`; `tessera-issuer::mint`, `serve_issuance_paid`/`obtain_credential_paid`, `tests/anvil_entitled.rs` |
 | Deployed **clean-IP** exit + Tor/Nym crowd + live mirrored directory operation + distributed spent tags + audit | 🔒 | external (clean egress is one blocker; stranger-safe deployment also needs the listed network/audit work; local signed directory verification/selection is built) |
 
 ## SHOULD — in progress
 
-| # | Item | Status | Commit |
+| # | Item | Status | Evidence |
 |---|------|--------|--------|
 | S4 | Property-based settlement suite | ✅ | `519da9a` |
 | S5 | Foundry court invariant + interaction-matrix fuzz (128k calls) | ✅ | `74b3acd` |
-| S7 | RDecVerifier malformed-proof negative tests | ✅ | (this commit) |
-| S6 | Wire-codec fuzz harnesses (relay header decoders) | ✅ | (this commit) |
-| S1 | Cross-layer epoch-clock authority spec (`docs/EPOCH_AUTHORITY.md`) | ✅ | (this commit) |
-| S2 | Cross-epoch nullifier-clash / replay integration test | ✅ | (this commit) |
-| S3 | Abuse/DoS model + bounded buffers (`docs/ABUSE_MODEL.md`) | ✅ | (this commit) |
+| S7 | RDecVerifier malformed-proof negative tests | ✅ | `contracts/test/RDecVerifier.t.sol` malformed-proof cases |
+| S6 | Wire-codec fuzz harnesses (relay header decoders) | ✅ | `b0068ff`; `fuzz/fuzz_targets/channel_wire.rs` |
+| S1 | Cross-layer epoch-clock authority spec (`docs/EPOCH_AUTHORITY.md`) | ✅ | `a1a123a`; `docs/EPOCH_AUTHORITY.md` |
+| S2 | Cross-epoch nullifier-clash / replay integration test | ✅ | `crates/tessera-relay/tests/cross_epoch.rs` |
+| S3 | Abuse/DoS model + bounded buffers (`docs/ABUSE_MODEL.md`) | ✅ | `c637b60`; `docs/ABUSE_MODEL.md` |
 | S8 | Reentrancy interaction-matrix fuzz | ✅ (subsumed by S5) | `74b3acd` |
 | S9 | Adversarial-caller / cross-contract court tests | ✅ | `contracts/test/CourtAdversarial.t.sol` (17 tests: attacker can't fund/close/dispute/slash/reenter) |
 | S10 | Negative channel-protocol tests | ✅ | `tessera-channel/tests/negative_protocol.rs` (non-monotone/bad-sig/replay/over-budget/malformed all rejected) |

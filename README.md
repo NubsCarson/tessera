@@ -112,8 +112,10 @@ the issuer issues against the live on-chain entitlement (`TESSERA_MINT_RPC` /
 
 For a **verifiable, non-logging relay**, deploy it into an Intel TDX **TEE via
 dstack** — a client can then *attest* that the node runs this exact open-source
-image and physically can't log. That nails the **trust** axis; the **clean-IP**
-axis stays external. See [`docs/DEPLOY.md`](./docs/DEPLOY.md).
+image under the dstack/TDX attestation assumptions. That strengthens the
+**trust** axis; the **clean-IP** axis stays external, and client attestation UX
+plus real KMS-sealed keys remain deployment work. See
+[`docs/DEPLOY.md`](./docs/DEPLOY.md).
 
 ## The problem it attacks
 
@@ -155,7 +157,7 @@ for when pay-as-you-go-with-refund is genuinely needed.
 | [`tessera-arc`](./crates/tessera-arc) | The cryptographic core: ARC over P-256 — group/hashing, issuance, presentation + integrated range proof, the SHAKE128 Fiat-Shamir / Sigma proofs, wire serialization, and the double-spend tag store. Proven against the IETF test vectors. |
 | [`tessera-issuer`](./crates/tessera-issuer) | The credential **authority**. A proof-of-work **issuance gate** ("earn your budget") *plus* **networked issuance** (`serve_issuance` — clients obtain a credential over the wire) and an optional **ETH-paid on-chain mint** (`serve_issuance_paid`: issue against a `TokenMint` purchase, `ecrecover`-proven, verified vs a live anvil chain). Also produces the `tessera-issuer` node binary. |
 | [`tessera-origin`](./crates/tessera-origin) | Server-side `OriginGuard`: admit a request on a valid, in-budget, unspent presentation — **never** on the source IP. Transport-agnostic. |
-| [`tessera-directory`](./crates/tessera-directory) | Signed, off-band exit-directory snapshots for multi-exit selection: clients pin a signer set, verify a signature threshold + validity window, reject rollback via optional local state, select one accepting exit domain, and pin that entry's full issuer public key before issuance. |
+| [`tessera-directory`](./crates/tessera-directory) | Signed, off-band exit-directory snapshots for multi-exit selection: clients pin a signer set, verify a signature threshold + validity window, reject sequence/key-epoch rollback via optional local state, enforce signed capacity/key-epoch policy, select one accepting exit domain, and pin that entry's full issuer public key before issuance. Includes the `tessera-directory` ops CLI for keygen/snapshot/sign/verify/select. |
 | [`tessera-client`](./crates/tessera-client) | Holds a credential and mints one fresh, unlinkable presentation per request; also **obtains a credential over the wire** from a networked issuer (`obtain_credential` / `obtain_credential_paid`). |
 | [`tessera-proxy`](./crates/tessera-proxy) | A credential-gated `CONNECT` proxy: IP-blind, TLS-end-to-end access to any HTTPS site, optionally over Tor. |
 | [`tessera-relay`](./crates/tessera-relay) | The first onion hop, forming the **2-hop split-trust loop**: the relay learns {client, exit} but never the destination; the exit learns {destination + that a valid token was presented} but never the client; neither sees content. **Default (recommended): ARC-token mode** — the request is gated on an unlinkable, rate-limited token checked at the credential-gated exit (proven end-to-end, no channel). It *also* has an **optional channel-payment mode** (the relay as channel counterparty, `tessera-channel`) for pay-per-request with the advanced tier. This crate also builds the runnable local **`tessera-client` proxy binary** (`src/bin/tessera-client.rs`, via `serve_client_proxy`/`CredentialSource`) — the thing you point a browser/curl at. Tested end-to-end. |
@@ -199,7 +201,7 @@ the Sigma Protocol vectors (the FS-transformed non-interactive proofs):
 | `tessera-origin` guard + `tessera-client` (real HTTP demo) | ✅ admit/reject tested; IP never read |
 | `tessera-origin` optional `tower` middleware (`TesseraLayer`) | ✅ feature-gated drop-in `Layer`; proven in a real `axum` server over a real socket (`tessera-tower-demo`) — admit/malformed/replay/fresh |
 | `tessera-origin` pluggable spent-tag store (`SpentTagStore`) | ✅ in-memory default + durable `FileTagStore`; double-spend survives a guard restart (tested) |
-| `tessera-directory` + client directory mode | ✅ signed exit-domain snapshot verification, threshold signer pins, anti-rollback state, issuer-key pin selection |
+| `tessera-directory` + client directory mode | ✅ signed exit-domain snapshot verification, threshold signer pins, signed capacity/key-epoch policy, anti-rollback state, issuer-key pin selection |
 | Tor binding (onion-service end-to-end) | ✅ implemented; live circuit needs host Tor egress |
 | `tessera-channel` — ZK Spilman channel protocol state machine (Phase 2a) | ✅ user-signed states / sign-then-serve / proof-of-relay / off-chain settlement; secp256k1+keccak chain-facing sigs |
 | `contracts/ChannelRegistry.sol` — EVM on-chain court (Phase 2c) | ✅ escrow/close/challenge/slash/refund via `ecrecover`; **Rust→Solidity cross-language vector verified**; testnet-only, UNAUDITED |

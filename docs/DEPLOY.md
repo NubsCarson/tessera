@@ -65,7 +65,6 @@ the local `cargo run` demos):
 | `TESSERA_DIRECTORY_MIN_SIGNATURES` | client | directory signature threshold (default `1`) |
 | `TESSERA_DIRECTORY_STATE_FILE` | client | optional anti-rollback state for directory sequence and per-exit key epoch |
 | `TESSERA_DIRECTORY_MIN_KEY_EPOCH` | client | optional minimum selected exit key epoch |
-| `TESSERA_DIRECTORY_STATE_FILE` | client | optional anti-rollback state file for monotonic directory sequence |
 | `TESSERA_EXIT_ID` | client | optional exact directory entry id to select |
 | `TESSERA_MINT_RPC` + `TESSERA_MINT_CONTRACT` | issuer | **paid mode**: gate issuance on an on-chain `TokenMint` purchase (RPC URL + contract address) instead of PoW |
 | `TESSERA_MINT_LEDGER` | issuer | optional durable redemption-ledger path (paid mode) |
@@ -109,13 +108,18 @@ cargo run -p tessera-relay --bin tessera-client -- --check
 ```
 
 The client verifies the pinned signer threshold, snapshot validity window, and
-optional monotonic sequence state; selects `TESSERA_EXIT_ID` if set, otherwise
-the highest-weight accepting entry; derives issuer/relay/exit addresses; and
-pins the entry's full ARC issuer public key before issuance. Directory mode
+optional monotonic sequence/per-exit key-epoch state; rejects closed or
+capacity-exhausted entries; applies `TESSERA_DIRECTORY_MIN_KEY_EPOCH` when set;
+selects `TESSERA_EXIT_ID` if set, otherwise the highest-weight accepting entry;
+derives issuer/relay/exit addresses; and pins the entry's full ARC issuer public
+key before issuance. Directory mode
 rejects manual `TESSERA_ISSUER` / `TESSERA_RELAY` / `TESSERA_EXIT` /
 `TESSERA_ISSUER_PK` overrides so a stale env var cannot silently route across
 key domains. `--check` performs the same validation and records the sequence if
-`TESSERA_DIRECTORY_STATE_FILE` is set; a later lower sequence fails closed.
+`TESSERA_DIRECTORY_STATE_FILE` is set; a later lower sequence/key epoch or a
+same-sequence snapshot hash change fails closed. Use the `tessera-directory` CLI
+to generate signer keys, build unsigned snapshots, sign them, verify thresholds,
+and inspect the selected route.
 
 ## 1. Local Docker — the whole network
 
@@ -158,9 +162,11 @@ curl -x http://127.0.0.1:8120 https://example.com
 
 **Why a TEE.** The relay must not log or collude (`{client, exit}` is sensitive).
 In an Intel TDX enclave with **remote attestation**, a client can *verify* the
-running node is exactly this open-source image before trusting it — it physically
-cannot be modified to log. The ARC server key can be **derived from the dstack
-KMS and sealed to the enclave** so it never leaves. This is the **trust** axis.
+running node matches the expected open-source image under dstack/TDX attestation
+assumptions before trusting it. The intended sealed-key path is to **derive the
+ARC server key from the dstack KMS and seal it to the enclave** so it never
+leaves; the current `dstack-kms` provider is reserved and fails closed until that
+client is implemented. This is the **trust** axis.
 
 ```sh
 # a) Build + push the image to a registry the TEE can pull:

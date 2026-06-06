@@ -24,7 +24,7 @@ use rand_core::OsRng;
 use tessera_arc::arc::{create_credential_response, Credential};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 use tessera_client::{begin_issuance, TesseraClient};
-use tessera_issuer::KeyProviderConfig;
+use tessera_issuer::{check_path_usable, KeyProviderConfig};
 use tessera_origin::{FileTagStore, OriginGuard};
 use tessera_proxy::{serve_observed_shaped, ShapingConfig, Upstream, VolumeShaper};
 
@@ -284,36 +284,6 @@ fn validate_addr(field: &str, value: &str) {
     }
 }
 
-/// Validate that a filesystem `path` the binary will read/write is plausibly
-/// usable WITHOUT blocking on the shared-key convergence loop. The key file may
-/// legitimately not exist yet, but its parent must exist and any existing target
-/// must be a regular file.
-fn check_path_usable(path: &str, what: &str) -> Result<(), String> {
-    if path.is_empty() {
-        return Err(format!("{what} is set but empty"));
-    }
-    let p = Path::new(path);
-    let parent = p.parent().filter(|d| !d.as_os_str().is_empty());
-    if let Some(dir) = parent {
-        if !dir.exists() {
-            return Err(format!(
-                "{what} {path}: parent directory {} does not exist",
-                dir.display()
-            ));
-        }
-        if !dir.is_dir() {
-            return Err(format!(
-                "{what} {path}: parent {} is not a directory",
-                dir.display()
-            ));
-        }
-    }
-    if p.exists() && !p.is_file() {
-        return Err(format!("{what} {path}: exists but is not a regular file"));
-    }
-    Ok(())
-}
-
 /// Optional durable spent-tag file for a single exit. This survives restarts but
 /// is still explicitly not a multi-process/distributed tag store.
 fn validate_spent_tag_file() -> Option<String> {
@@ -506,8 +476,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_path_usable, KeyDomainLease};
+    use super::KeyDomainLease;
     use std::io::Write;
+    use tessera_issuer::check_path_usable;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(

@@ -124,14 +124,15 @@ a live origin (track 3 ships a compiling, headless-tested wasm core + scaffold).
 ### E-a. ERC-8004 Validation Registry for attested-non-logging-relay discovery
 
 Tessera's single best trust claim is "run the relay in a TEE and a client can
-*cryptographically attest* it runs the exact non-logging open-source image — it
-physically can't keep logs." Today there's no standard place to publish or find
-that attestation; it's bespoke. [ERC-8004](https://ethereum-magicians.org/t/erc-8004-trustless-agents/25098)'s
+*cryptographically attest* it matches the expected non-logging open-source image
+under TDX/dstack assumptions." Today there's no standard place to publish or
+find that attestation; it's bespoke. [ERC-8004](https://ethereum-magicians.org/t/erc-8004-trustless-agents/25098)'s
 **Validation Registry** is, by design, "records verifiable evidence that a node
 met a constraint" and is *method-agnostic*. So a relay's TDX attestation ("I'm
-running commit X, can't log") becomes a Validation entry, and a client/agent
-queries the registry to find provably-non-logging relays **without trusting a
-central directory**. It reuses work Tessera already has (dstack TEE) and positions
+running commit X under the expected no-log image") becomes a Validation entry,
+and a client/agent queries the registry to find attested non-logging relays
+**without trusting a central directory**. It reuses work Tessera already has
+(dstack TEE) and positions
 Tessera as the privacy layer ERC-8004 deliberately omits (8004 has *no* privacy).
 **Why not yet:** purely an operator-*discovery* layer — it does nothing for the
 actual hard problem (clean egress IP, anonymity crowd, audit), and "discovery"

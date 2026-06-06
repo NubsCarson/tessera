@@ -176,6 +176,7 @@ fn snapshot_sign_verify_select_and_state_guards_work() {
     let stdout = String::from_utf8_lossy(&verify.stdout);
     assert!(stdout.contains("sequence=5"), "{stdout}");
     let state_text = std::fs::read_to_string(&state).unwrap();
+    assert!(state_text.contains("snapshot_hash="), "{state_text}");
     assert!(state_text.contains("entry_epoch=exit-a|1"), "{state_text}");
     assert!(state_text.contains("entry_epoch=exit-b|2"), "{state_text}");
 

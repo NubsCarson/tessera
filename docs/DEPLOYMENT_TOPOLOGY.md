@@ -35,8 +35,8 @@ configured entirely by env vars; no role holds *who* + *where* + *what* at once.
    never destination/content         never the client
 ```
 
-(Layout matches the `deploy/docker-compose.yaml` ASCII flow, lines 3–8 (header
-block 1–21), and the `tessera-relay` ASCII diagram, `crates/tessera-relay/src/lib.rs:5`.)
+(Layout matches the `deploy/docker-compose.yaml` header flow and the
+`tessera-relay` ASCII diagram in `crates/tessera-relay/src/lib.rs`.)
 
 "Bind (compose / node mode)" shows what the compose sets via env; the code default
 (when that env var is unset) differs and is noted inline.
@@ -50,7 +50,8 @@ block 1–21), and the `tessera-relay` ASCII diagram, `crates/tessera-relay/src/
 
 The full loop is verified end-to-end in-process by
 `crates/tessera-relay/tests/network.rs` (credential over the wire → 200 through
-the loop → auto re-issue → pin mismatch rejected), per `DEPLOY.md` lines 97–100.
+the loop → auto re-issue → pin mismatch rejected), and is described in
+[`DEPLOY.md`](./DEPLOY.md) §1.
 
 ## 2. Data flow & what stays opaque
 
@@ -127,8 +128,8 @@ This is the one IP exposure inside the system. The browsing path (client → rel
 because the relay is the only node that sees the client and it never sees the
 destination. To hide issuance too, the client must reach the issuer over an
 anonymity transport (Tor) — `obtain_credential` is transport-agnostic
-(`THREAT_MODEL.md` §3.5; `ARCHITECTURE.md` lines 114–115 notes a real Tor/Nym
-crowd must also cover this hop). In the all-localhost demo this is moot.
+(`THREAT_MODEL.md` §3.5; `ARCHITECTURE.md` notes that a real Tor/Nym crowd must
+also cover this hop). In the all-localhost demo this is moot.
 
 ## 5. Per-node trust table
 
@@ -160,10 +161,12 @@ Joining those two views re-links a client to its destination.
   other), then `{client}` from the relay joins `{destination}` from the exit and
   the split-trust property collapses. **These must be operated by mutually
   distrusting parties and must not log.** This is exactly why the TEE variant
-  exists: an attested enclave lets a client *verify* the relay is running this
-  open-source image and *physically cannot* be modified to log
-  (`DEPLOY.md` lines 115–119; `dstack/docker-compose.yaml:7-12`). The TEE
-  addresses the **trust** axis (non-logging relay), **not** the clean-egress axis.
+  exists: an attested enclave lets a client *verify* the relay matches the
+  expected open-source no-log image under dstack/TDX attestation assumptions
+  (see [`DEPLOY.md`](./DEPLOY.md) §2 and
+  [`deploy/dstack/docker-compose.yaml`](../deploy/dstack/docker-compose.yaml)).
+  The TEE addresses the **trust** axis (non-logging relay), **not** the
+  clean-egress axis.
 - **Issuer + Exit are *inside* one boundary, not across it.** They already share
   the ARC key (§3); treating them as separate non-colluding parties buys nothing.
   A malicious issuer is just the malicious origin operator of `THREAT_MODEL.md`
@@ -188,8 +191,8 @@ Joining those two views re-links a client to its destination.
   entirely to the transport (Tor). Tessera adds **zero** network-level anonymity;
   the presentation header travels in clear at the Tessera layer
   (`THREAT_MODEL.md` §3.3). Front the relay with a Tor onion service in production
-  so the relay never sees the client's real address — a deployment step **not yet
-  in the compose** (`DEPLOY.md` lines 159–160).
+  so the relay never sees the client's real address — a deployment step tracked
+  in [`DEPLOY.md`](./DEPLOY.md) §2, not wired into the default compose.
 
 ### Collusion outcome matrix
 
@@ -210,8 +213,9 @@ limits" and `THREAT_MODEL.md` §4):
 - **Clean egress IP is external.** A TEE proves the relay does not log; it does
   **not** make the exit's egress clean. TDX hosts are *datacenter* IPs — *more*
   likely to be blocked than residential. No code or enclave manufactures a clean
-  IP (`DEPLOY.md` lines 149–152; `ARCHITECTURE.md` lines 112–115;
-  `docs/IP_EGRESS_IDEAS.md`).
+  IP (see [`DEPLOY.md`](./DEPLOY.md) "Honest limits",
+  [`ARCHITECTURE.md`](./ARCHITECTURE.md), and
+  [`IP_EGRESS_IDEAS.md`](./IP_EGRESS_IDEAS.md)).
 - **PoW is a cost knob, not Sybil resistance.** Issuance gating throttles bulk
   minting but does not give a per-human guarantee; an adversary with compute
   still scales (`THREAT_MODEL.md` §4 item 3).

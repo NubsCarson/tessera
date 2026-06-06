@@ -151,8 +151,9 @@ For client routing, the built path is either direct pinning
 (`TESSERA_ISSUER_PK`) or signed-directory mode. In directory mode the client pins
 a directory signer set (`TESSERA_DIRECTORY_SIGNERS`), verifies a signature
 threshold and validity window over a snapshot, optionally records a monotonic
-sequence in `TESSERA_DIRECTORY_STATE_FILE`, selects one accepting exit entry, and
-uses that entry's full ARC issuer public key as the issuance pin. That is a
+sequence, snapshot hash, and per-exit key epoch in
+`TESSERA_DIRECTORY_STATE_FILE`, selects one accepting non-exhausted exit entry,
+and uses that entry's full ARC issuer public key as the issuance pin. That is a
 local verification layer; running a mirrored directory publisher and real
 operator governance is still deployment work.
 
@@ -191,9 +192,10 @@ attestation a client can verify the running node is exactly the open-source
 image before trusting it; combined with KMS-sealed keys, the key is bound to an
 attested measurement rather than to a readable file.
 
-This is a **trust-axis** improvement (the relay/exit physically cannot be
-modified to log or to exfiltrate the key), not a clean-IP improvement — a TDX
-host is still a datacenter egress IP (`DEPLOY.md` "Honest limits").
+This is a **trust-axis** improvement under dstack/TDX attestation assumptions
+(clients can verify the expected image before trusting it), not a clean-IP
+improvement — a TDX host is still a datacenter egress IP (`DEPLOY.md` "Honest
+limits").
 
 **Status — reserved, fail-closed provider only.** The binaries now parse
 `TESSERA_KEY_PROVIDER=ephemeral|file|dstack-kms`. `ephemeral` and `file` are

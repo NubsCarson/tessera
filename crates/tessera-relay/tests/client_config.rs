@@ -134,6 +134,7 @@ fn check_mode_accepts_signed_directory_and_records_state() {
     assert!(stdout.contains("state="), "{stdout}");
     let state_text = std::fs::read_to_string(&state).unwrap();
     assert!(state_text.contains("last_sequence=7"), "{state_text}");
+    assert!(state_text.contains("snapshot_hash="), "{state_text}");
     assert!(state_text.contains("entry_epoch=exit-b|2"), "{state_text}");
 
     let _ = std::fs::remove_dir_all(&dir);

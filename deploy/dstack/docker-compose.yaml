@@ -6,12 +6,12 @@
 #
 # Why a TEE here (the trust axis, not the clean-IP axis): the RELAY sees
 # {client, exit} and must not log or collude. In an attested enclave a client can
-# VERIFY the running node is exactly this open-source image before trusting it —
-# it physically cannot be modified to log. The ARC server key for this exit
-# domain should eventually be DERIVED from the dstack KMS and sealed to the
-# enclave (never leaves it). In this build TESSERA_KEY_PROVIDER=dstack-kms is a
-# reserved, fail-closed provider; it is not a working KMS client. The egress IP is
-# still the TEE host's (a datacenter IP) — TEE does NOT solve clean egress.
+# VERIFY the running node matches this open-source image under dstack/TDX
+# attestation assumptions. The ARC server key for this exit domain should
+# eventually be DERIVED from the dstack KMS and sealed to the enclave (never
+# leaves it). In this build TESSERA_KEY_PROVIDER=dstack-kms is a reserved,
+# fail-closed provider; it is not a working KMS client. The egress IP is still
+# the TEE host's (a datacenter IP) — TEE does NOT solve clean egress.
 #
 # Scope note: this TEE variant intentionally wires only the relay + exit. The
 # issuer/client + real KMS key-domain bootstrap (the file-volume approach in

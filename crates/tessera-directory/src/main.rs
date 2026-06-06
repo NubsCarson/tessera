@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use k256::ecdsa::SigningKey;
 use rand_core::OsRng;
 use tessera_directory::{
-    CapacityEnvelope, DirectorySelectionPolicy, DirectorySnapshot, DirectoryState,
-    ExitDirectoryEntry, SignedExitDirectory,
+    parse_signer_pins_csv, CapacityEnvelope, DirectorySelectionPolicy, DirectorySnapshot,
+    DirectoryState, ExitDirectoryEntry, SignedExitDirectory,
 };
 
 fn die(msg: impl AsRef<str>) -> ! {
@@ -113,24 +113,6 @@ fn signer_pin_hex(key: &SigningKey) -> String {
     hex::encode(key.verifying_key().to_encoded_point(true).as_bytes())
 }
 
-fn parse_signer_pins(raw: &str) -> Vec<Vec<u8>> {
-    if raw.trim().is_empty() {
-        die("--signers cannot be empty");
-    }
-    raw.split(',')
-        .enumerate()
-        .map(|(idx, part)| {
-            let trimmed = part.trim();
-            if trimmed.is_empty() {
-                die(format!("--signers entry {} is empty", idx + 1));
-            }
-            let hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-            hex::decode(hex)
-                .unwrap_or_else(|e| die(format!("--signers entry {} is not hex: {e}", idx + 1)))
-        })
-        .collect()
-}
-
 fn parse_bool(raw: &str, label: &str) -> bool {
     match raw {
         "1" | "true" | "TRUE" | "True" => true,
@@ -172,9 +154,10 @@ fn parse_entry_spec(spec: &str) -> ExitDirectoryEntry {
 
 fn load_verified_directory(
     args: &mut Vec<String>,
-) -> (SignedExitDirectory, String, usize, Option<PathBuf>) {
+) -> (SignedExitDirectory, usize, Option<PathBuf>) {
     let path = take_required(args, "--directory");
-    let signers = parse_signer_pins(&take_required(args, "--signers"));
+    let signers = parse_signer_pins_csv(&take_required(args, "--signers"))
+        .unwrap_or_else(|e| die(format!("invalid --signers: {e}")));
     let min_signatures = take_one(args, "--min-signatures")
         .map(|raw| parse_usize(&raw, "--min-signatures"))
         .unwrap_or(1);
@@ -206,7 +189,7 @@ fn load_verified_directory(
             .check_snapshot_and_record(&directory.snapshot)
             .unwrap_or_else(|e| die(format!("directory rejected by state: {e}")));
     }
-    (directory, path, min_signatures, state_path)
+    (directory, min_signatures, state_path)
 }
 
 fn cmd_keygen(mut args: Vec<String>) {
@@ -278,7 +261,7 @@ fn cmd_sign(mut args: Vec<String>) {
 }
 
 fn cmd_verify(mut args: Vec<String>) {
-    let (directory, _path, min_signatures, state_path) = load_verified_directory(&mut args);
+    let (directory, min_signatures, state_path) = load_verified_directory(&mut args);
     finish_args(&args);
     println!(
         "tessera-directory: verify OK sequence={} entries={} threshold={}{}",
@@ -299,7 +282,7 @@ fn cmd_select(mut args: Vec<String>) {
     if matches!(min_key_epoch, Some(0)) {
         die("--min-key-epoch must be non-zero");
     }
-    let (directory, _path, _min_signatures, _state_path) = load_verified_directory(&mut args);
+    let (directory, _min_signatures, _state_path) = load_verified_directory(&mut args);
     finish_args(&args);
     let policy = DirectorySelectionPolicy { min_key_epoch };
     let entry = directory

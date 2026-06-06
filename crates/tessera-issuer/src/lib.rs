@@ -38,7 +38,9 @@ pub mod key_provider;
 pub mod keyfile;
 pub mod mint;
 pub mod net;
-pub use key_provider::{KeyProviderConfig, DEFAULT_DSTACK_SOCKET, DSTACK_KMS_RESERVED_ERROR};
+pub use key_provider::{
+    check_path_usable, KeyProviderConfig, DEFAULT_DSTACK_SOCKET, DSTACK_KMS_RESERVED_ERROR,
+};
 pub use keyfile::ensure_shared_key;
 pub use net::{serve_issuance, serve_issuance_paid};
 

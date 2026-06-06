@@ -691,6 +691,7 @@ dependencies = [
  "hex",
  "k256",
  "rand_core",
+ "sha2",
  "tessera-arc",
 ]
 

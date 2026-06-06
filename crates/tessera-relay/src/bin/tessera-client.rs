@@ -18,7 +18,7 @@
 //!   `TESSERA_DIRECTORY_FILE` signed directory file; if set, derives issuer/relay/exit/pin
 //!   `TESSERA_DIRECTORY_SIGNERS` comma-separated SEC1 directory signer pk hex pins
 //!   `TESSERA_DIRECTORY_MIN_SIGNATURES` signature threshold (default `1`)
-//!   `TESSERA_DIRECTORY_STATE_FILE` optional anti-rollback state path
+//!   `TESSERA_DIRECTORY_STATE_FILE` optional sequence/hash/key-epoch state path
 //!   `TESSERA_DIRECTORY_MIN_KEY_EPOCH` optional minimum selected entry key epoch
 //!   `TESSERA_EXIT_ID`       optional directory entry id to select
 //!   `TESSERA_BUYER_KEY`     hex (32 bytes) secp256k1 secret → PAID mode (else PoW)
@@ -39,8 +39,8 @@ use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::path::PathBuf;
 
 use tessera_client::{
-    obtain_credential, obtain_credential_paid, DirectorySelectionPolicy, DirectoryState,
-    SignedExitDirectory,
+    obtain_credential, obtain_credential_paid, parse_signer_pins_csv, DirectorySelectionPolicy,
+    DirectoryState, SignedExitDirectory,
 };
 use tessera_relay::{serve_client_proxy, CredentialSource};
 
@@ -300,25 +300,11 @@ fn load_directory_signers(path_var: &str) -> Vec<Vec<u8>> {
     if raw.trim().is_empty() {
         die("config error: TESSERA_DIRECTORY_SIGNERS cannot be empty");
     }
-    raw.split(',')
-        .enumerate()
-        .map(|(idx, part)| {
-            let trimmed = part.trim();
-            if trimmed.is_empty() {
-                die(&format!(
-                    "config error: TESSERA_DIRECTORY_SIGNERS entry {} is empty",
-                    idx + 1
-                ));
-            }
-            let hex_str = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-            hex::decode(hex_str).unwrap_or_else(|e| {
-                die(&format!(
-                    "config error: TESSERA_DIRECTORY_SIGNERS entry {} is not valid hex ({e})",
-                    idx + 1
-                ))
-            })
-        })
-        .collect()
+    parse_signer_pins_csv(&raw).unwrap_or_else(|e| {
+        die(&format!(
+            "config error: invalid TESSERA_DIRECTORY_SIGNERS: {e}"
+        ))
+    })
 }
 
 fn load_directory_threshold() -> usize {

@@ -32,7 +32,7 @@ use std::net::{TcpListener, ToSocketAddrs};
 
 use rand_core::OsRng;
 use tessera_issuer::mint::{EthRpc, PaymentGate, RedemptionLedger, TOKENS_PER_CREDENTIAL};
-use tessera_issuer::{serve_issuance, serve_issuance_paid, KeyProviderConfig};
+use tessera_issuer::{check_path_usable, serve_issuance, serve_issuance_paid, KeyProviderConfig};
 
 /// Parse a `0x`-prefixed (or bare) 20-byte hex address.
 fn parse_addr(s: &str) -> Option<[u8; 20]> {
@@ -101,39 +101,6 @@ impl Config {
             }
         }
     }
-}
-
-/// Validate that a filesystem `path` the binary will read/write is plausibly
-/// usable WITHOUT blocking (no 60s shared-key wait, no network). We only confirm
-/// the parent directory exists, since a non-existent parent guarantees failure
-/// later. `what` names the var for the error message.
-fn check_path_usable(path: &str, what: &str) -> Result<(), String> {
-    if path.is_empty() {
-        return Err(format!("{what} is set but empty"));
-    }
-    let p = std::path::Path::new(path);
-    // The file itself may legitimately not exist yet (it gets created). But its
-    // parent directory must exist, or every later open will fail.
-    let parent = p.parent().filter(|d| !d.as_os_str().is_empty());
-    if let Some(dir) = parent {
-        if !dir.exists() {
-            return Err(format!(
-                "{what} {path}: parent directory {} does not exist",
-                dir.display()
-            ));
-        }
-        if !dir.is_dir() {
-            return Err(format!(
-                "{what} {path}: parent {} is not a directory",
-                dir.display()
-            ));
-        }
-    }
-    // If the path already exists, it must be a regular file we could read.
-    if p.exists() && !p.is_file() {
-        return Err(format!("{what} {path}: exists but is not a regular file"));
-    }
-    Ok(())
 }
 
 /// Read, parse, and validate every env var. Returns a fully-resolved [`Config`]

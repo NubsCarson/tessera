@@ -115,14 +115,18 @@ replicated directory of independent exit key domains:
 
 The local verification and selection layer for this target is now built:
 `tessera-directory` parses deterministic signed snapshots, verifies a pinned
-signer threshold, rejects expired or tampered snapshots, selects one accepting
-exit domain, and can persist a monotonic sequence state to reject rollback. The
-`tessera-client` binary consumes it via:
+signer threshold, rejects expired or tampered snapshots, enforces signed
+capacity/key-epoch policy, selects one accepting non-exhausted exit domain, and
+can persist sequence + snapshot-hash + per-exit key-epoch state to reject
+rollback or same-sequence equivocation. The `tessera-directory` CLI covers
+operator keygen, snapshot, sign, verify, and select flows. The `tessera-client`
+binary consumes it via:
 
 - `TESSERA_DIRECTORY_FILE`
 - `TESSERA_DIRECTORY_SIGNERS`
 - `TESSERA_DIRECTORY_MIN_SIGNATURES` (default `1`)
-- `TESSERA_DIRECTORY_STATE_FILE` (optional anti-rollback state)
+- `TESSERA_DIRECTORY_STATE_FILE` (optional anti-rollback/equivocation state)
+- `TESSERA_DIRECTORY_MIN_KEY_EPOCH` (optional selected-entry epoch floor)
 - `TESSERA_EXIT_ID` (optional exact entry)
 
 Still-needed product/ops work: a real mirrored directory publisher, operator
@@ -142,7 +146,8 @@ Built here:
   fails closed on malformed ledger state or append/sync failure.
 - Signed exit-directory snapshot verification (`crates/tessera-directory`) with
   pinned signer thresholds, validity windows, deterministic serialization,
-  highest-weight or exact-ID selection, and local anti-rollback state.
+  signed capacity/key-epoch fields, highest-weight or exact-ID selection, CLI
+  tooling, and local anti-rollback/equivocation state.
 - Client directory mode in `tessera-client --check` and runtime: signed snapshot
   → selected exit domain → full issuer-key pin before issuance, including paid
   mode without a separate `TESSERA_ISSUER_PK`.

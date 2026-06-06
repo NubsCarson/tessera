@@ -8,9 +8,8 @@
 //! runs **end-to-end** to the real upstream (e.g. `api.anthropic.com`): the
 //! proxy never sees plaintext and needs no TLS of its own.
 //!
-//! This is the "use Claude through Tor, gated on a credential not an IP"
-//! endpoint: a cooperating proxy admits anonymous, accountable traffic and
-//! relays it to any HTTPS site over Tor.
+//! A cooperating proxy admits anonymous, accountable traffic and relays it to
+//! any HTTPS site over Tor.
 //!
 //! Demo/example tooling — std-only, not a hardened production proxy.
 

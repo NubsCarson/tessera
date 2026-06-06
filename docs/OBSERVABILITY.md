@@ -13,9 +13,8 @@
 ## 1. The property being protected
 
 Tessera's anonymity rests on **split trust**: no single hop holds
-`{who}` + `{where}` + `{what}` at once. From
-[`tessera-relay/src/lib.rs`](../crates/tessera-relay/src/lib.rs) (crate docs,
-lines 14–23):
+`{who}` + `{where}` + `{what}` at once. From the crate docs in
+[`tessera-relay/src/lib.rs`](../crates/tessera-relay/src/lib.rs):
 
 - the **relay** (first hop) learns the *client's* address and the *exit's*
   address, but **never the destination** (it rides inside the opaque tunnel) and
@@ -74,11 +73,11 @@ connection.
 
 Two cases:
 
-- **Deploy mode** (both `TESSERA_RELAY_LISTEN` and `TESSERA_EXIT_ADDR` set,
-  lines 224–227): one startup line printing the relay's bind address and its
+- **Deploy mode** (both `TESSERA_RELAY_LISTEN` and `TESSERA_EXIT_ADDR` set):
+  one startup line printing the relay's bind address and its
   fixed exit address (`-> exit {exit_addr}`). The exit address is the relay's
   one legitimate forwarding target; printing it is not a privacy leak.
-- **Local all-in-one demo** (lines 267–292): a multi-line banner describing the
+- **Local all-in-one demo**: a multi-line banner describing the
   loop, the relay/exit addresses, a single demo presentation header, and the
   honest "this proves the loop LOCALLY … a real Tor-403 site needs a real clean
   egress IP" caveat.
@@ -86,16 +85,15 @@ Two cases:
 Per connection the relay prints **nothing**. Its `handle` function
 ([`src/lib.rs:184`](../crates/tessera-relay/src/lib.rs)) parses only the outer
 `CONNECT <exit>` line and explicitly never parses inside the tunnel
-(lines 195–197 comment: "we do NOT look for, log, or forward any credential
-header"). The channel-mode handler (`handle_channel`,
+(`handle` contains the "we do NOT look for, log, or forward any credential
+header" comment). The channel-mode handler (`handle_channel`,
 [`src/lib.rs:401`](../crates/tessera-relay/src/lib.rs)) reads only its three
 `Tessera-Channel-*` outer headers; still no logging.
 
 ### 2.3 Issuer — `tessera-issuer` ([`src/main.rs`](../crates/tessera-issuer/src/main.rs))
 
-Startup banner (lines 303–332): the issuer's **bind address**, the key source and
-an **8-byte public-key fingerprint** (`hex::encode(&pk.serialize()[..8])`,
-line 301 — public material, the same fingerprint clients pin via
+Startup banner: the issuer's **bind address**, the key source and an **8-byte
+public-key fingerprint** (public material, the same fingerprint clients pin via
 `TESSERA_ISSUER_PK`), the gate mode (PoW difficulty, or PAID + the public
 `TokenMint` address), and client setup hints. Nothing per issuance.
 
@@ -109,16 +107,16 @@ buyer identifier. This only fires in PAID mode and only on disk failure.
 
 Runs on the **user's own machine**, so its output is the least sensitive (it is
 the one party already allowed to know everything about itself). It prints to
-**stderr**: a TOFU warning when no `TESSERA_ISSUER_PK` pin is set (lines 244–249),
-"obtaining a … credential from issuer {issuer}…" (lines 266 and 276–277, names the
-issuer host the user themselves configured), and "credential obtained." (line 284). To
-**stdout**: a startup banner (lines 300–309) including the user's own route
+**stderr**: a TOFU warning when no `TESSERA_ISSUER_PK` pin is set,
+"obtaining a … credential from issuer {issuer}…" (names the issuer host the user
+themselves configured), and "credential obtained." To **stdout**: a startup
+banner including the user's own route
 (`you → (this proxy) → RELAY → EXIT → destination`) and the honest issuance-IP caveat.
 No per-request output.
 
 ### 2.5 Tower demo — `tessera-tower-demo` ([`src/main.rs`](../crates/tessera-tower-demo/src/main.rs))
 
-Banner only (lines 101–106): bind address and curl examples. This crate is a
+Banner only: bind address and curl examples. This crate is a
 middleware demo, not a deployment node.
 
 ### 2.6 Not request logs: examples, tests, and the `Observer`
@@ -280,10 +278,10 @@ To preserve split-trust + the no-log property, **no node may emit or store**:
   (e.g. Prometheus), expose only label-free counters/gauges.
 - **TEE deployment makes this enforceable, not just promised.** Per
   [`DEPLOY.md`](DEPLOY.md) §2, running the relay in an Intel TDX enclave with
-  remote attestation lets a client *verify* the node is exactly this
-  open-source, no-log image before trusting it — "it physically cannot be
-  modified to log." That is the strongest available answer to "trust me, I don't
-  log": the no-log property becomes attestable rather than asserted. `dstack`'s
+  remote attestation lets a client *verify* the node matches the expected
+  open-source no-log image under dstack/TDX attestation assumptions before
+  trusting it. That is the strongest available answer to "trust me, I don't
+  log": the no-log property becomes attestable rather than merely asserted. `dstack`'s
   `--public-logs` publishes the node *measurement* and its stdout logs
   ([`DEPLOY.md`](DEPLOY.md) §2); since the shipped nodes emit only the §2 startup
   banner and no per-request data (this review), those public logs contain no

@@ -76,12 +76,7 @@ impl KeyProviderConfig {
                 }
             }
             Some("dstack-kms") => {
-                if key_file.is_some() {
-                    return Err(
-                        "TESSERA_KEY_PROVIDER=dstack-kms cannot be combined with TESSERA_KEY_FILE"
-                            .to_string(),
-                    );
-                }
+                reject_key_file_with_provider("dstack-kms", key_file.as_deref())?;
                 let socket = std::env::var("TESSERA_DSTACK_SOCKET")
                     .ok()
                     .map(|s| s.trim().to_string())
@@ -163,7 +158,12 @@ fn reject_dstack_env_without_provider() -> Result<(), String> {
     Ok(())
 }
 
-fn check_path_usable(path: &str, what: &str) -> Result<(), String> {
+/// Validate that a file path a Tessera binary will read or write is usable.
+///
+/// The target file may be absent because several call sites create it later, but
+/// any parent directory must exist and any existing target must be a regular
+/// file. `what` is the env var or setting name used in the error message.
+pub fn check_path_usable(path: &str, what: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err(format!("{what} is set but empty"));
     }

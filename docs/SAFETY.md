@@ -120,9 +120,10 @@ Before exposing any node:
    traffic from your IP (§2). Understand your jurisdiction's intermediary/relay
    liability, logging obligations, and abuse-handling expectations *before* you
    start. A verifiable non-logging deployment (Intel TDX TEE via dstack,
-   `docs/DEPLOY.md`) lets a client *attest* the node can't log — that nails the
-   **trust** axis but does **not** change your egress attribution or your legal
-   posture. A clean egress IP remains external (`docs/DEPLOY.md:156-162`).
+   `docs/DEPLOY.md`) lets a client *attest* the node matches the expected no-log
+   image under dstack/TDX assumptions — that strengthens the **trust** axis but
+   does **not** change your egress attribution or your legal posture. A clean
+   egress IP remains external.
 
 7. **Mind the unauthenticated work surface.** The accept-and-parse layer runs
    before any credential check; the shipped accept-layer bounds are the
