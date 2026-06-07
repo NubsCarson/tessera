@@ -1,0 +1,43 @@
+# Hardened systemd unit for the Tessera EXIT (credential-gated egress).
+# Install: copy to /etc/systemd/system/, create /etc/tessera/exit.env (see
+# deploy/systemd/README.md) and a `tessera` user, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now tessera-exit
+[Unit]
+Description=Tessera exit (credential-gated egress)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tessera-proxy
+EnvironmentFile=/etc/tessera/exit.env
+Restart=on-failure
+RestartSec=2
+
+# Identity: a fixed user so the issuer + exit can share one ARC key file
+# (DynamicUser would give each a different UID and break the shared-key domain).
+User=tessera
+Group=tessera
+StateDirectory=tessera
+ReadWritePaths=/var/lib/tessera
+
+# Hardening — a user-space network app needs no privileges and no writable system.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,35 @@
+# Hardened systemd unit for the Tessera RELAY (credential-blind first hop).
+# Holds no key/state. See deploy/systemd/README.md.
+[Unit]
+Description=Tessera relay (credential-blind first hop)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tessera-relay
+EnvironmentFile=/etc/tessera/relay.env
+Restart=on-failure
+RestartSec=2
+
+# Stateless hop: an ephemeral DynamicUser is ideal.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
