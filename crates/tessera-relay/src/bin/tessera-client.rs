@@ -140,7 +140,10 @@ fn resolve_client_route(
     let reachable = match TcpStream::connect_timeout(&socks_resolved, ONION_PREFLIGHT_TIMEOUT) {
         Ok(_) => true,
         Err(e) => {
-            eprintln!("warning: the Tor SOCKS proxy {socks_addr} is unreachable ({e}).");
+            eprintln!(
+                "warning: {} ({e}).",
+                diagnose_tor(false, None).hint(&socks_addr)
+            );
             false
         }
     };
@@ -203,6 +206,47 @@ fn choose_route(
             relay_addr,
             exit_addr,
         }),
+    }
+}
+
+/// What the client can infer about local Tor reachability, to give an actionable
+/// hint. The local SOCKS port being up only proves the Tor *process* is running;
+/// "blocked" is only knowable once a circuit fails to build — a censor blocks the
+/// path Tor takes to the network, not the loopback SOCKS port.
+#[derive(Debug, PartialEq, Eq)]
+enum TorDiagnosis {
+    /// SOCKS port refused/absent: Tor is not running locally.
+    NotRunning,
+    /// SOCKS port up but no circuit could be built: Tor is running, but the
+    /// network may be censoring Tor — enter via a bridge.
+    LikelyBlocked,
+    /// SOCKS up and a circuit built (or circuit not yet probed).
+    Reachable,
+}
+
+/// Classify Tor reachability from the two cheap signals — whether the local SOCKS
+/// port answered, and (optionally) whether a circuit was built through it. Pure
+/// (no I/O), so the down-vs-blocked distinction is unit-testable.
+fn diagnose_tor(socks_reachable: bool, circuit_built: Option<bool>) -> TorDiagnosis {
+    match (socks_reachable, circuit_built) {
+        (false, _) => TorDiagnosis::NotRunning,
+        (true, Some(false)) => TorDiagnosis::LikelyBlocked,
+        (true, _) => TorDiagnosis::Reachable,
+    }
+}
+
+impl TorDiagnosis {
+    /// An actionable, operator-facing message — the blocked case names bridges.
+    fn hint(&self, socks_addr: &str) -> String {
+        match self {
+            TorDiagnosis::NotRunning => format!(
+                "the Tor SOCKS proxy {socks_addr} is unreachable — Tor does not appear to be running (start Tor, or set TESSERA_TOR_SOCKS)"
+            ),
+            TorDiagnosis::LikelyBlocked => format!(
+                "Tor is running ({socks_addr}) but no circuit could be built — your network may be BLOCKING Tor. Enter via a bridge: set TESSERA_PT (obfs4|snowflake|webtunnel) + TESSERA_BRIDGE_LINES (see docs/CENSORSHIP_RESISTANCE.md)"
+            ),
+            TorDiagnosis::Reachable => format!("Tor SOCKS proxy {socks_addr} is reachable"),
+        }
     }
 }
 
@@ -890,5 +934,27 @@ mod tests {
             Ok(ClientRoute::Onion { exit_onion, .. }) => assert_eq!(exit_onion, "abc.onion:443"),
             other => panic!("expected the onion lane even with clearnet opt-out, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tor_diagnosis_tells_down_from_blocked() {
+        use super::{diagnose_tor, TorDiagnosis};
+        // SOCKS port refused => Tor not running (regardless of any circuit signal).
+        assert_eq!(diagnose_tor(false, None), TorDiagnosis::NotRunning);
+        assert_eq!(diagnose_tor(false, Some(true)), TorDiagnosis::NotRunning);
+        // SOCKS up but no circuit => likely censored.
+        assert_eq!(diagnose_tor(true, Some(false)), TorDiagnosis::LikelyBlocked);
+        // SOCKS up + circuit built (or not yet probed) => reachable.
+        assert_eq!(diagnose_tor(true, Some(true)), TorDiagnosis::Reachable);
+        assert_eq!(diagnose_tor(true, None), TorDiagnosis::Reachable);
+        // The two cases give DIFFERENT, actionable messages: blocked names a bridge.
+        let blocked = TorDiagnosis::LikelyBlocked.hint("127.0.0.1:9050");
+        assert!(
+            blocked.contains("bridge") && blocked.contains("BLOCKING"),
+            "got: {blocked}"
+        );
+        let down = TorDiagnosis::NotRunning.hint("127.0.0.1:9050");
+        assert!(down.contains("not appear to be running"), "got: {down}");
+        assert_ne!(blocked, down);
     }
 }
