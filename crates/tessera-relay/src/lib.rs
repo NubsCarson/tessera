@@ -55,9 +55,9 @@
 
 pub mod channel;
 
-use std::io::{BufRead, BufReader, Read, Result, Write};
+use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -83,7 +83,7 @@ impl Drop for InflightGuard {
 use tessera_channel::{Channel, ChannelError, RelayerChannel, SignedState, Spend, VerifyingKey};
 // The relay reuses tessera-proxy's byte-pump (`pipe`) verbatim — the exact same
 // transport heart the EXIT uses — rather than reinventing it.
-use tessera_proxy::pipe;
+use tessera_proxy::{pipe, Dialer, TorSocksDialer};
 // The local client proxy ([`serve_client_proxy`]) mints presentations and, on
 // budget exhaustion, re-obtains a credential from the issuer.
 use rand_core::OsRng;
@@ -689,6 +689,135 @@ pub fn open_through_relay(
     Ok(stream)
 }
 
+/// How the local client proxy reaches the exit.
+#[derive(Debug, Clone)]
+pub enum ClientRoute {
+    /// The 2-hop clearnet loop: TCP to the relay, which forwards a nested
+    /// `CONNECT` to the exit. The relay hides the client IP from the exit.
+    Relay {
+        /// First hop — the credential-blind relay.
+        relay_addr: SocketAddr,
+        /// The exit the relay is asked to forward to.
+        exit_addr: SocketAddr,
+    },
+    /// The single-hop onion lane: dial the exit's `.onion` through a Tor SOCKS
+    /// proxy, so the exit's peer is the Tor rendezvous circuit — never the client
+    /// IP — and no separate relay is needed.
+    Onion {
+        /// Local Tor SOCKS5 endpoint, e.g. `127.0.0.1:9050`.
+        socks_addr: String,
+        /// The exit's `.onion:port` (the hostname is passed to Tor unresolved).
+        exit_onion: String,
+    },
+}
+
+/// How many times a cold-start onion dial is retried before giving up. A freshly
+/// published descriptor / building circuit can make the first dial fail
+/// transiently right after boot.
+const ONION_COLD_START_RETRIES: u32 = 3;
+
+/// Delay between cold-start onion retries.
+const ONION_RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// The onion-lane analogue of [`open_through_relay`]: SOCKS5-dial the exit's
+/// `.onion` through `socks_addr`, then write the **same** inner
+/// `CONNECT <destination>` (carrying the ARC presentation) the relay loop sends.
+/// The relay is bypassed — the Tor circuit is the outer hop, so the exit's peer
+/// is the rendezvous, never the client. Returns the stream positioned right after
+/// the exit's `200`, exactly like [`open_through_relay`].
+///
+/// Cold start: `cold_start` means the lane has not yet proven reachable this run,
+/// so a transient dial failure (descriptor still publishing / circuit building)
+/// is retried a bounded number of times with a "warming up" narration. Once the
+/// lane is warm the caller passes `cold_start = false` and a single attempt is
+/// made, so the steady-state per-request path NEVER sleeps. A *connection-refused
+/// on the SOCKS port* (Tor not running) short-circuits without retry on either
+/// path.
+pub fn open_through_onion(
+    socks_addr: &str,
+    exit_onion: &str,
+    destination: &str,
+    presentation_header: &str,
+    cold_start: bool,
+) -> Result<TcpStream> {
+    let (onion_host, onion_port) = split_onion_host_port(exit_onion)?;
+    let mut stream = onion_dial(socks_addr, &onion_host, onion_port, cold_start)?;
+
+    // INNER hop — byte-identical to the relay loop's inner CONNECT. The exit's
+    // OriginGuard is source-IP-blind, so admission is unchanged over the circuit.
+    stream.write_all(
+        format!(
+            "CONNECT {destination} HTTP/1.1\r\nTessera-Presentation: {presentation_header}\r\n\r\n"
+        )
+        .as_bytes(),
+    )?;
+    stream.flush()?;
+    expect_200(&mut stream, "exit")?;
+
+    Ok(stream)
+}
+
+/// SOCKS5-dial the exit `.onion`. On `cold_start`, a transient failure is retried
+/// a bounded number of times with a "warming up" narration; otherwise a single
+/// attempt is made (steady state never sleeps). `ConnectionRefused` (the SOCKS
+/// port is down — Tor not running) short-circuits without retry on either path.
+fn onion_dial(socks_addr: &str, host: &str, port: u16, cold_start: bool) -> Result<TcpStream> {
+    let dialer = TorSocksDialer::new(socks_addr.to_string());
+    let attempts = if cold_start {
+        ONION_COLD_START_RETRIES + 1
+    } else {
+        1
+    };
+    let mut last_err = None;
+    for attempt in 0..attempts {
+        match dialer.connect(host, port) {
+            Ok(s) => return Ok(s),
+            // The SOCKS port itself refused: Tor is not running. Don't retry.
+            Err(e) if e.kind() == ErrorKind::ConnectionRefused => return Err(e),
+            Err(e) => {
+                if attempt + 1 < attempts {
+                    eprintln!(
+                        "  onion: exit {host} not reachable yet (attempt {}/{}), service may be \
+                         warming up, retrying…",
+                        attempt + 1,
+                        ONION_COLD_START_RETRIES
+                    );
+                    thread::sleep(ONION_RETRY_DELAY);
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| Error::other("onion dial failed")))
+}
+
+/// Split an `.onion:port` (or any `host:port`) string. The host stays a string
+/// (it is a `.onion`, never resolvable to a `SocketAddr`); only the port is
+/// parsed.
+fn split_onion_host_port(target: &str) -> Result<(String, u16)> {
+    let (host, port) = target
+        .rsplit_once(':')
+        .ok_or_else(|| Error::other(format!("onion endpoint {target:?} is not host:port")))?;
+    if host.is_empty() {
+        return Err(Error::other(format!(
+            "onion endpoint {target:?} has no host"
+        )));
+    }
+    // Reject userinfo smuggling (`user@host`) and a stray ':' in the host — the
+    // same malformed-authority guard `tessera_proxy`'s `split_host_port` applies.
+    // An `.onion` is never a bracketed IPv6 literal, so ANY ':' left in the host
+    // is malformed; this keeps the two authority parsers from drifting.
+    if host.contains('@') || host.contains(':') {
+        return Err(Error::other(format!(
+            "onion endpoint {target:?} has a malformed host (stray ':' or userinfo '@')"
+        )));
+    }
+    let port: u16 = port
+        .parse()
+        .map_err(|_| Error::other(format!("onion endpoint {target:?} has a bad port")))?;
+    Ok((host.to_string(), port))
+}
+
 /// Read exactly one HTTP status block (status line + headers up to the blank
 /// line) off `stream`, one byte at a time so we never buffer past the
 /// terminating `\r\n\r\n` into the tunnel payload, and require a `200`. `who`
@@ -841,7 +970,32 @@ pub fn serve_client_proxy(
     exit_addr: SocketAddr,
     source: CredentialSource,
 ) -> thread::JoinHandle<()> {
+    serve_client_proxy_route(
+        listener,
+        ClientRoute::Relay {
+            relay_addr,
+            exit_addr,
+        },
+        source,
+    )
+}
+
+/// Like [`serve_client_proxy`], but routes over an explicit [`ClientRoute`] — the
+/// clearnet 2-hop relay loop *or* the single-hop onion lane (dial the exit's
+/// `.onion` through Tor SOCKS). The mint, the inner `CONNECT`/presentation, the
+/// `200` ACK, and the byte pump are identical on both routes; only the first hop
+/// differs.
+pub fn serve_client_proxy_route(
+    listener: TcpListener,
+    route: ClientRoute,
+    source: CredentialSource,
+) -> thread::JoinHandle<()> {
     let source = Arc::new(Mutex::new(source));
+    let route = Arc::new(route);
+    // Whether the onion lane has proven reachable this run: until the first
+    // successful onion dial, requests use the cold-start retry budget; afterwards
+    // they dial once (steady state never sleeps). Per-server, shared across conns.
+    let onion_warm = Arc::new(AtomicBool::new(false));
     let inflight = Arc::new(AtomicUsize::new(0));
     thread::spawn(move || {
         for stream in listener.incoming() {
@@ -855,21 +1009,24 @@ pub fn serve_client_proxy(
             }
             let permit = InflightGuard(Arc::clone(&inflight));
             let source = Arc::clone(&source);
+            let route = Arc::clone(&route);
+            let onion_warm = Arc::clone(&onion_warm);
             thread::spawn(move || {
                 let _permit = permit;
-                let _ = handle_client_proxy_conn(browser, relay_addr, exit_addr, &source);
+                let _ = handle_client_proxy_conn(browser, &route, &source, &onion_warm);
             });
         }
     })
 }
 
 /// Handle one inbound `CONNECT` from the user's client: parse the target, mint a
-/// presentation, open the loop, ACK the tunnel, and pump bytes.
+/// presentation, open the configured route to the exit, ACK the tunnel, and pump
+/// bytes.
 fn handle_client_proxy_conn(
     mut browser: TcpStream,
-    relay_addr: SocketAddr,
-    exit_addr: SocketAddr,
+    route: &ClientRoute,
     source: &Arc<Mutex<CredentialSource>>,
+    onion_warm: &AtomicBool,
 ) -> Result<()> {
     let target = match read_connect_target(&mut browser)? {
         Some(t) => t,
@@ -885,7 +1042,25 @@ fn handle_client_proxy_conn(
             return Ok(());
         }
     };
-    let upstream = match open_through_relay(relay_addr, exit_addr, &target, &header) {
+    let opened = match route {
+        ClientRoute::Relay {
+            relay_addr,
+            exit_addr,
+        } => open_through_relay(*relay_addr, *exit_addr, &target, &header),
+        ClientRoute::Onion {
+            socks_addr,
+            exit_onion,
+        } => {
+            // Cold-start retry only until the lane first proves reachable.
+            let cold = !onion_warm.load(Ordering::Acquire);
+            let opened = open_through_onion(socks_addr, exit_onion, &target, &header, cold);
+            if opened.is_ok() {
+                onion_warm.store(true, Ordering::Release);
+            }
+            opened
+        }
+    };
+    let upstream = match opened {
         Ok(u) => u,
         Err(_) => {
             write_status(&mut browser, "502 Bad Gateway");
@@ -923,5 +1098,51 @@ fn read_connect_target(s: &mut TcpStream) -> Result<Option<String>> {
             Ok(Some(target.to_string()))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn split_onion_host_port_parses_and_rejects_malformed() {
+        assert_eq!(
+            split_onion_host_port("abc.onion:443").unwrap(),
+            ("abc.onion".to_string(), 443)
+        );
+        // Each of these must be rejected (mirrors the proxy's authority guard).
+        for bad in [
+            "noport",             // no ':'
+            ":443",               // empty host
+            "abc.onion:notnum",   // non-numeric port
+            "abc.onion:99999",    // port > u16
+            "user@abc.onion:443", // userinfo smuggling
+            "a:b:c.onion:443",    // stray ':' in host
+        ] {
+            assert!(
+                split_onion_host_port(bad).is_err(),
+                "{bad:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn onion_dial_connection_refused_fails_fast_without_sleeping() {
+        // A closed loopback port => the SOCKS connect is refused. Even on the
+        // cold-start path, onion_dial must return immediately (no retry sleeps) so
+        // the lane fails fast instead of stalling 3×2s on a down Tor.
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = l.local_addr().unwrap();
+        drop(l);
+        let t0 = Instant::now();
+        let err = onion_dial(&dead.to_string(), "x.onion", 443, true).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ConnectionRefused);
+        assert!(
+            t0.elapsed() < ONION_RETRY_DELAY,
+            "ConnectionRefused must not sleep, took {:?}",
+            t0.elapsed()
+        );
     }
 }

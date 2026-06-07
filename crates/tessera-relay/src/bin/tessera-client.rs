@@ -35,18 +35,26 @@
 //!
 //! Then: `curl -x http://127.0.0.1:8120 https://example.com`
 
-use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use tessera_client::{
     obtain_credential, obtain_credential_paid, parse_signer_pins_csv, DirectorySelectionPolicy,
     DirectoryState, SignedExitDirectory,
 };
-use tessera_relay::{serve_client_proxy, CredentialSource};
+use tessera_relay::{serve_client_proxy_route, ClientRoute, CredentialSource};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
 const PRESENT_CTX: &[u8] = b"tessera://proxy/v1";
 const LIMIT: u64 = 64;
+
+/// Default local Tor SOCKS5 endpoint for the onion lane (`TESSERA_TOR_SOCKS`).
+const DEFAULT_TOR_SOCKS: &str = "127.0.0.1:9050";
+
+/// How long the onion preflight waits for the Tor SOCKS port before deciding Tor
+/// is down and self-skipping to the clearnet relay loop.
+const ONION_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// The issuer-pk pin must be at least this many bytes (16 hex chars) to be a
 /// meaningful fingerprint; the client library rejects anything shorter, so we
@@ -75,6 +83,53 @@ fn resolve_value(label: &str, spec: &str) -> SocketAddr {
         None => die(&format!(
             "config error: {label}={spec} did not resolve to any address"
         )),
+    }
+}
+
+/// Decide how the client reaches the exit.
+///
+/// If `TESSERA_EXIT_ONION` (an `ONION:PORT`) is set, prefer the single-hop onion
+/// lane through the local Tor SOCKS proxy (`TESSERA_TOR_SOCKS`, default
+/// `127.0.0.1:9050`) — but only if that SOCKS port is actually reachable. If Tor
+/// is not running, **self-skip cleanly** to the clearnet relay loop (the lane is
+/// additive, never a hard prerequisite). With no onion configured, use the relay.
+fn resolve_client_route(relay_addr: SocketAddr, exit_addr: SocketAddr) -> ClientRoute {
+    let relay = ClientRoute::Relay {
+        relay_addr,
+        exit_addr,
+    };
+    let exit_onion = match std::env::var("TESSERA_EXIT_ONION") {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
+        Ok(_) => die("config error: TESSERA_EXIT_ONION is set but empty (unset it for the relay loop, or give an ONION:PORT)"),
+        Err(_) => return relay,
+    };
+    // Validate ONION:PORT shape up front (fail-fast, like every other peer).
+    match exit_onion.rsplit_once(':').map(|(h, p)| (h, p.parse::<u16>())) {
+        Some((h, Ok(_))) if !h.is_empty() => {}
+        _ => die(&format!(
+            "config error: TESSERA_EXIT_ONION {exit_onion:?} must be ONION:PORT (e.g. abc…xyz.onion:443)"
+        )),
+    }
+    let socks_addr = std::env::var("TESSERA_TOR_SOCKS")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_TOR_SOCKS.to_string());
+    let socks_resolved = resolve_value("TESSERA_TOR_SOCKS", &socks_addr);
+
+    // Preflight: is the Tor SOCKS port up? Refused/timeout => Tor down => self-skip.
+    match TcpStream::connect_timeout(&socks_resolved, ONION_PREFLIGHT_TIMEOUT) {
+        Ok(_) => ClientRoute::Onion {
+            socks_addr,
+            exit_onion,
+        },
+        Err(e) => {
+            eprintln!(
+                "warning: onion lane requested (TESSERA_EXIT_ONION={exit_onion}) but the Tor SOCKS \
+                 proxy {socks_addr} is unreachable ({e}); self-skipping to the clearnet relay loop."
+            );
+            relay
+        }
     }
 }
 
@@ -364,10 +419,14 @@ fn load_directory_route(
         "TESSERA_RELAY",
         "TESSERA_EXIT",
         "TESSERA_ISSUER_PK",
+        // The onion endpoint is NOT (yet) in the signed directory, so allowing it
+        // alongside one would let an unsigned env `.onion` silently override the
+        // directory's signed exit. Fail fast, consistent with the peers above.
+        "TESSERA_EXIT_ONION",
     ] {
         if std::env::var(var).is_ok() {
             die(&format!(
-                "config error: {var} cannot be set with {path_var}; the signed directory supplies issuer/relay/exit/pin"
+                "config error: {var} cannot be set with {path_var}; the signed directory supplies issuer/relay/exit/pin (onion advertisement is not yet in the signed directory)"
             ));
         }
     }
@@ -573,8 +632,32 @@ fn main() {
         .local_addr()
         .unwrap_or_else(|e| die(&format!("could not read client proxy addr: {e}")));
 
+    // Choose the route to the exit: the single-hop onion lane if configured and
+    // Tor is up, else the 2-hop clearnet relay loop (self-skip fallback).
+    let route = resolve_client_route(relay_addr, exit_addr);
+
     println!("\nTessera client proxy live on http://{addr}");
-    println!("  route: you → (this proxy) → RELAY {relay_addr} → EXIT {exit_addr} → destination");
+    match &route {
+        ClientRoute::Relay {
+            relay_addr,
+            exit_addr,
+        } => {
+            println!(
+                "  route: you → (this proxy) → RELAY {relay_addr} → EXIT {exit_addr} → destination"
+            );
+        }
+        ClientRoute::Onion {
+            socks_addr,
+            exit_onion,
+        } => {
+            println!(
+                "  route: you → (this proxy) → Tor SOCKS {socks_addr} → EXIT {exit_onion} (.onion, single hop) → destination"
+            );
+            println!(
+                "         the exit's peer is the Tor circuit, never your IP; no separate relay needed."
+            );
+        }
+    }
     if let Some(directory) = &directory {
         println!(
             "  directory: {} entry={} seq={} threshold={} key_epoch={} capacity={}/{}{} (issuer key pinned from signed snapshot)",
@@ -597,7 +680,7 @@ fn main() {
     println!("        it to your browsing). Run this client over Tor to hide issuance too.");
     println!("\n  curl -x http://{addr} https://example.com\n");
 
-    serve_client_proxy(listener, relay_addr, exit_addr, source)
+    serve_client_proxy_route(listener, route, source)
         .join()
         .expect("client proxy thread");
 }

@@ -166,7 +166,14 @@ For the code that exists today:
   signed `tessera-directory` snapshot. Never mount one key file into independent
   exits.
 - The onion path must work or self-skip cleanly when Tor is unavailable. Onion is
-  never a hard prerequisite; the clearnet relay loop is the fallback.
+  never a hard prerequisite; the clearnet relay loop is the fallback. **Scope of
+  the self-skip:** it is a *startup* preflight — if the Tor SOCKS port is
+  unreachable at launch, the client selects the relay route instead. The preflight
+  is a TCP-liveness check only (a wedged or non-Tor listener on the SOCKS port can
+  pass it); and once the onion route is committed, a *later* Tor failure surfaces
+  as a per-request `502`, not a runtime fall-back to the relay — restart the
+  client to re-skip. Runtime fallback is deliberately omitted: silently dropping
+  to clearnet on a route chosen for anonymity is its own footgun.
 
 ## Target clean onion egress lane shape
 
@@ -214,17 +221,54 @@ Built here (the reusable core the lane stands on):
   (default `:443`), private/loopback/link-local/CGNAT/cloud-metadata rejection for
   IPv4 and IPv6 (including IPv4-mapped/NAT64/6to4 embedded forms), and
   resolve-then-pin against DNS rebinding, run as a cheap pre-credential check.
+- **The pluggable transport seam** (PR2): `tessera_proxy::transport::Dialer` with
+  `TcpDialer` + `TorSocksDialer`, so the SOCKS5 client is shared by the exit
+  (egress hop) and the client (onion hop).
+- **The client→exit onion lane** (PR3): `ClientRoute::Onion` /
+  `open_through_onion` — the local client proxy dials the exit's `.onion` through
+  Tor SOCKS (single hop, relay bypassed; the exit's peer is the Tor circuit,
+  never the client IP), with a bounded cold-start retry + "warming up" narration
+  and a preflight that **self-skips to the clearnet relay loop when Tor is
+  unavailable**. Configured by `TESSERA_EXIT_ONION` + `TESSERA_TOR_SOCKS`; proven
+  end-to-end against a SOCKS5 stub standing in for Tor.
 
 Not built here (buildable, but forward product/research scope, not hidden
 cleanup):
 
-- Client→exit Tor SOCKS/`.onion` dialer for the OUTER hop, with cold-start retry
-  and clean self-skip when Tor is unavailable.
-- A production exit-side `.onion` listener (today only the demo-crate, ephemeral
-  probe). In a non-logging TEE the onion key must be sealed to the enclave, not a
-  plain on-disk file.
+- A **persisted, sealed** exit-side onion key. The exit is reachable over
+  `.onion` today via operator Tor configuration (a `HiddenServiceDir` mapping the
+  onion to the exit's loopback port — see "Running the exit as an onion service"
+  below; the exit binary needs no code change). What is *not* built is sealing
+  that HS key to the enclave in a non-logging TEE — like the ARC server key it
+  must ride the (reserved, fail-closed) `dstack-kms` provider, not a plain file.
 - Onion-aware directory advertisement + selection (a breaking directory format
-  bump).
+  bump): the client onion endpoint is env-configured today; advertising it in the
+  signed directory is the next change.
+- Routing **issuance** over Tor: the onion lane hides the *browsing* IP from the
+  exit, but issuance still connects the client directly to the issuer (the issuer
+  learns the IP at mint/re-issue time; ARC keeps it cryptographically unlinkable).
+  Wrapping issuance in the same `TorSocksDialer` is a tightly-coupled follow-up.
+
+## Running the exit as an onion service
+
+The exit is made reachable over `.onion` by operator Tor configuration, not exit
+code: Tor maps an onion address to the exit's existing loopback listener. A
+minimal `torrc` on the exit host:
+
+```text
+HiddenServiceDir /var/lib/tor/tessera-exit/
+HiddenServicePort 443 127.0.0.1:8118
+```
+
+Tor publishes the descriptor and writes the stable `.onion` to
+`/var/lib/tor/tessera-exit/hostname`; clients set `TESSERA_EXIT_ONION` to
+`<that-onion>:443`. The exit keeps binding its loopback port (`TESSERA_LISTEN`)
+and is otherwise unchanged. **Honesty caveats:** (1) the HS key under
+`HiddenServiceDir` is a plain on-disk file — in a non-logging TEE it must instead
+be sealed to the enclave (reserved `dstack-kms` path), or a host-root/volume
+compromise reads it; (2) a freshly published descriptor can take tens of seconds
+to become reachable, which is why the client retries with a "warming up"
+narration; (3) this borrows Tor's anonymity crowd — it does not manufacture one.
 
 Never-faked externals (no code in this repo manufactures these — `CLAUDE.md`):
 
