@@ -354,6 +354,43 @@ impl ExitDirectoryEntry {
             // An `.onion:port` is a token (base32 + `.onion` + `:port`); it must
             // not contain the field/line delimiters. Same charset as the addresses.
             validate_field("onion address", onion)?;
+            // Enforce the SAME `host:port` shape the client's dial path requires
+            // (relay's `split_onion_host_port`), so a signed-but-malformed onion is
+            // rejected at parse/`--check` time instead of passing config and then
+            // failing closed at dial. Kept in lockstep with that parser.
+            self.validate_onion_authority(onion)?;
+        }
+        Ok(())
+    }
+
+    /// Mirror of `tessera_relay::split_onion_host_port`'s authority rules (the
+    /// relay crate is a layer above directory, so the shape check is duplicated
+    /// here rather than depended on): require `host:port`, a non-empty host with
+    /// no stray `:`/userinfo `@`, and a numeric `u16` port.
+    fn validate_onion_authority(&self, onion: &str) -> Result<(), DirectoryError> {
+        let (host, port) = onion.rsplit_once(':').ok_or_else(|| {
+            DirectoryError::new(format!(
+                "entry {} onion_addr {onion:?} is not host:port",
+                self.id
+            ))
+        })?;
+        if host.is_empty() {
+            return Err(DirectoryError::new(format!(
+                "entry {} onion_addr {onion:?} has no host",
+                self.id
+            )));
+        }
+        if host.contains('@') || host.contains(':') {
+            return Err(DirectoryError::new(format!(
+                "entry {} onion_addr {onion:?} has a malformed host (stray ':' or userinfo '@')",
+                self.id
+            )));
+        }
+        if port.parse::<u16>().is_err() {
+            return Err(DirectoryError::new(format!(
+                "entry {} onion_addr {onion:?} has a bad port",
+                self.id
+            )));
         }
         Ok(())
     }
@@ -1270,6 +1307,42 @@ mod tests {
         let got = parsed.snapshot.select(None).unwrap();
         assert_eq!(got.onion_addr.as_deref(), Some("abc.onion:443"));
         assert!(got.clean_egress, "clean_egress must round-trip");
+    }
+
+    #[test]
+    fn malformed_onion_authority_is_rejected_at_validate() {
+        // Each of these passes the charset filter but violates the `host:port`
+        // shape the dial path requires; validate (via with_onion) must reject them
+        // so `--check` cannot say "config OK" on an onion that dies at dial.
+        let base = || {
+            ExitDirectoryEntry::current_protocols(
+                "e",
+                "127.0.0.1:8000",
+                "127.0.0.1:8001",
+                "127.0.0.1:8002",
+                issuer_pk(1),
+                10,
+                true,
+            )
+            .unwrap()
+        };
+        for bad in [
+            "abc.onion",          // no port
+            "abc.onion:",         // empty port
+            "abc.onion:notaport", // non-numeric port
+            "abc.onion:99999",    // port > u16
+            ":443",               // no host
+            "user@abc.onion:443", // userinfo smuggling
+        ] {
+            assert!(
+                base().with_onion(Some(bad.to_string()), true).is_err(),
+                "malformed onion {bad:?} must be rejected"
+            );
+        }
+        // The well-formed control still validates.
+        assert!(base()
+            .with_onion(Some("abc.onion:443".to_string()), true)
+            .is_ok());
     }
 
     #[test]
