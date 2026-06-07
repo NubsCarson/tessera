@@ -32,7 +32,7 @@ use tessera_arc::arc::{verify_presentation, Presentation};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 
 pub mod store;
-pub use store::{FileTagStore, InMemoryTagStore, SpentTagStore, StoreError};
+pub use store::{FileTagStore, InMemoryTagStore, RedisTagStore, SpentTagStore, StoreError};
 
 /// The HTTP header carrying a hex-encoded ARC presentation.
 pub const PRESENTATION_HEADER: &str = "Tessera-Presentation";
