@@ -41,11 +41,16 @@ network.
 - a tested **2-hop split-trust access loop**, **per-IP human-volume shaping**, an
   ETH-paid **token-mint rail**, and an **optional ZK payment-channel tier** (with
   an EVM court), all CI-green;
+- **both private and uncensorable** — the onion egress is reachable from a
+  censored network via Tor pluggable-transport / bridge **entry** (obfs4 /
+  Snowflake / WebTunnel, reused from Tor, not reinvented); see
+  [`docs/CENSORSHIP_RESISTANCE.md`](./docs/CENSORSHIP_RESISTANCE.md);
 - **honest** — every limit and external hand-off is named, not hidden.
 
 **It is NOT (yet):**
 - a deployed, anonymous **network** a stranger can use — that needs clean
-  residential egress IPs at scale **+** a Tor/Nym anonymity crowd (external);
+  residential egress IPs at scale **+** a Tor/Nym anonymity crowd **+** a real
+  censor-unknown bridge population (all external);
 - **audited** — no third-party review yet; do not protect real users or funds;
 - a way to defeat a determined anti-bot system or "reach any site" — it removes
   the **IP / Tor-exit** block, not the arms race;
@@ -262,6 +267,7 @@ model, per-goal guarantees, and known gaps are in
 | [`docs/ROADMAP.md`](./docs/ROADMAP.md) | The post-v0 frontier — audit-readiness, deployable middleware, WASM client, upstream + PQ research. |
 | [`docs/NEXT_STEPS.md`](./docs/NEXT_STEPS.md) | What remains, what is external, and what would be new product scope rather than cleanup. |
 | [`docs/ONION_EGRESS.md`](./docs/ONION_EGRESS.md) | Run Tessera as a **Tor-native onion egress** (the exit *is* the onion service): one-command + two-machine deploy, the live residential-IP proof, and an honest head-to-head vs `reputation-gated-onion-egress`. |
+| [`docs/CENSORSHIP_RESISTANCE.md`](./docs/CENSORSHIP_RESISTANCE.md) | **Both private AND uncensorable**: the disguised, unblockable **entry** half (Tor obfs4/Snowflake/WebTunnel bridges, reused from Tor) layered in front of the private pipe — the layering, the per-transport honesty matrix, and what stays external. |
 | [`docs/CLEAN_ONION_EGRESS.md`](./docs/CLEAN_ONION_EGRESS.md) | The clean onion egress lane: client→exit over `.onion`, ARC-as-limiter, per-exit key domains + signed directory advertisement. |
 | [`SECURITY.md`](./SECURITY.md) | Vulnerability disclosure policy + in/out of scope. |
 | [`docs/ARC_PROOF_VECTOR_DISCREPANCY.md`](./docs/ARC_PROOF_VECTOR_DISCREPANCY.md) | The one known upstream vector inconsistency, with full reproduction. |

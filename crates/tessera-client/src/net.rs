@@ -2,6 +2,15 @@
 //! over the wire: solve the proof of work, run the blinded ARC issuance, and
 //! return a finalized [`Credential`]. The client side of the
 //! `tessera://issue-net/v1` protocol documented in [`tessera_issuer::net`].
+//!
+//! Each call has an address-based form ([`obtain_credential`] /
+//! [`obtain_credential_paid`]) that opens a direct [`TcpStream`], and a
+//! stream-based core ([`obtain_credential_on`] / [`obtain_credential_paid_on`])
+//! that runs the exchange over an already-connected `TcpStream`. The stream form
+//! is what lets a caller route issuance over **Tor** — hand it a stream dialed
+//! through a Tor SOCKS proxy to a `.onion` issuer, and the issuer no longer sees
+//! the caller's source IP (closing the issuance-time IP leak; ARC issuance is
+//! already cryptographically unlinkable from later presentations).
 
 use std::io::{Error, Result};
 use std::net::TcpStream;
@@ -28,8 +37,17 @@ const MAX_ACCEPTABLE_DIFFICULTY: u32 = 28;
 /// printed fingerprint (64-bit); a full `99`-byte pin is strongest.
 const MIN_PIN_LEN: usize = 8;
 
-/// Connect to the issuer at `issuer_addr`, pay the proof of work, and obtain a
-/// finalized credential bound to `request_context`.
+/// Set generous-but-bounded read/write deadlines on an issuance stream. The
+/// issuer does real arithmetic; allow slack but never block forever.
+fn set_issuance_timeouts(stream: &TcpStream) -> Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(60)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+    Ok(())
+}
+
+/// Connect to the issuer at `issuer_addr` over a **direct** TCP connection, pay
+/// the proof of work, and obtain a finalized credential bound to
+/// `request_context`.
 ///
 /// If `expected_pk_prefix` is `Some`, the issuer's advertised public key must
 /// start with those bytes (a pin against a substituted/MITM issuer — e.g. the
@@ -39,11 +57,25 @@ const MIN_PIN_LEN: usize = 8;
 /// returned credential to its later presentations. It is **not** anonymous at the
 /// transport layer: this opens a **direct connection to `issuer_addr`, so the
 /// issuer sees the caller's source IP and the time of issuance**. To hide that
-/// too, wrap this call in an anonymity transport (e.g. obtain the credential over
-/// Tor). ARC is keyed-verification, so the credential only verifies at an exit
-/// holding the **same** key as this issuer.
+/// too, dial a `.onion` issuer through Tor SOCKS and use [`obtain_credential_on`].
+/// ARC is keyed-verification, so the credential only verifies at an exit holding
+/// the **same** key as this issuer.
 pub fn obtain_credential(
     issuer_addr: &str,
+    request_context: &[u8],
+    expected_pk_prefix: Option<&[u8]>,
+) -> Result<Credential> {
+    let mut stream = TcpStream::connect(issuer_addr)?;
+    set_issuance_timeouts(&stream)?;
+    obtain_credential_on(&mut stream, request_context, expected_pk_prefix)
+}
+
+/// Run the PoW-gated `tessera://issue-net/v1` exchange over an
+/// **already-connected** stream (the caller sets timeouts and chooses the
+/// transport). Pass a direct [`TcpStream`] via [`obtain_credential`], or a stream
+/// dialed through a Tor SOCKS proxy to a `.onion` issuer to hide the caller's IP.
+pub fn obtain_credential_on(
+    stream: &mut TcpStream,
     request_context: &[u8],
     expected_pk_prefix: Option<&[u8]>,
 ) -> Result<Credential> {
@@ -54,13 +86,9 @@ pub fn obtain_credential(
             ));
         }
     }
-    let mut s = TcpStream::connect(issuer_addr)?;
-    // The issuer does real arithmetic; allow generous slack but never block forever.
-    s.set_read_timeout(Some(Duration::from_secs(60)))?;
-    s.set_write_timeout(Some(Duration::from_secs(30)))?;
 
     // 1. HELLO: pk(99) ‖ difficulty(4) ‖ nonce(16).
-    let hello = read_frame(&mut s)?;
+    let hello = read_frame(stream)?;
     if hello.len() != HELLO_PK_LEN + 4 + CHALLENGE_LEN {
         return Err(Error::other("issuer sent a malformed HELLO"));
     }
@@ -91,10 +119,10 @@ pub fn obtain_credential(
     let mut frame = Vec::with_capacity(8 + req_bytes.len());
     frame.extend_from_slice(&solution.counter.to_be_bytes());
     frame.extend_from_slice(&req_bytes);
-    write_frame(&mut s, &frame)?;
+    write_frame(stream, &frame)?;
 
     // 4. RESPONSE: the signed CredentialResponse (empty frame = rejected).
-    let resp = read_frame(&mut s)?;
+    let resp = read_frame(stream)?;
     if resp.is_empty() {
         return Err(Error::other(
             "issuer rejected the request (proof-of-work or arithmetic)",
@@ -108,17 +136,39 @@ pub fn obtain_credential(
 }
 
 /// Obtain a credential from a **paid** issuer (one running
-/// [`serve_issuance_paid`](tessera_issuer::serve_issuance_paid)): prove control of
-/// the Ethereum address `buyer_secret` (a 32-byte secp256k1 key) that holds the
-/// TokenMint entitlement, and receive a credential charged against it.
+/// [`serve_issuance_paid`](tessera_issuer::serve_issuance_paid)) over a direct TCP
+/// connection: prove control of the Ethereum address `buyer_secret` (a 32-byte
+/// secp256k1 key) that holds the TokenMint entitlement, and receive a credential
+/// charged against it.
 ///
 /// `expected_pk_prefix` is **required** here (≥ 8 bytes): the control signature is
 /// bound to the issuer's pk, and pinning is what prevents a relay/MITM from luring
 /// you into signing for a *different* issuer (a wormhole that would steal your
 /// entitlement). Same transport-privacy caveat as [`obtain_credential`]: a direct
-/// connection, so the issuer sees the caller's IP; wrap it in Tor for anonymity.
+/// connection, so the issuer sees the caller's IP; use [`obtain_credential_paid_on`]
+/// with a Tor-dialed stream for anonymity.
 pub fn obtain_credential_paid(
     issuer_addr: &str,
+    request_context: &[u8],
+    buyer_secret: &[u8; 32],
+    expected_pk_prefix: Option<&[u8]>,
+) -> Result<Credential> {
+    let mut stream = TcpStream::connect(issuer_addr)?;
+    set_issuance_timeouts(&stream)?;
+    obtain_credential_paid_on(
+        &mut stream,
+        request_context,
+        buyer_secret,
+        expected_pk_prefix,
+    )
+}
+
+/// Run the paid issuance exchange over an **already-connected** stream (the caller
+/// sets timeouts and chooses the transport — direct or Tor SOCKS to a `.onion`
+/// issuer). The issuer-pk pin remains **required**: it binds the control
+/// signature to this issuer, defeating the wormhole even over Tor.
+pub fn obtain_credential_paid_on(
+    stream: &mut TcpStream,
     request_context: &[u8],
     buyer_secret: &[u8; 32],
     expected_pk_prefix: Option<&[u8]>,
@@ -138,12 +188,8 @@ pub fn obtain_credential_paid(
         ));
     }
 
-    let mut s = TcpStream::connect(issuer_addr)?;
-    s.set_read_timeout(Some(Duration::from_secs(60)))?;
-    s.set_write_timeout(Some(Duration::from_secs(30)))?;
-
     // 1. HELLO: pk(99) ‖ challenge(32).
-    let hello = read_frame(&mut s)?;
+    let hello = read_frame(stream)?;
     if hello.len() != HELLO_PK_LEN + PAID_CHALLENGE_LEN {
         return Err(Error::other("issuer sent a malformed paid HELLO"));
     }
@@ -166,10 +212,10 @@ pub fn obtain_credential_paid(
     let mut frame = Vec::with_capacity(CONTROL_SIG_LEN + req_bytes.len());
     frame.extend_from_slice(&sig);
     frame.extend_from_slice(&req_bytes);
-    write_frame(&mut s, &frame)?;
+    write_frame(stream, &frame)?;
 
     // 4. RESPONSE.
-    let resp = read_frame(&mut s)?;
+    let resp = read_frame(stream)?;
     if resp.is_empty() {
         return Err(Error::other(
             "issuer rejected the request (bad proof / insufficient paid entitlement)",

@@ -25,7 +25,7 @@ use tessera_arc::arc::{create_credential_response, Credential};
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 use tessera_client::{begin_issuance, TesseraClient};
 use tessera_issuer::{check_path_usable, KeyProviderConfig};
-use tessera_origin::{FileTagStore, OriginGuard};
+use tessera_origin::{FileTagStore, OriginGuard, RedisTagStore, SpentTagStore};
 use tessera_proxy::{
     serve_observed_shaped_policy, PortRule, ShapingConfig, TargetPolicy, Upstream, VolumeShaper,
 };
@@ -303,6 +303,52 @@ fn validate_spent_tag_file() -> Option<String> {
     }
 }
 
+/// A Redis-backed spent-tag store for a **distributed, multi-replica** exit: the
+/// only correct choice behind more than one node (a per-process set lets the same
+/// presentation replay against a different replica). Configured via
+/// `TESSERA_SPENT_TAG_REDIS=HOST:PORT` (+ optional `_PASSWORD`, `_TTL` seconds).
+struct RedisTagConfig {
+    addr: String,
+    password: Option<String>,
+    ttl_secs: Option<u64>,
+}
+
+fn validate_spent_tag_redis() -> Option<RedisTagConfig> {
+    let addr = match std::env::var("TESSERA_SPENT_TAG_REDIS") {
+        Ok(a) if !a.trim().is_empty() => a.trim().to_string(),
+        Ok(_) => die(&format!(
+            "tessera-{ROLE}: config error: TESSERA_SPENT_TAG_REDIS is set but empty (unset it, or give HOST:PORT)"
+        )),
+        Err(_) => return None,
+    };
+    // Fail fast on a typo'd address (the live connect happens at serving start).
+    if addr
+        .to_socket_addrs()
+        .map(|mut a| a.next().is_none())
+        .unwrap_or(true)
+    {
+        die(&format!(
+            "tessera-{ROLE}: config error: TESSERA_SPENT_TAG_REDIS={addr} is not a resolvable HOST:PORT"
+        ));
+    }
+    let password = std::env::var("TESSERA_SPENT_TAG_REDIS_PASSWORD")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let ttl_secs = match std::env::var("TESSERA_SPENT_TAG_REDIS_TTL") {
+        Ok(s) if !s.trim().is_empty() => Some(s.trim().parse::<u64>().unwrap_or_else(|_| {
+            die(&format!(
+                "tessera-{ROLE}: config error: TESSERA_SPENT_TAG_REDIS_TTL must be a positive integer (seconds)"
+            ))
+        })),
+        _ => None,
+    };
+    Some(RedisTagConfig {
+        addr,
+        password,
+        ttl_secs,
+    })
+}
+
 /// Resolve the exit's target/egress policy from env, fail-fast on bad config.
 ///
 ///   TESSERA_TARGET_POLICY    "secure" (default) | "unrestricted"
@@ -409,6 +455,10 @@ fn main() {
     //                    issuer; unset => ephemeral self-issuing exit (the demo).
     //   TESSERA_SPENT_TAG_FILE optional durable spent-tag path for a single exit;
     //                    unset => in-memory tags (lost on restart).
+    //   TESSERA_SPENT_TAG_REDIS  HOST:PORT of a shared Redis for a MULTI-REPLICA
+    //                    exit (+ optional _PASSWORD, _TTL seconds). Mutually
+    //                    exclusive with TESSERA_SPENT_TAG_FILE. Without either,
+    //                    the in-memory default is non-durable AND non-shared.
     let args: Vec<String> = std::env::args().collect();
     let tor_arg = args.iter().any(|a| a == "--tor");
     let check = args.iter().any(|a| a == "--check");
@@ -424,6 +474,12 @@ fn main() {
         die(&format!("tessera-{ROLE}: config error: {msg}"));
     });
     let spent_tag_file = validate_spent_tag_file();
+    let spent_tag_redis = validate_spent_tag_redis();
+    if spent_tag_file.is_some() && spent_tag_redis.is_some() {
+        die(&format!(
+            "tessera-{ROLE}: config error: set only one of TESSERA_SPENT_TAG_FILE (single-process durable) or TESSERA_SPENT_TAG_REDIS (multi-replica shared), not both"
+        ));
+    }
     let target_policy = resolve_target_policy();
 
     // ---- --check: non-serving preflight (validate + bind + drop, then exit) ----
@@ -461,9 +517,10 @@ fn main() {
                     Upstream::Tor(p) => format!("tor via {p}"),
                 };
                 let key = key_provider.label();
-                let tags = match &spent_tag_file {
-                    Some(p) => format!("file:{p}"),
-                    None => "memory".to_string(),
+                let tags = match (&spent_tag_redis, &spent_tag_file) {
+                    (Some(r), _) => format!("redis:{}", r.addr),
+                    (None, Some(p)) => format!("file:{p}"),
+                    (None, None) => "memory (non-durable, single-process)".to_string(),
                 };
                 let target = target_policy.label();
                 println!("tessera-{ROLE}: config OK");
@@ -478,13 +535,40 @@ fn main() {
 
     // ---- normal serving path (config already validated above) ----
 
-    let tag_store = spent_tag_file.as_ref().map(|path| {
-        FileTagStore::open(path).unwrap_or_else(|e| {
+    // Spent-tag store precedence: shared Redis (multi-replica) > durable file
+    // (single process) > in-memory default. The default is non-durable AND
+    // non-shared, so warn LOUDLY — running it behind >1 replica silently reopens
+    // double-spend (a token spent on one replica is unknown to the others).
+    let tag_store: Option<Box<dyn SpentTagStore>> = if let Some(rc) = &spent_tag_redis {
+        let store = RedisTagStore::connect(
+            rc.addr.clone(),
+            rc.password.clone(),
+            "tessera:tag:",
+            rc.ttl_secs,
+        )
+        .unwrap_or_else(|e| {
+            die(&format!(
+                "tessera-{ROLE}: config error: TESSERA_SPENT_TAG_REDIS {}: {e}",
+                rc.addr
+            ))
+        });
+        Some(Box::new(store))
+    } else if let Some(path) = spent_tag_file.as_ref() {
+        let store = FileTagStore::open(path).unwrap_or_else(|e| {
             die(&format!(
                 "tessera-{ROLE}: config error: TESSERA_SPENT_TAG_FILE {path}: could not open tag store: {e}"
             ))
-        })
-    });
+        });
+        Some(Box::new(store))
+    } else {
+        eprintln!(
+            "warning: no spent-tag store configured — using a NON-DURABLE, in-process set. \
+             Accepted tokens are forgotten on restart, and behind more than one replica the \
+             SAME token can be spent on each (double-spend). For a real multi-node deployment set \
+             TESSERA_SPENT_TAG_REDIS=HOST:PORT (shared) or TESSERA_SPENT_TAG_FILE (single-process durable)."
+        );
+        None
+    };
 
     // Bind the (defaulted-or-explicit) listen address before taking the key-domain
     // lease, so a bind failure cannot leave a stale lease behind.
@@ -516,7 +600,7 @@ fn main() {
             REQUEST_CTX,
             PRESENT_CTX,
             LIMIT,
-            Box::new(store),
+            store,
         )),
         None => Arc::new(OriginGuard::new(sk, pk, REQUEST_CTX, PRESENT_CTX, LIMIT)),
     };

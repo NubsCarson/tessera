@@ -39,10 +39,12 @@ use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use tessera_arc::arc::Credential;
 use tessera_client::{
-    obtain_credential, obtain_credential_paid, parse_signer_pins_csv, DirectorySelectionPolicy,
-    DirectoryState, SignedExitDirectory,
+    obtain_credential, obtain_credential_on, obtain_credential_paid, obtain_credential_paid_on,
+    parse_signer_pins_csv, DirectorySelectionPolicy, DirectoryState, SignedExitDirectory,
 };
+use tessera_proxy::transport::{Dialer, TorSocksDialer};
 use tessera_relay::{
     serve_client_proxy_route, split_onion_host_port, ClientRoute, CredentialSource,
 };
@@ -138,7 +140,10 @@ fn resolve_client_route(
     let reachable = match TcpStream::connect_timeout(&socks_resolved, ONION_PREFLIGHT_TIMEOUT) {
         Ok(_) => true,
         Err(e) => {
-            eprintln!("warning: the Tor SOCKS proxy {socks_addr} is unreachable ({e}).");
+            eprintln!(
+                "warning: {} ({e}).",
+                diagnose_tor(false, None).hint(&socks_addr)
+            );
             false
         }
     };
@@ -201,6 +206,47 @@ fn choose_route(
             relay_addr,
             exit_addr,
         }),
+    }
+}
+
+/// What the client can infer about local Tor reachability, to give an actionable
+/// hint. The local SOCKS port being up only proves the Tor *process* is running;
+/// "blocked" is only knowable once a circuit fails to build — a censor blocks the
+/// path Tor takes to the network, not the loopback SOCKS port.
+#[derive(Debug, PartialEq, Eq)]
+enum TorDiagnosis {
+    /// SOCKS port refused/absent: Tor is not running locally.
+    NotRunning,
+    /// SOCKS port up but no circuit could be built: Tor is running, but the
+    /// network may be censoring Tor — enter via a bridge.
+    LikelyBlocked,
+    /// SOCKS up and a circuit built (or circuit not yet probed).
+    Reachable,
+}
+
+/// Classify Tor reachability from the two cheap signals — whether the local SOCKS
+/// port answered, and (optionally) whether a circuit was built through it. Pure
+/// (no I/O), so the down-vs-blocked distinction is unit-testable.
+fn diagnose_tor(socks_reachable: bool, circuit_built: Option<bool>) -> TorDiagnosis {
+    match (socks_reachable, circuit_built) {
+        (false, _) => TorDiagnosis::NotRunning,
+        (true, Some(false)) => TorDiagnosis::LikelyBlocked,
+        (true, _) => TorDiagnosis::Reachable,
+    }
+}
+
+impl TorDiagnosis {
+    /// An actionable, operator-facing message — the blocked case names bridges.
+    fn hint(&self, socks_addr: &str) -> String {
+        match self {
+            TorDiagnosis::NotRunning => format!(
+                "the Tor SOCKS proxy {socks_addr} is unreachable — Tor does not appear to be running (start Tor, or set TESSERA_TOR_SOCKS)"
+            ),
+            TorDiagnosis::LikelyBlocked => format!(
+                "Tor is running ({socks_addr}) but no circuit could be built — your network may be BLOCKING Tor. Enter via a bridge: set TESSERA_PT (obfs4|snowflake|webtunnel) + TESSERA_BRIDGE_LINES (see docs/CENSORSHIP_RESISTANCE.md)"
+            ),
+            TorDiagnosis::Reachable => format!("Tor SOCKS proxy {socks_addr} is reachable"),
+        }
     }
 }
 
@@ -666,6 +712,52 @@ fn bind_listener(cfg: &Config) -> TcpListener {
     })
 }
 
+/// Obtain a credential, routing issuance over **Tor** when `TESSERA_ISSUER_ONION`
+/// (the issuer's `.onion:port`) is set: dial it through the local Tor SOCKS proxy
+/// so the issuer never sees the client's IP (closing the issuance-time IP leak;
+/// ARC already keeps issuance unlinkable from browsing). Without that env, issuance
+/// uses a direct connection to `issuer` — so clearnet issuance is the explicit
+/// opt-out (just unset `TESSERA_ISSUER_ONION`). The issuer-pk pin binds on both
+/// paths (and stays mandatory in paid mode, defeating the wormhole even over Tor).
+fn obtain_credential_routed(
+    issuer: &str,
+    buyer_secret: Option<&[u8; 32]>,
+    pin: Option<&[u8]>,
+) -> std::io::Result<Credential> {
+    if let Some(issuer_onion) = std::env::var("TESSERA_ISSUER_ONION")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        let (host, port) = split_onion_host_port(&issuer_onion).map_err(|e| {
+            std::io::Error::other(format!(
+                "TESSERA_ISSUER_ONION {issuer_onion:?} must be ONION:PORT: {e}"
+            ))
+        })?;
+        let socks_addr = std::env::var("TESSERA_TOR_SOCKS")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_TOR_SOCKS.to_string());
+        eprintln!(
+            "Tessera CLIENT: routing issuance over Tor to {issuer_onion} (SOCKS {socks_addr}); \
+             the issuer will not see your IP."
+        );
+        let mut stream = TorSocksDialer::new(socks_addr).connect(&host, port)?;
+        stream.set_read_timeout(Some(Duration::from_secs(60)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+        return match buyer_secret {
+            Some(secret) => obtain_credential_paid_on(&mut stream, REQUEST_CTX, secret, pin),
+            None => obtain_credential_on(&mut stream, REQUEST_CTX, pin),
+        };
+    }
+    // Direct (clearnet) issuance — the default / opt-out path.
+    match buyer_secret {
+        Some(secret) => obtain_credential_paid(issuer, REQUEST_CTX, secret, pin),
+        None => obtain_credential(issuer, REQUEST_CTX, pin),
+    }
+}
+
 fn main() {
     let check_mode = std::env::args().skip(1).any(|a| a == "--check");
 
@@ -718,26 +810,15 @@ fn main() {
         directory,
     } = cfg;
 
-    let credential = match &buyer_secret {
-        Some(secret) => {
-            eprintln!("Tessera CLIENT: obtaining a PAID credential from issuer {issuer}…");
-            obtain_credential_paid(&issuer, REQUEST_CTX, secret, pin.as_deref()).unwrap_or_else(
-                |e| {
-                    die(&format!(
-                        "could not obtain a paid credential from {issuer}: {e}"
-                    ))
-                },
-            )
-        }
-        None => {
-            eprintln!(
-                "Tessera CLIENT: obtaining a credential from issuer {issuer} (paying proof-of-work)…"
-            );
-            obtain_credential(&issuer, REQUEST_CTX, pin.as_deref()).unwrap_or_else(|e| {
-                die(&format!("could not obtain a credential from {issuer}: {e}"))
-            })
-        }
-    };
+    if buyer_secret.is_some() {
+        eprintln!("Tessera CLIENT: obtaining a PAID credential from issuer {issuer}…");
+    } else {
+        eprintln!(
+            "Tessera CLIENT: obtaining a credential from issuer {issuer} (paying proof-of-work)…"
+        );
+    }
+    let credential = obtain_credential_routed(&issuer, buyer_secret.as_ref(), pin.as_deref())
+        .unwrap_or_else(|e| die(&format!("could not obtain a credential from {issuer}: {e}")));
     eprintln!("Tessera CLIENT: credential obtained.");
 
     let source = CredentialSource::new(
@@ -853,5 +934,27 @@ mod tests {
             Ok(ClientRoute::Onion { exit_onion, .. }) => assert_eq!(exit_onion, "abc.onion:443"),
             other => panic!("expected the onion lane even with clearnet opt-out, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tor_diagnosis_tells_down_from_blocked() {
+        use super::{diagnose_tor, TorDiagnosis};
+        // SOCKS port refused => Tor not running (regardless of any circuit signal).
+        assert_eq!(diagnose_tor(false, None), TorDiagnosis::NotRunning);
+        assert_eq!(diagnose_tor(false, Some(true)), TorDiagnosis::NotRunning);
+        // SOCKS up but no circuit => likely censored.
+        assert_eq!(diagnose_tor(true, Some(false)), TorDiagnosis::LikelyBlocked);
+        // SOCKS up + circuit built (or not yet probed) => reachable.
+        assert_eq!(diagnose_tor(true, Some(true)), TorDiagnosis::Reachable);
+        assert_eq!(diagnose_tor(true, None), TorDiagnosis::Reachable);
+        // The two cases give DIFFERENT, actionable messages: blocked names a bridge.
+        let blocked = TorDiagnosis::LikelyBlocked.hint("127.0.0.1:9050");
+        assert!(
+            blocked.contains("bridge") && blocked.contains("BLOCKING"),
+            "got: {blocked}"
+        );
+        let down = TorDiagnosis::NotRunning.hint("127.0.0.1:9050");
+        assert!(down.contains("not appear to be running"), "got: {down}");
+        assert_ne!(blocked, down);
     }
 }

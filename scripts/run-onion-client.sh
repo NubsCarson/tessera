@@ -27,6 +27,11 @@ CLIENT_LISTEN=${TESSERA_CLIENT_LISTEN:-127.0.0.1:8120}
 # so the script's own tor would fail to bind and we'd silently ride the system tor.
 SOCKS=${SOCKS_PORT:-19250}
 STATE_DIR=${TESSERA_STATE_DIR:-./.onion-client-state}
+# Censored-network entry (optional): point the client's REAL Tor at a Tor
+# pluggable transport + bridges so it reaches the network where Tor is blocked.
+# These are Tor's own transports/bridges — we only emit the torrc lines.
+PT=${TESSERA_PT:-}                       # obfs4 | snowflake | webtunnel  (unset = plain Tor)
+BRIDGE_LINES=${TESSERA_BRIDGE_LINES:-}   # newline-separated Bridge lines OR a file path
 
 command -v tor >/dev/null || { echo "error: no 'tor' on PATH"; exit 1; }
 # Build the release tessera-client if absent (it lives in the tessera-relay pkg).
@@ -34,6 +39,27 @@ command -v tor >/dev/null || { echo "error: no 'tor' on PATH"; exit 1; }
   echo "building release tessera-client (cargo build --release -p tessera-relay)…"
   cargo build --release -p tessera-relay
 }
+
+# Pluggable-transport preflight: if a PT is selected, resolve its plugin binary
+# and FAIL LOUD if it is missing — a censored user must never silently fall back
+# to plain (blocked) Tor.
+PT_PLUGIN=""
+if [ -n "$PT" ]; then
+  case "$PT" in
+    obfs4)     PT_PLUGIN=${TESSERA_PT_OBFS4PROXY:-$(command -v obfs4proxy || true)} ;;
+    snowflake) PT_PLUGIN=${TESSERA_PT_SNOWFLAKE:-$(command -v snowflake-client || true)} ;;
+    webtunnel) PT_PLUGIN=${TESSERA_PT_WEBTUNNEL:-$(command -v webtunnel-client || true)} ;;
+    *) echo "error: TESSERA_PT=$PT is not one of: obfs4 | snowflake | webtunnel" >&2; exit 1 ;;
+  esac
+  if [ -z "$PT_PLUGIN" ] || [ ! -x "$PT_PLUGIN" ]; then
+    echo "error: pluggable transport '$PT' selected but its plugin binary is missing/not executable." >&2
+    echo "       set TESSERA_PT_$(printf '%s' "$PT" | tr '[:lower:]' '[:upper:]') to the binary path, or install it" >&2
+    echo "       (Debian: 'apt install obfs4proxy'; snowflake/webtunnel from Tor Project builds)." >&2
+    exit 1
+  fi
+  [ -n "$BRIDGE_LINES" ] || { echo "error: TESSERA_PT=$PT set but TESSERA_BRIDGE_LINES is empty (need >=1 bridge)." >&2; exit 1; }
+fi
+
 mkdir -p "$STATE_DIR/tor-data"; chmod 700 "$STATE_DIR" "$STATE_DIR/tor-data"
 
 # Client torrc: SOCKS only — the asymmetry is the point. The exit PUBLISHES an
@@ -43,6 +69,20 @@ SocksPort 127.0.0.1:$SOCKS
 DataDirectory $(realpath "$STATE_DIR/tor-data")
 Log notice file $(realpath "$STATE_DIR")/tor.log
 EOF
+# When a pluggable transport is configured, append the bridge entry. The PT runs
+# INSIDE Tor; the client still dials the plain local SOCKS port above.
+if [ -n "$PT" ]; then
+  {
+    echo "UseBridges 1"
+    echo "ClientTransportPlugin $PT exec $PT_PLUGIN"
+    if [ -f "$BRIDGE_LINES" ]; then cat "$BRIDGE_LINES"; else printf '%s\n' "$BRIDGE_LINES"; fi \
+      | while IFS= read -r line; do
+          line=${line#Bridge }; line=${line# }          # tolerate a leading "Bridge " keyword
+          [ -n "$line" ] && echo "Bridge $line"
+        done
+  } >>"$STATE_DIR/torrc"
+  echo "censored-network entry: routing through $PT bridges via $PT_PLUGIN"
+fi
 
 echo "starting client Tor (SOCKS on 127.0.0.1:$SOCKS)…"
 tor -f "$STATE_DIR/torrc" & TOR_PID=$!
@@ -58,7 +98,7 @@ for _ in $(seq 1 60); do
 done
 echo
 grep -q 'Bootstrapped 100%' "$STATE_DIR/tor.log" 2>/dev/null \
-  || echo "warning: Tor did not report 'Bootstrapped 100%' within 60s; first requests may fail until circuits build (and the descriptor publish adds ~30-90s)."
+  || echo "warning: Tor did not report 'Bootstrapped 100%' within 60s. If your network BLOCKS Tor, enter via a bridge: set TESSERA_PT (obfs4|snowflake|webtunnel) + TESSERA_BRIDGE_LINES — see docs/CENSORSHIP_RESISTANCE.md. Otherwise first requests may just need more time (descriptor publish adds ~30-90s)."
 
 echo "starting tessera-client on the onion route…"
 TESSERA_EXIT_ONION="$TESSERA_EXIT_ONION" TESSERA_ISSUER="$TESSERA_ISSUER" \

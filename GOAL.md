@@ -17,7 +17,12 @@ as censorship-*obsolescence*, not evasion: give servers a trust signal better
 than IP so they have no reason to block anonymity. That remains true and is the
 right play for *cooperating* origins. The project is now **evolving to also
 pursue privacy-preserving *circumvention*** — reaching sites that do **not**
-cooperate, via clean egress behind an anonymous, paid (ZK payment-channel) rail.
+cooperate, via a clean egress *and* a disguised, unblockable **entry** (Tor
+pluggable transports / bridges — obfs4, Snowflake, WebTunnel — reused from Tor,
+not reinvented). Tessera now aims to be **both private AND uncensorable**;
+circumvention of network-level blocking **is in scope** (this supersedes v0's
+"evasion is out of scope" framing — see [`docs/CENSORSHIP_RESISTANCE.md`](./docs/CENSORSHIP_RESISTANCE.md)).
+A real bridge population, a user crowd, and the arms race stay external.
 The full vNext north-star + Definition of Done is in
 [`docs/DESIGN.md`](./docs/DESIGN.md) (§11); the v0 milestones below remain the
 proven foundation it builds on.
