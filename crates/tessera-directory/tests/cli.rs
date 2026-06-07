@@ -61,8 +61,9 @@ fn now_unix() -> u64 {
 }
 
 fn entry_spec(id: &str, issuer_byte: u8, weight: u64, epoch: u64, available: u64) -> String {
+    // 14 fields: …,onion_addr,clean_egress (empty onion => clearnet-only exit).
     format!(
-        "{id},127.0.0.1:{},127.0.0.1:{},127.0.0.1:{},{},{weight},true,{epoch},{available},10,3600,1000",
+        "{id},127.0.0.1:{},127.0.0.1:{},127.0.0.1:{},{},{weight},true,{epoch},{available},10,3600,1000,,0",
         8000 + issuer_byte as u16,
         8100 + issuer_byte as u16,
         8200 + issuer_byte as u16,

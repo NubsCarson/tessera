@@ -419,14 +419,16 @@ fn load_directory_route(
         "TESSERA_RELAY",
         "TESSERA_EXIT",
         "TESSERA_ISSUER_PK",
-        // The onion endpoint is NOT (yet) in the signed directory, so allowing it
-        // alongside one would let an unsigned env `.onion` silently override the
-        // directory's signed exit. Fail fast, consistent with the peers above.
+        // The directory now CARRIES a signed onion endpoint (v2 `onion_addr`), but
+        // the client does not yet auto-consume it — it reads the onion from the
+        // env `TESSERA_EXIT_ONION`. Allowing both would let that unsigned env
+        // `.onion` diverge from / override the directory's signed exit, so fail
+        // fast, consistent with the peers above.
         "TESSERA_EXIT_ONION",
     ] {
         if std::env::var(var).is_ok() {
             die(&format!(
-                "config error: {var} cannot be set with {path_var}; the signed directory supplies issuer/relay/exit/pin (onion advertisement is not yet in the signed directory)"
+                "config error: {var} cannot be set with {path_var}; the signed directory supplies issuer/relay/exit/pin (its signed onion advertisement is not yet auto-consumed by the client)"
             ));
         }
     }
@@ -435,6 +437,9 @@ fn load_directory_route(
     let min_signatures = load_directory_threshold();
     let selection_policy = DirectorySelectionPolicy {
         min_key_epoch: load_directory_min_key_epoch(),
+        // The client does not yet require onion/clean-egress at directory-select
+        // time (the onion endpoint is consumed via TESSERA_EXIT_ONION today).
+        ..Default::default()
     };
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         die(&format!(

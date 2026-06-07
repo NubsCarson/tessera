@@ -231,6 +231,12 @@ Built here (the reusable core the lane stands on):
   and a preflight that **self-skips to the clearnet relay loop when Tor is
   unavailable**. Configured by `TESSERA_EXIT_ONION` + `TESSERA_TOR_SOCKS`; proven
   end-to-end against a SOCKS5 stub standing in for Tor.
+- **Onion-aware directory advertisement + selection** (PR4): the signed directory
+  format `tessera-exit-directory-v2` advertises each exit's optional `onion_addr`
+  and a signed `clean_egress` flag under the threshold signature (tamper-evident),
+  and `DirectorySelectionPolicy` gains `require_onion` / `require_clean_egress` so
+  a client can select an onion-capable exit. The magic bump fails a v1 verifier
+  closed against a v2 snapshot.
 
 Not built here (buildable, but forward product/research scope, not hidden
 cleanup):
@@ -241,9 +247,11 @@ cleanup):
   below; the exit binary needs no code change). What is *not* built is sealing
   that HS key to the enclave in a non-logging TEE — like the ARC server key it
   must ride the (reserved, fail-closed) `dstack-kms` provider, not a plain file.
-- Onion-aware directory advertisement + selection (a breaking directory format
-  bump): the client onion endpoint is env-configured today; advertising it in the
-  signed directory is the next change.
+- Wiring the directory's advertised `onion_addr` into the client's automatic
+  route selection. The directory now *carries* the onion endpoint (PR4), but the
+  client still consumes it via `TESSERA_EXIT_ONION` (env), not yet from a selected
+  directory entry — that wiring (and lifting the env/directory mutual-exclusion)
+  is the next step.
 - Routing **issuance** over Tor: the onion lane hides the *browsing* IP from the
   exit, but issuance still connects the client directly to the issuer (the issuer
   learns the IP at mint/re-issue time; ARC keeps it cryptographically unlinkable).

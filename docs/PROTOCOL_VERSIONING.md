@@ -34,6 +34,7 @@ the minimal fix for.
 | Paid-issuance control proof | Domain separator `"tessera-mint-control-v1"` | **Explicit** (in the hash domain), but not negotiated | `crates/tessera-issuer/src/mint.rs` |
 | Relay 2-hop loop (HTTP `CONNECT`) | `HTTP/1.1`; outer `Tessera-Channel-*` / `Tessera-Presentation` header **names** | **Implicit** (the header set *is* the version) | `crates/tessera-relay/src/lib.rs`, `.../channel.rs` |
 | Channel state / spend format | Domain separators `"tessera-channel/state/v1"`, `".../state-sig/v1"`, `".../zk-state-sig/v1"`, `".../spend/v1"`, `".../relay-ack/v1"`, `".../request/v1"` | **Explicit** (in the hash domains), but not negotiated | `crates/tessera-channel/src/state.rs`, `.../relay.rs` |
+| Signed exit-directory snapshot | Magic line `tessera-exit-directory-v2` (line 1 of the signed payload) + local-state magic `tessera-directory-state-v1` | **Explicit** (the magic is inside the signed/hashed material) | `crates/tessera-directory/src/lib.rs` |
 | Solidity contracts | `pragma solidity ^0.8.24` + the `v1`-suffixed domain constants that **must byte-match** Rust | **Explicit** (pragma) + **explicit but unenforced cross-layer** (domains) | `contracts/src/*.sol` |
 
 Two distinct things are being versioned and they should not be confused:
