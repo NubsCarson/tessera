@@ -30,38 +30,15 @@ pub mod shaping;
 pub mod transport;
 pub use policy::{is_blocked_addr, PortRule, TargetPolicy, TargetReject};
 pub use shaping::{ShapingConfig, ShapingDecision, VolumeShaper};
-pub use transport::{Dialer, TcpDialer, TorSocksDialer};
+// The accept-loop scaffolding (concurrency cap + timeouts + the RAII permit + the
+// reject writer) lives in `transport` and is shared with `tessera-relay`'s accept
+// loop, so neither role re-declares it. The byte-pump (`pipe`) is shared the same
+// way.
+pub use transport::{
+    write_status, Dialer, InflightGuard, TcpDialer, TorSocksDialer, MAX_INFLIGHT, SOCKET_TIMEOUT,
+};
 
 use policy::Precheck;
-
-/// Hard cap on simultaneously-handled connections (S3 DoS bound). This is a
-/// *transport* backstop distinct from the [`VolumeShaper`]'s *soft* per-egress
-/// concurrency pacing: the shaper paces a paying user's tunnels to look human,
-/// whereas this prevents an unauthenticated flood from spawning unbounded OS
-/// threads (each ~MiBs of stack) and exhausting the node. Excess connections get
-/// `503` on the accept thread and are dropped *before* a worker is spawned.
-const MAX_INFLIGHT: usize = 1024;
-
-/// Read/write timeout on a tunnel socket (S3): a slow-roll / idle peer cannot pin
-/// a worker thread + fd forever — the blocking copy/parse loops unblock on it.
-/// Applied symmetrically to BOTH the accepted client socket and the upstream
-/// socket (the latter inside each [`transport::Dialer`]), so a stalled upstream
-/// cannot pin a handler either.
-pub(crate) const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Bound on the upstream `connect` (S3): a black-holed destination cannot pin a
-/// handler for the kernel's full SYN-retry window (~127s) holding a concurrency
-/// permit. Applied by each [`transport::Dialer`] (Direct dial and SOCKS5 dial).
-pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// RAII permit for the [`MAX_INFLIGHT`] concurrency cap: decrements the active
-/// counter when the handler thread returns, on every path.
-struct InflightGuard(Arc<AtomicUsize>);
-impl Drop for InflightGuard {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
 
 /// A per-egress-IP human-volume shaper shared across the proxy's connection
 /// threads. See [`shaping`].
@@ -189,7 +166,7 @@ pub fn serve_observed_shaped_policy(
                 write_status(&mut stream, "503 Service Unavailable");
                 continue;
             }
-            let permit = InflightGuard(Arc::clone(&inflight));
+            let permit = InflightGuard::new(Arc::clone(&inflight));
             let guard = Arc::clone(&guard);
             let upstream = upstream.clone();
             let observer = observer.clone();
@@ -208,11 +185,6 @@ pub fn serve_observed_shaped_policy(
             });
         }
     })
-}
-
-fn write_status(stream: &mut TcpStream, status: &str) {
-    let _ = stream.write_all(format!("HTTP/1.1 {status}\r\nConnection: close\r\n\r\n").as_bytes());
-    let _ = stream.flush();
 }
 
 fn handle_connect(

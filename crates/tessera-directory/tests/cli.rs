@@ -306,3 +306,121 @@ fn snapshot_sign_verify_select_and_state_guards_work() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Like `entry_spec` but advertises an onion endpoint + clean-egress flag (the
+/// two trailing v2 fields).
+fn entry_spec_onion(
+    id: &str,
+    issuer_byte: u8,
+    weight: u64,
+    epoch: u64,
+    available: u64,
+    onion: &str,
+    clean: &str,
+) -> String {
+    format!(
+        "{id},127.0.0.1:{},127.0.0.1:{},127.0.0.1:{},{},{weight},true,{epoch},{available},10,3600,1000,{onion},{clean}",
+        8000 + issuer_byte as u16,
+        8100 + issuer_byte as u16,
+        8200 + issuer_byte as u16,
+        issuer_hex(issuer_byte),
+    )
+}
+
+#[test]
+fn select_require_onion_picks_the_onion_capable_exit() {
+    let dir = temp_dir("require-onion");
+    let k1 = write_key(&dir, "k1.hex", 7);
+    let signed = dir.join("exits.signed");
+    let unsigned = dir.join("exits.unsigned");
+    let now = now_unix();
+
+    // An onion-capable exit (lower weight) + a clearnet exit (higher weight).
+    let snapshot = cli()
+        .arg("snapshot")
+        .arg("--sequence")
+        .arg("5")
+        .arg("--valid-from")
+        .arg((now - 60).to_string())
+        .arg("--valid-until")
+        .arg((now + 3600).to_string())
+        .arg("--entry")
+        .arg(entry_spec_onion(
+            "onion-exit",
+            1,
+            10,
+            1,
+            10,
+            "abc.onion:443",
+            "1",
+        ))
+        .arg("--entry")
+        .arg(entry_spec("clearnet-exit", 2, 20, 1, 10))
+        .arg("--out")
+        .arg(&unsigned)
+        .output()
+        .unwrap();
+    assert_success(&snapshot, "snapshot should write the onion directory");
+
+    let sign = cli()
+        .arg("sign")
+        .arg("--snapshot")
+        .arg(&unsigned)
+        .arg("--key")
+        .arg(&k1)
+        .arg("--out")
+        .arg(&signed)
+        .output()
+        .unwrap();
+    assert_success(&sign, "sign should write a signed directory");
+
+    let signers = signer_hex(7);
+
+    // Without the flag, the higher-weight clearnet exit wins.
+    let plain = cli()
+        .arg("select")
+        .arg("--directory")
+        .arg(&signed)
+        .arg("--signers")
+        .arg(&signers)
+        .arg("--now")
+        .arg(now.to_string())
+        .output()
+        .unwrap();
+    assert_success(&plain, "select without a policy");
+    let (out, _) = output_text(&plain);
+    assert!(
+        out.contains("entry_id=clearnet-exit"),
+        "highest weight wins without the flag: {out}"
+    );
+
+    // With --require-onion, the onion exit wins despite its lower weight, and the
+    // signed onion endpoint + clean_egress flag are printed.
+    let onion = cli()
+        .arg("select")
+        .arg("--directory")
+        .arg(&signed)
+        .arg("--signers")
+        .arg(&signers)
+        .arg("--now")
+        .arg(now.to_string())
+        .arg("--require-onion")
+        .output()
+        .unwrap();
+    assert_success(&onion, "select --require-onion");
+    let (out, _) = output_text(&onion);
+    assert!(
+        out.contains("entry_id=onion-exit"),
+        "--require-onion must pick the onion exit: {out}"
+    );
+    assert!(
+        out.contains("onion_addr=abc.onion:443"),
+        "the signed onion endpoint must be printed: {out}"
+    );
+    assert!(
+        out.contains("clean_egress=true"),
+        "the signed clean_egress flag must be printed: {out}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

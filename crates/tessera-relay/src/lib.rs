@@ -62,28 +62,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-/// Hard cap on simultaneously-handled connections at the relay hop (S3 DoS
-/// bound): an unauthenticated flood cannot spawn unbounded OS threads. Excess
-/// connections are dropped on the accept thread before a worker is spawned.
-const MAX_INFLIGHT: usize = 1024;
-
-/// Read/write timeout on a tunnel socket (S3): a slow-roll / idle peer unblocks
-/// the blocking copy loops instead of pinning a worker + fd forever.
-const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// RAII permit for the [`MAX_INFLIGHT`] cap — decrements the active counter when
-/// the handler thread returns, on every path.
-struct InflightGuard(Arc<AtomicUsize>);
-impl Drop for InflightGuard {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
 use tessera_channel::{Channel, ChannelError, RelayerChannel, SignedState, Spend, VerifyingKey};
-// The relay reuses tessera-proxy's byte-pump (`pipe`) verbatim — the exact same
-// transport heart the EXIT uses — rather than reinventing it.
-use tessera_proxy::{pipe, Dialer, TorSocksDialer};
+// The relay reuses tessera-proxy's transport scaffolding — the byte-pump
+// (`pipe`), the SOCKS5 dialer, the accept-loop concurrency cap + idle timeout +
+// RAII permit + reject writer — rather than re-declaring any of it.
+use tessera_proxy::{
+    pipe, write_status, Dialer, InflightGuard, TorSocksDialer, MAX_INFLIGHT, SOCKET_TIMEOUT,
+};
 // The local client proxy ([`serve_client_proxy`]) mints presentations and, on
 // budget exhaustion, re-obtains a credential from the issuer.
 use rand_core::OsRng;
@@ -161,7 +146,7 @@ pub fn serve(
                 write_status(&mut stream, "503 Service Unavailable");
                 continue;
             }
-            let permit = InflightGuard(Arc::clone(&inflight));
+            let permit = InflightGuard::new(Arc::clone(&inflight));
             let observer = observer.clone();
             thread::spawn(move || {
                 let _permit = permit;
@@ -169,11 +154,6 @@ pub fn serve(
             });
         }
     })
-}
-
-fn write_status(stream: &mut TcpStream, status: &str) {
-    let _ = stream.write_all(format!("HTTP/1.1 {status}\r\nConnection: close\r\n\r\n").as_bytes());
-    let _ = stream.flush();
 }
 
 /// Handle one client connection: read the outer `CONNECT <exit-addr>`, open a
@@ -387,7 +367,7 @@ pub fn serve_channel(
                 write_status(&mut stream, "503 Service Unavailable");
                 continue;
             }
-            let permit = InflightGuard(Arc::clone(&inflight));
+            let permit = InflightGuard::new(Arc::clone(&inflight));
             let gate = gate.clone();
             let observer = observer.clone();
             thread::spawn(move || {
@@ -616,30 +596,51 @@ pub fn open_through_relay_paid(
     Ok(stream)
 }
 
-/// Read exactly one HTTP status block (status line + headers up to the blank
-/// line) off `stream`, one byte at a time so we never read past `\r\n\r\n` into
-/// the tunnel payload. Shared by the paid-loop client (which also needs a header
-/// off the block, unlike [`expect_200`]).
-fn read_status_block(stream: &mut TcpStream, who: &str) -> Result<String> {
+/// Read one HTTP head block (everything up to and including the terminating
+/// `\r\n\r\n`) one byte at a time, so no tunnel payload past the blank line is
+/// consumed — the load-bearing invariant for every CONNECT hop. Returns
+/// `Ok(None)` if the peer closed before the blank line or `cap` bytes were
+/// exceeded. The three readers below are thin parsers over this.
+fn read_http_block(stream: &mut TcpStream, cap: usize) -> Result<Option<String>> {
     let mut block = Vec::with_capacity(256);
     let mut byte = [0u8; 1];
     loop {
         if stream.read(&mut byte)? == 0 {
-            return Err(std::io::Error::other(format!(
-                "{who} closed the connection before any status line"
-            )));
+            return Ok(None);
         }
         block.push(byte[0]);
         if block.ends_with(b"\r\n\r\n") {
-            break;
+            return Ok(Some(String::from_utf8_lossy(&block).into_owned()));
         }
-        if block.len() > 16 * 1024 {
-            return Err(std::io::Error::other(format!(
-                "{who} status block too large"
-            )));
+        if block.len() > cap {
+            return Ok(None);
         }
     }
-    Ok(String::from_utf8_lossy(&block).into_owned())
+}
+
+/// Read one HTTP status block off `stream`. Shared by the paid-loop client (which
+/// also needs a header off the block, unlike [`expect_200`]).
+fn read_status_block(stream: &mut TcpStream, who: &str) -> Result<String> {
+    read_http_block(stream, 16 * 1024)?
+        .ok_or_else(|| std::io::Error::other(format!("{who} sent no status block")))
+}
+
+/// Send the inner `CONNECT <destination>` carrying the ARC presentation and wait
+/// for the exit's `200`. Identical on both ARC-mode routes (the relay loop and
+/// the onion lane), so they share it.
+fn send_inner_connect(
+    stream: &mut TcpStream,
+    destination: &str,
+    presentation_header: &str,
+) -> Result<()> {
+    stream.write_all(
+        format!(
+            "CONNECT {destination} HTTP/1.1\r\nTessera-Presentation: {presentation_header}\r\n\r\n"
+        )
+        .as_bytes(),
+    )?;
+    stream.flush()?;
+    expect_200(stream, "exit")
 }
 
 /// Pull a header value out of a parsed status block (case-insensitive name).
@@ -677,14 +678,7 @@ pub fn open_through_relay(
 
     // INNER hop: now tunneled to the EXIT, send the real CONNECT to the
     // destination, carrying the ARC presentation. Only the exit reads this.
-    stream.write_all(
-        format!(
-            "CONNECT {destination} HTTP/1.1\r\nTessera-Presentation: {presentation_header}\r\n\r\n"
-        )
-        .as_bytes(),
-    )?;
-    stream.flush()?;
-    expect_200(&mut stream, "exit")?;
+    send_inner_connect(&mut stream, destination, presentation_header)?;
 
     Ok(stream)
 }
@@ -743,16 +737,9 @@ pub fn open_through_onion(
     let (onion_host, onion_port) = split_onion_host_port(exit_onion)?;
     let mut stream = onion_dial(socks_addr, &onion_host, onion_port, cold_start)?;
 
-    // INNER hop — byte-identical to the relay loop's inner CONNECT. The exit's
-    // OriginGuard is source-IP-blind, so admission is unchanged over the circuit.
-    stream.write_all(
-        format!(
-            "CONNECT {destination} HTTP/1.1\r\nTessera-Presentation: {presentation_header}\r\n\r\n"
-        )
-        .as_bytes(),
-    )?;
-    stream.flush()?;
-    expect_200(&mut stream, "exit")?;
+    // INNER hop — the same credential-carrying CONNECT the relay loop sends. The
+    // exit's OriginGuard is source-IP-blind, so admission is unchanged over Tor.
+    send_inner_connect(&mut stream, destination, presentation_header)?;
 
     Ok(stream)
 }
@@ -791,10 +778,12 @@ fn onion_dial(socks_addr: &str, host: &str, port: u16, cold_start: bool) -> Resu
     Err(last_err.unwrap_or_else(|| Error::other("onion dial failed")))
 }
 
-/// Split an `.onion:port` (or any `host:port`) string. The host stays a string
-/// (it is a `.onion`, never resolvable to a `SocketAddr`); only the port is
-/// parsed.
-fn split_onion_host_port(target: &str) -> Result<(String, u16)> {
+/// Split an `.onion:port` (or any `host:port`) string into its host and port. The
+/// host stays a string (a `.onion` is never resolvable to a `SocketAddr`); only
+/// the port is parsed. Rejects userinfo (`@`) and a stray ':' in the host. The
+/// `tessera-client` binary reuses this to validate `TESSERA_EXIT_ONION` at config
+/// time with the exact rules the dial path applies.
+pub fn split_onion_host_port(target: &str) -> Result<(String, u16)> {
     let (host, port) = target
         .rsplit_once(':')
         .ok_or_else(|| Error::other(format!("onion endpoint {target:?} is not host:port")))?;
@@ -825,26 +814,8 @@ fn split_onion_host_port(target: &str) -> Result<(String, u16)> {
 /// correctly). Reading unbuffered is essential: the very next bytes after the
 /// exit's `200` are the destination's reply, which the caller must not lose.
 fn expect_200(stream: &mut TcpStream, who: &str) -> Result<()> {
-    let mut block = Vec::with_capacity(128);
-    let mut byte = [0u8; 1];
-    loop {
-        if stream.read(&mut byte)? == 0 {
-            return Err(std::io::Error::other(format!(
-                "{who} closed the connection before any status line"
-            )));
-        }
-        block.push(byte[0]);
-        if block.ends_with(b"\r\n\r\n") {
-            break;
-        }
-        if block.len() > 16 * 1024 {
-            return Err(std::io::Error::other(format!(
-                "{who} status block too large"
-            )));
-        }
-    }
-    let text = String::from_utf8_lossy(&block);
-    let status_line = text.lines().next().unwrap_or("");
+    let block = read_status_block(stream, who)?;
+    let status_line = block.lines().next().unwrap_or("");
     if status_line.contains("200") {
         Ok(())
     } else {
@@ -1007,7 +978,7 @@ pub fn serve_client_proxy_route(
                 write_status(&mut browser, "503 Service Unavailable");
                 continue;
             }
-            let permit = InflightGuard(Arc::clone(&inflight));
+            let permit = InflightGuard::new(Arc::clone(&inflight));
             let source = Arc::clone(&source);
             let route = Arc::clone(&route);
             let onion_warm = Arc::clone(&onion_warm);
@@ -1076,22 +1047,10 @@ fn handle_client_proxy_conn(
 /// Read a `CONNECT` request block and return its `host:port` target. Reads
 /// unbuffered up to the blank line so no tunnel bytes are consumed past it.
 fn read_connect_target(s: &mut TcpStream) -> Result<Option<String>> {
-    let mut block = Vec::with_capacity(256);
-    let mut byte = [0u8; 1];
-    loop {
-        if s.read(&mut byte)? == 0 {
-            return Ok(None);
-        }
-        block.push(byte[0]);
-        if block.ends_with(b"\r\n\r\n") {
-            break;
-        }
-        if block.len() > 8 * 1024 {
-            return Ok(None);
-        }
-    }
-    let text = String::from_utf8_lossy(&block);
-    let first = text.lines().next().unwrap_or("");
+    let Some(block) = read_http_block(s, 8 * 1024)? else {
+        return Ok(None);
+    };
+    let first = block.lines().next().unwrap_or("");
     let mut parts = first.split_whitespace();
     match (parts.next(), parts.next()) {
         (Some(m), Some(target)) if m.eq_ignore_ascii_case("CONNECT") => {

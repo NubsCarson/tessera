@@ -15,8 +15,48 @@
 
 use std::io::{Error, Read, Result, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
-use crate::{CONNECT_TIMEOUT, SOCKET_TIMEOUT};
+/// Hard cap on simultaneously-handled connections (S3 DoS bound): an
+/// unauthenticated flood cannot spawn unbounded OS threads (each ~MiBs of stack).
+/// Excess connections are dropped on the accept thread before a worker is
+/// spawned. Shared by the exit and relay accept loops.
+pub const MAX_INFLIGHT: usize = 1024;
+
+/// Read/write idle timeout on a tunnel socket (S3): a slow-roll / idle peer
+/// unblocks the blocking copy loops instead of pinning a worker + fd forever.
+pub const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Bound on the upstream `connect` (S3): a black-holed destination cannot pin a
+/// handler for the kernel's full SYN-retry window (~127s) holding a permit.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// RAII permit for the [`MAX_INFLIGHT`] concurrency cap: decrements the active
+/// counter when the handler thread returns, on every path.
+pub struct InflightGuard(Arc<AtomicUsize>);
+
+impl InflightGuard {
+    /// Take a permit backed by the given active-connection counter.
+    pub fn new(active: Arc<AtomicUsize>) -> Self {
+        Self(active)
+    }
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Write a bare HTTP/1.1 status line + `Connection: close`, then flush. The
+/// accept loops use it to reject a connection (`503`/`407`/`405`/...) without
+/// tunneling.
+pub fn write_status(stream: &mut TcpStream, status: &str) {
+    let _ = stream.write_all(format!("HTTP/1.1 {status}\r\nConnection: close\r\n\r\n").as_bytes());
+    let _ = stream.flush();
+}
 
 /// Opens the onward TCP leg of a tunnel to `host:port`.
 ///

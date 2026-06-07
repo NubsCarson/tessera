@@ -1369,6 +1369,44 @@ mod tests {
     }
 
     #[test]
+    fn selection_policy_requires_clean_egress() {
+        let clean = onion_entry("clean-exit", 3, 10, Some("a.onion:443"), true);
+        // The non-clean exit has HIGHER weight, so it would win without the policy.
+        let dirty = onion_entry("dirty-exit", 4, 20, Some("b.onion:443"), false);
+        let snap = DirectorySnapshot::new(5, 100, 200, vec![clean, dirty]).unwrap();
+
+        let require = DirectorySelectionPolicy {
+            require_clean_egress: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            snap.select_with_policy(None, &require).unwrap().id,
+            "clean-exit"
+        );
+        let err = snap
+            .select_with_policy(Some("dirty-exit"), &require)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("does not advertise clean egress"),
+            "{err}"
+        );
+        // Without the requirement, the higher-weight (non-clean) entry wins.
+        assert_eq!(snap.select(None).unwrap().id, "dirty-exit");
+    }
+
+    #[test]
+    fn parse_unsigned_rejects_a_signed_snapshot() {
+        let signed =
+            SignedExitDirectory::sign(snapshot(3), std::slice::from_ref(&signing_key(7))).unwrap();
+        let text = signed.to_text().unwrap();
+        let err = DirectorySnapshot::parse_unsigned(&text).unwrap_err();
+        assert!(
+            err.to_string().contains("must not contain signatures"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn signed_directory_round_trips_and_verifies_threshold() {
         let k1 = signing_key(7);
         let k2 = signing_key(8);
