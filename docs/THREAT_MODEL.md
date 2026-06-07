@@ -56,10 +56,19 @@ network.
 - It **cannot** force Google, Cloudflare, or any non-cooperating site to accept
   anything. Those sites do not run `OriginGuard`, do not hold the keys, and will
   go on judging traffic by IP. Tessera does nothing to them.
-- It does **not** disguise Tor traffic as non-Tor (that is censorship *evasion*,
-  the losing arms race `GOAL.md` explicitly rejects). A cooperating origin still
-  sees that the connection is from a Tor exit; it simply no longer has to *care*,
-  because it has a better trust signal than IP reputation.
+- For **entry**, it now *does* support disguising the client's path to the Tor
+  network, via Tor's own pluggable transports / bridges (obfs4, Snowflake,
+  WebTunnel — reused, not reinvented; see
+  [`CENSORSHIP_RESISTANCE.md`](./CENSORSHIP_RESISTANCE.md)). This is the vNext
+  "both private **and** uncensorable" direction — a maintainer decision that
+  supersedes v0's "evasion is out of scope" framing. Tessera does **not** claim to
+  *win* that arms race: a real censor-unknown bridge population, real users, and
+  the perpetual fingerprinting race are **external**, and Tessera only configures
+  the real Tor binary (it implements no circumvention crypto of its own).
+- For **egress to a cooperating origin**, the original obsolescence play still
+  holds: such an origin sees the connection is from a Tor exit but no longer has
+  to *care*, because it has a better trust signal than IP reputation. (Non-
+  cooperating sites are reached via the clean onion egress, not by coercing them.)
 - The win is local and voluntary: a cooperating origin can stop blocking Tor
   because it now has a cryptographic, rate-limitable, unlinkable proof of "a
   budgeted, validly-issued client" that is strictly more informative than an IP
