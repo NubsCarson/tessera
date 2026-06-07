@@ -84,7 +84,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # The exit binds its port only AFTER establishing the shared ARC key, which
+      # polls up to ~60s for the issuer to mint it on a cold start — give the
+      # readiness probe that long before it can mark the node unhealthy.
+      start_period: 60s
 
   relay:
     <<: *hardening

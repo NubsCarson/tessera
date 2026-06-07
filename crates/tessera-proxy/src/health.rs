@@ -9,6 +9,10 @@
 //!
 //! Endpoints: `GET /healthz` → 200 (process alive), `GET /readyz` → 200 once the
 //! node is serving else 503, `GET /metrics` → label-free `tessera_*` scalars.
+//!
+//! `/readyz` is a **one-shot "has begun serving" latch** (set once when the accept
+//! loop starts), not a continuous health signal — it answers "did this node ever
+//! reach serving?", which is what a startup/ordering healthcheck needs.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
@@ -56,6 +60,14 @@ pub fn spawn(addr: &str, state: Arc<HealthState>) -> std::io::Result<()> {
         .next()
         .ok_or_else(|| std::io::Error::other(format!("health: {addr} did not resolve")))?;
     let listener = TcpListener::bind(sock)?;
+    if !sock.ip().is_loopback() {
+        eprintln!(
+            "warning: TESSERA_HEALTH_LISTEN is bound to a non-loopback address ({sock}); the \
+             counts-only health/metrics endpoint exposes node liveness + restart cadence to \
+             anyone who can reach it — bind it to loopback or a private metrics interface, \
+             never the public internet."
+        );
+    }
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let st = Arc::clone(&state);
@@ -68,8 +80,10 @@ pub fn spawn(addr: &str, state: Arc<HealthState>) -> std::io::Result<()> {
 }
 
 fn handle(stream: &mut TcpStream, st: &HealthState) -> std::io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    // A probe completes in microseconds; keep the window tight so one slow/trickle
+    // client can't stall the (serial) probe handler for long.
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut buf = [0u8; 1024];
     let n = stream.read(&mut buf)?;
     let req = String::from_utf8_lossy(&buf[..n]);

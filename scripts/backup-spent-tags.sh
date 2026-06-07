@@ -8,8 +8,10 @@
 #
 # The backup is a consistent point-in-time copy (copy to a temp file in the same
 # dir, then atomic rename) — the exit only ever APPENDS to the ledger, so a copy
-# taken mid-write is a valid prefix (it can only MISS the most recent tag, never
-# corrupt one; missing a just-written tag fails CLOSED — at worst a re-issue).
+# taken mid-write is a valid prefix plus, at most, a partial trailing line. On
+# restore, FileTagStore::open hex-decodes every line and fails CLOSED on a
+# malformed one, so a torn last line never silently un-spends a tag — at worst a
+# just-written tag is missing, which costs only a re-issue.
 #
 # NOTE on ROTATION (intentionally NOT provided): you must never just truncate or
 # drop the ledger to bound its growth — a dropped tag becomes replayable within

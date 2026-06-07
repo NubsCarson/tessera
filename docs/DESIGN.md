@@ -27,7 +27,7 @@ behavioral anti-bot remains an arms race that, worst case, degrades to a CAPTCHA
 
 ## 1. Architecture (one flow)
 
-> **Scope note:** this is the *ambitious-first* flow (the §0 "proposed direction"); the shielded-pool, Loopix/Sphinx mixnet, and residential-egress nodes below are **proposed/unbuilt** (the `ShieldedPool` is future work, see §10 "**Then:**"). The **built, recommended-default** path is the leaner **ARC-token-over-Tor** loop — credential-gated clean exit, **no channel, no shielded pool, no mixnet, no on-chain court on the common path** — see [`ARCHITECTURE.md`](./ARCHITECTURE.md). Everything here is research-grade and UNAUDITED.
+> **Scope note:** this is the *ambitious-first* flow (the §0 north-star direction); the shielded-pool, Loopix/Sphinx mixnet, and residential-egress nodes below are **proposed/unbuilt** (the `ShieldedPool` is future work, see §10 "**Then:**"). The **built, recommended-default** path is the leaner **ARC-token-over-Tor** loop — credential-gated clean exit, **no channel, no shielded pool, no mixnet, no on-chain court on the common path** — see [`ARCHITECTURE.md`](./ARCHITECTURE.md). Everything here is research-grade and UNAUDITED.
 
 ```
 CLIENT (real-browser persona; holds an anonymous credential)
@@ -171,7 +171,9 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
 
 ## 10. Build phasing + reuse + honest gates
 
-- **Phase 0 — Consolidate (this doc) + scaffold.** Reframe gated on maintainer OK.
+- **Phase 0 — Consolidate (this doc) + scaffold.** ✅ Reframe **applied** (README/
+  GOAL/THREAT_MODEL/STATUS now "both private AND uncensorable"; the unblockable
+  bridge-entry layer shipped — see [`CENSORSHIP_RESISTANCE.md`](./CENSORSHIP_RESISTANCE.md)).
 - **Phase 1 — Prove the loop (make-or-break, mostly reuse).** `client → Tor → credential-gated exit
   (e2e TLS) → site → return`, ARC as v0 spend stand-in; local first, then **one real clean exit IP**
   → a Tor-`403` site returns `200`, privately. Tested.
