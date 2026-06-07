@@ -1,5 +1,13 @@
 # Tessera browser extension — Manifest V3 **scaffold**
 
+> ⚠️ **NOT per-request unlinkable — do not use this for privacy.** Chrome's
+> `declarativeNetRequest` attaches **one** presentation value to many requests
+> (it cannot call wasm per request), which breaks ARC's per-request
+> unlinkability. This extension demonstrates in-browser issuance + header
+> attachment **mechanics only**. For real per-request unlinkability, point your
+> browser at the local **`tessera-client` CONNECT proxy**, which mints a fresh
+> single-use token per request.
+
 A minimal MV3 extension that mints a Tessera ARC presentation in-browser (via
 the `tessera-wasm` wasm-bindgen glue) and attaches it as a `Tessera-Presentation`
 request header to outgoing requests.

@@ -10,7 +10,9 @@
 
 pub mod net;
 pub mod torrc;
-pub use net::{obtain_credential, obtain_credential_paid};
+pub use net::{
+    obtain_credential, obtain_credential_on, obtain_credential_paid, obtain_credential_paid_on,
+};
 pub use tessera_directory::{
     parse_signer_pins_csv, CapacityEnvelope, DirectoryError, DirectorySelectionPolicy,
     DirectorySignature, DirectorySnapshot, DirectoryState, DirectoryStateCheck, ExitDirectoryEntry,

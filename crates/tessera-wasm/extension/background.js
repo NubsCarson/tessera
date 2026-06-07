@@ -1,4 +1,12 @@
-// Tessera MV3 background service worker (SCAFFOLD).
+// Tessera MV3 background service worker — SCAFFOLD, NOT per-request unlinkable.
+//
+// ⚠️  This attaches ONE presentation header value to many requests (Chrome's
+//     declarativeNetRequest cannot call wasm per request), so it does NOT provide
+//     ARC's per-request unlinkability — do not rely on it for privacy. The
+//     faithful per-request path is the local `tessera-client` CONNECT proxy (one
+//     fresh single-use token per request); point your browser at that for real
+//     unlinkability. This extension demonstrates in-browser issuance + header
+//     attachment MECHANICS only.
 //
 // Responsibility: load the wasm-bindgen glue, mint/refresh a presentation
 // header, and install a `declarativeNetRequest` (DNR) rule that attaches it as
@@ -44,6 +52,14 @@ const TARGET_URL_FILTER = "||127.0.0.1";
 // baked into tessera-tower-demo.
 const REQUEST_CTX = "tessera-tower-demo/issue/v1";
 const PRESENT_CTX = "tessera-tower-demo/origin/v1";
+// Runtime reminder that this scaffold is NOT per-request unlinkable.
+console.warn(
+  "[Tessera] SCAFFOLD: this extension reuses one presentation header across " +
+    "requests (declarativeNetRequest limitation) and is NOT per-request " +
+    "unlinkable. For real unlinkability use the local tessera-client CONNECT " +
+    "proxy, which mints a fresh single-use token per request.",
+);
+
 const LIMIT = 5n; // presentation budget per credential; re-issue when spent
 
 let wasm = null;

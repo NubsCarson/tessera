@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Tessera Presentation (scaffold)",
   "version": "0.0.1",
-  "description": "Attaches a Tessera-Presentation ARC credential header to outgoing requests. SCAFFOLD — see README.md; the live-origin final mile is human-gated.",
+  "description": "Attaches a Tessera-Presentation ARC header to outgoing requests. SCAFFOLD — NOT per-request unlinkable (declarativeNetRequest reuses one value across requests; use the tessera-client proxy for real unlinkability). See README.md.",
   "permissions": [
     "declarativeNetRequest",
     "declarativeNetRequestFeedback",

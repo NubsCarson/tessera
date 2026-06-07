@@ -39,10 +39,12 @@ use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use tessera_arc::arc::Credential;
 use tessera_client::{
-    obtain_credential, obtain_credential_paid, parse_signer_pins_csv, DirectorySelectionPolicy,
-    DirectoryState, SignedExitDirectory,
+    obtain_credential, obtain_credential_on, obtain_credential_paid, obtain_credential_paid_on,
+    parse_signer_pins_csv, DirectorySelectionPolicy, DirectoryState, SignedExitDirectory,
 };
+use tessera_proxy::transport::{Dialer, TorSocksDialer};
 use tessera_relay::{
     serve_client_proxy_route, split_onion_host_port, ClientRoute, CredentialSource,
 };
@@ -666,6 +668,52 @@ fn bind_listener(cfg: &Config) -> TcpListener {
     })
 }
 
+/// Obtain a credential, routing issuance over **Tor** when `TESSERA_ISSUER_ONION`
+/// (the issuer's `.onion:port`) is set: dial it through the local Tor SOCKS proxy
+/// so the issuer never sees the client's IP (closing the issuance-time IP leak;
+/// ARC already keeps issuance unlinkable from browsing). Without that env, issuance
+/// uses a direct connection to `issuer` — so clearnet issuance is the explicit
+/// opt-out (just unset `TESSERA_ISSUER_ONION`). The issuer-pk pin binds on both
+/// paths (and stays mandatory in paid mode, defeating the wormhole even over Tor).
+fn obtain_credential_routed(
+    issuer: &str,
+    buyer_secret: Option<&[u8; 32]>,
+    pin: Option<&[u8]>,
+) -> std::io::Result<Credential> {
+    if let Some(issuer_onion) = std::env::var("TESSERA_ISSUER_ONION")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        let (host, port) = split_onion_host_port(&issuer_onion).map_err(|e| {
+            std::io::Error::other(format!(
+                "TESSERA_ISSUER_ONION {issuer_onion:?} must be ONION:PORT: {e}"
+            ))
+        })?;
+        let socks_addr = std::env::var("TESSERA_TOR_SOCKS")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_TOR_SOCKS.to_string());
+        eprintln!(
+            "Tessera CLIENT: routing issuance over Tor to {issuer_onion} (SOCKS {socks_addr}); \
+             the issuer will not see your IP."
+        );
+        let mut stream = TorSocksDialer::new(socks_addr).connect(&host, port)?;
+        stream.set_read_timeout(Some(Duration::from_secs(60)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+        return match buyer_secret {
+            Some(secret) => obtain_credential_paid_on(&mut stream, REQUEST_CTX, secret, pin),
+            None => obtain_credential_on(&mut stream, REQUEST_CTX, pin),
+        };
+    }
+    // Direct (clearnet) issuance — the default / opt-out path.
+    match buyer_secret {
+        Some(secret) => obtain_credential_paid(issuer, REQUEST_CTX, secret, pin),
+        None => obtain_credential(issuer, REQUEST_CTX, pin),
+    }
+}
+
 fn main() {
     let check_mode = std::env::args().skip(1).any(|a| a == "--check");
 
@@ -718,26 +766,15 @@ fn main() {
         directory,
     } = cfg;
 
-    let credential = match &buyer_secret {
-        Some(secret) => {
-            eprintln!("Tessera CLIENT: obtaining a PAID credential from issuer {issuer}…");
-            obtain_credential_paid(&issuer, REQUEST_CTX, secret, pin.as_deref()).unwrap_or_else(
-                |e| {
-                    die(&format!(
-                        "could not obtain a paid credential from {issuer}: {e}"
-                    ))
-                },
-            )
-        }
-        None => {
-            eprintln!(
-                "Tessera CLIENT: obtaining a credential from issuer {issuer} (paying proof-of-work)…"
-            );
-            obtain_credential(&issuer, REQUEST_CTX, pin.as_deref()).unwrap_or_else(|e| {
-                die(&format!("could not obtain a credential from {issuer}: {e}"))
-            })
-        }
-    };
+    if buyer_secret.is_some() {
+        eprintln!("Tessera CLIENT: obtaining a PAID credential from issuer {issuer}…");
+    } else {
+        eprintln!(
+            "Tessera CLIENT: obtaining a credential from issuer {issuer} (paying proof-of-work)…"
+        );
+    }
+    let credential = obtain_credential_routed(&issuer, buyer_secret.as_ref(), pin.as_deref())
+        .unwrap_or_else(|e| die(&format!("could not obtain a credential from {issuer}: {e}")));
     eprintln!("Tessera CLIENT: credential obtained.");
 
     let source = CredentialSource::new(
