@@ -19,7 +19,7 @@ use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 use tessera_arc::group::NE;
 
-const MAGIC: &str = "tessera-exit-directory-v1";
+const MAGIC: &str = "tessera-exit-directory-v2";
 const STATE_MAGIC: &str = "tessera-directory-state-v1";
 const MIN_SIGNER_PK_LEN: usize = 33;
 const ISSUER_PK_LEN: usize = 3 * NE;
@@ -161,6 +161,10 @@ impl CapacityEnvelope {
 pub struct DirectorySelectionPolicy {
     /// Reject entries below this per-exit ARC key epoch, when set.
     pub min_key_epoch: Option<u64>,
+    /// Require the exit to advertise an `.onion` endpoint (the onion lane).
+    pub require_onion: bool,
+    /// Require the exit's signed clean-egress capability flag to be set.
+    pub require_clean_egress: bool,
 }
 
 /// One independently operated exit key domain advertised by a directory.
@@ -188,6 +192,13 @@ pub struct ExitDirectoryEntry {
     pub relay_protocol: String,
     /// Credential primitive label expected by this entry.
     pub credential_protocol: String,
+    /// Optional `.onion:port` for the single-hop onion lane (the client dials it
+    /// over Tor SOCKS). `None` => a clearnet-only exit (reach it via the relay).
+    pub onion_addr: Option<String>,
+    /// The operator's **signed** clean-egress capability claim. This is an
+    /// attestation a client can require/prefer, NOT a cryptographic proof that the
+    /// egress IP is clean (no code can prove that — see CLAUDE.md "three gaps").
+    pub clean_egress: bool,
 }
 
 impl ExitDirectoryEntry {
@@ -205,6 +216,8 @@ impl ExitDirectoryEntry {
         issue_protocol: impl Into<String>,
         relay_protocol: impl Into<String>,
         credential_protocol: impl Into<String>,
+        onion_addr: Option<String>,
+        clean_egress: bool,
     ) -> Result<Self, DirectoryError> {
         let entry = Self {
             id: id.into(),
@@ -218,9 +231,25 @@ impl ExitDirectoryEntry {
             issue_protocol: issue_protocol.into(),
             relay_protocol: relay_protocol.into(),
             credential_protocol: credential_protocol.into(),
+            onion_addr,
+            clean_egress,
         };
         entry.validate()?;
         Ok(entry)
+    }
+
+    /// Set the onion-lane advertisement (`onion_addr` + `clean_egress`) on an
+    /// already-built entry and re-validate. Convenience for the convenience ctors,
+    /// which default these to `None`/`false`.
+    pub fn with_onion(
+        mut self,
+        onion_addr: Option<String>,
+        clean_egress: bool,
+    ) -> Result<Self, DirectoryError> {
+        self.onion_addr = onion_addr;
+        self.clean_egress = clean_egress;
+        self.validate()?;
+        Ok(self)
     }
 
     /// Build an entry using the current Tessera protocol labels.
@@ -269,6 +298,8 @@ impl ExitDirectoryEntry {
             "issue-net/v1",
             "relay-connect/v1",
             "arcv1-p256",
+            None,
+            false,
         )
     }
 
@@ -313,12 +344,25 @@ impl ExitDirectoryEntry {
         }
         self.capacity
             .validate(&format!("entry {} capacity", self.id))?;
+        if let Some(onion) = &self.onion_addr {
+            if onion.is_empty() {
+                return Err(DirectoryError::new(format!(
+                    "entry {} onion_addr is set but empty (use None for a clearnet-only exit)",
+                    self.id
+                )));
+            }
+            // An `.onion:port` is a token (base32 + `.onion` + `:port`); it must
+            // not contain the field/line delimiters. Same charset as the addresses.
+            validate_field("onion address", onion)?;
+        }
         Ok(())
     }
 
     fn canonical_line(&self) -> String {
+        // The onion fields are APPENDED (positions 16/17) so the original 15 field
+        // indices are unchanged. An empty onion field encodes `None`.
         format!(
-            "entry={}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "entry={}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             self.id,
             self.relay_addr,
             self.exit_addr,
@@ -333,7 +377,9 @@ impl ExitDirectoryEntry {
             self.capacity.max_destinations_per_window,
             self.issue_protocol,
             self.relay_protocol,
-            self.credential_protocol
+            self.credential_protocol,
+            self.onion_addr.as_deref().unwrap_or(""),
+            if self.clean_egress { "1" } else { "0" }
         )
     }
 }
@@ -854,6 +900,18 @@ fn selection_error(
             )));
         }
     }
+    if policy.require_onion && entry.onion_addr.is_none() {
+        return Some(DirectoryError::new(format!(
+            "directory entry {} does not advertise an onion endpoint",
+            entry.id
+        )));
+    }
+    if policy.require_clean_egress && !entry.clean_egress {
+        return Some(DirectoryError::new(format!(
+            "directory entry {} does not advertise clean egress",
+            entry.id
+        )));
+    }
     None
 }
 
@@ -971,9 +1029,9 @@ fn parse_directory_text(
 
 fn parse_entry(rest: &str) -> Result<ExitDirectoryEntry, DirectoryError> {
     let parts: Vec<_> = rest.split('|').collect();
-    if parts.len() != 15 {
+    if parts.len() != 17 {
         return Err(DirectoryError::new(
-            "entry must have 15 fields: id|relay|exit|issuer|issuer_pk|weight|accepting|key_epoch|available_sessions|max_sessions|window_seconds|max_destinations_per_window|issue|relay_proto|credential",
+            "entry must have 17 fields: id|relay|exit|issuer|issuer_pk|weight|accepting|key_epoch|available_sessions|max_sessions|window_seconds|max_destinations_per_window|issue|relay_proto|credential|onion_addr|clean_egress",
         ));
     }
     let issuer_pk = hex::decode(parts[4])
@@ -997,6 +1055,21 @@ fn parse_entry(rest: &str) -> Result<ExitDirectoryEntry, DirectoryError> {
         parse_entry_u64(parts[10], "window_seconds")?,
         parse_entry_u64(parts[11], "max_destinations_per_window")?,
     )?;
+    // Appended v2 fields: an empty onion field decodes to `None`.
+    let onion_addr = if parts[15].is_empty() {
+        None
+    } else {
+        Some(parts[15].to_string())
+    };
+    let clean_egress = match parts[16] {
+        "1" => true,
+        "0" => false,
+        other => {
+            return Err(DirectoryError::new(format!(
+                "entry clean_egress flag must be 0 or 1, got {other}"
+            )));
+        }
+    };
     ExitDirectoryEntry::new(
         parts[0],
         parts[1],
@@ -1009,6 +1082,8 @@ fn parse_entry(rest: &str) -> Result<ExitDirectoryEntry, DirectoryError> {
         parts[12],
         parts[13],
         parts[14],
+        onion_addr,
+        clean_egress,
     )
 }
 
@@ -1155,6 +1230,180 @@ mod tests {
             ],
         )
         .unwrap()
+    }
+
+    fn onion_entry(
+        id: &str,
+        byte: u8,
+        weight: u64,
+        onion: Option<&str>,
+        clean: bool,
+    ) -> ExitDirectoryEntry {
+        let base = 8000 + byte as u16;
+        ExitDirectoryEntry::current_protocols(
+            id,
+            format!("127.0.0.1:{}", base),
+            format!("127.0.0.1:{}", base + 1),
+            format!("127.0.0.1:{}", base + 2),
+            issuer_pk(byte),
+            weight,
+            true,
+        )
+        .unwrap()
+        .with_onion(onion.map(|s| s.to_string()), clean)
+        .unwrap()
+    }
+
+    #[test]
+    fn onion_advertisement_round_trips_and_is_v2() {
+        let entry = onion_entry("onion-exit", 3, 30, Some("abc.onion:443"), true);
+        let snap = DirectorySnapshot::new(5, 100, 200, vec![entry]).unwrap();
+        let k = signing_key(7);
+        let signed = SignedExitDirectory::sign(snap, std::slice::from_ref(&k)).unwrap();
+        let text = signed.to_text().unwrap();
+        assert!(
+            text.contains("tessera-exit-directory-v2"),
+            "must serialize as the v2 format"
+        );
+        let parsed = SignedExitDirectory::parse(&text).unwrap();
+        parsed.verify_at(&[signer_pk(&k)], 1, 150).unwrap();
+        let got = parsed.snapshot.select(None).unwrap();
+        assert_eq!(got.onion_addr.as_deref(), Some("abc.onion:443"));
+        assert!(got.clean_egress, "clean_egress must round-trip");
+    }
+
+    #[test]
+    fn onion_fields_are_signed_and_tamper_checked() {
+        let entry = onion_entry("onion-exit", 3, 30, Some("abc.onion:443"), true);
+        let snap = DirectorySnapshot::new(5, 100, 200, vec![entry]).unwrap();
+        let k = signing_key(7);
+        let signed = SignedExitDirectory::sign(snap, std::slice::from_ref(&k)).unwrap();
+        let text = signed.to_text().unwrap();
+        // Swap the advertised .onion — it is under the signature, so verify fails.
+        let tampered = text.replace("abc.onion:443", "evil.onion:443");
+        assert_ne!(text, tampered, "the onion address must be in the payload");
+        let parsed = SignedExitDirectory::parse(&tampered).unwrap();
+        let err = parsed.verify_at(&[signer_pk(&k)], 1, 150).unwrap_err();
+        assert!(
+            err.to_string().contains("did not verify"),
+            "tampered onion must fail verification, got: {err}"
+        );
+    }
+
+    #[test]
+    fn selection_policy_requires_onion() {
+        let onion = onion_entry("onion-exit", 3, 10, Some("abc.onion:443"), true);
+        // The clearnet exit has HIGHER weight, so it would win without the policy.
+        let clearnet = onion_entry("clearnet-exit", 4, 20, None, false);
+        let snap = DirectorySnapshot::new(5, 100, 200, vec![onion, clearnet]).unwrap();
+
+        let require = DirectorySelectionPolicy {
+            require_onion: true,
+            ..Default::default()
+        };
+        // Auto-select must pick the onion exit despite its lower weight.
+        assert_eq!(
+            snap.select_with_policy(None, &require).unwrap().id,
+            "onion-exit"
+        );
+        // Explicit select of the clearnet exit under require_onion is a clean error.
+        let err = snap
+            .select_with_policy(Some("clearnet-exit"), &require)
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not advertise an onion endpoint"),
+            "got: {err}"
+        );
+        // Without the requirement, the highest-weight (clearnet) entry wins.
+        assert_eq!(snap.select(None).unwrap().id, "clearnet-exit");
+    }
+
+    #[test]
+    fn rollback_state_rejects_same_sequence_onion_mutation() {
+        // The new v2 fields are under the anti-rollback snapshot hash too: a
+        // same-sequence snapshot that only swaps the .onion or flips clean_egress
+        // must be rejected as equivocation.
+        let dir = std::env::temp_dir().join(format!(
+            "tessera-directory-state-onion-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut state = DirectoryState::open(&dir).unwrap();
+        let snap = |onion: &str, clean: bool| {
+            DirectorySnapshot::new(
+                10,
+                100,
+                200,
+                vec![onion_entry("e", 3, 10, Some(onion), clean)],
+            )
+            .unwrap()
+        };
+        state
+            .check_snapshot_and_record(&snap("a.onion:443", true))
+            .unwrap();
+
+        // Swap only the advertised .onion at the same sequence => equivocation.
+        let err = state
+            .check_snapshot_and_record(&snap("b.onion:443", true))
+            .expect_err("same-sequence onion swap must fail closed");
+        assert!(
+            err.to_string().contains("same-sequence equivocation"),
+            "{err}"
+        );
+
+        // Flip only clean_egress at the same sequence => equivocation (the reject
+        // above did not record, so this is still vs the original).
+        let err2 = state
+            .check_snapshot_and_record(&snap("a.onion:443", false))
+            .expect_err("same-sequence clean_egress flip must fail closed");
+        assert!(
+            err2.to_string().contains("same-sequence equivocation"),
+            "{err2}"
+        );
+
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn selection_policy_requires_clean_egress() {
+        let clean = onion_entry("clean-exit", 3, 10, Some("a.onion:443"), true);
+        // The non-clean exit has HIGHER weight, so it would win without the policy.
+        let dirty = onion_entry("dirty-exit", 4, 20, Some("b.onion:443"), false);
+        let snap = DirectorySnapshot::new(5, 100, 200, vec![clean, dirty]).unwrap();
+
+        let require = DirectorySelectionPolicy {
+            require_clean_egress: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            snap.select_with_policy(None, &require).unwrap().id,
+            "clean-exit"
+        );
+        let err = snap
+            .select_with_policy(Some("dirty-exit"), &require)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("does not advertise clean egress"),
+            "{err}"
+        );
+        // Without the requirement, the higher-weight (non-clean) entry wins.
+        assert_eq!(snap.select(None).unwrap().id, "dirty-exit");
+    }
+
+    #[test]
+    fn parse_unsigned_rejects_a_signed_snapshot() {
+        let signed =
+            SignedExitDirectory::sign(snapshot(3), std::slice::from_ref(&signing_key(7))).unwrap();
+        let text = signed.to_text().unwrap();
+        let err = DirectorySnapshot::parse_unsigned(&text).unwrap_err();
+        assert!(
+            err.to_string().contains("must not contain signatures"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1321,6 +1570,7 @@ mod tests {
         .unwrap();
         let policy = DirectorySelectionPolicy {
             min_key_epoch: Some(2),
+            ..Default::default()
         };
         assert_eq!(
             snapshot.select_with_policy(None, &policy).unwrap().id,

@@ -25,7 +25,7 @@ fn usage() -> ! {
          snapshot --sequence N --valid-from N --valid-until N --entry SPEC [--out PATH|-]\n\
          sign --snapshot PATH --key PATH [--key PATH...] [--out PATH|-]\n\
          verify --directory PATH --signers CSV [--min-signatures N] [--now UNIX] [--state-file PATH]\n\
-         select --directory PATH --signers CSV [--min-signatures N] [--now UNIX] [--exit-id ID] [--min-key-epoch N]",
+         select --directory PATH --signers CSV [--min-signatures N] [--now UNIX] [--exit-id ID] [--min-key-epoch N] [--require-onion] [--require-clean-egress]",
     )
 }
 
@@ -40,6 +40,17 @@ fn take_one(args: &mut Vec<String>, flag: &str) -> Option<String> {
 
 fn take_required(args: &mut Vec<String>, flag: &str) -> String {
     take_one(args, flag).unwrap_or_else(|| die(format!("missing required {flag}")))
+}
+
+/// Remove a boolean flag from `args` if present; return whether it was there.
+fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
+    match args.iter().position(|arg| arg == flag) {
+        Some(idx) => {
+            args.remove(idx);
+            true
+        }
+        None => false,
+    }
 }
 
 fn take_many(args: &mut Vec<String>, flag: &str) -> Vec<String> {
@@ -123,9 +134,9 @@ fn parse_bool(raw: &str, label: &str) -> bool {
 
 fn parse_entry_spec(spec: &str) -> ExitDirectoryEntry {
     let parts: Vec<_> = spec.split(',').collect();
-    if parts.len() != 12 {
+    if parts.len() != 14 {
         die(
-            "--entry must have 12 comma-separated fields: id,relay,exit,issuer,issuer_pk_hex,weight,accepting,key_epoch,available_sessions,max_sessions,window_seconds,max_destinations_per_window",
+            "--entry must have 14 comma-separated fields: id,relay,exit,issuer,issuer_pk_hex,weight,accepting,key_epoch,available_sessions,max_sessions,window_seconds,max_destinations_per_window,onion_addr,clean_egress (leave onion_addr empty for a clearnet-only exit)",
         );
     }
     let issuer_hex = parts[4].strip_prefix("0x").unwrap_or(parts[4]);
@@ -139,6 +150,12 @@ fn parse_entry_spec(spec: &str) -> ExitDirectoryEntry {
         parse_u64(parts[11], "entry max_destinations_per_window"),
     )
     .unwrap_or_else(|e| die(format!("entry capacity invalid: {e}")));
+    let onion_addr = if parts[12].trim().is_empty() {
+        None
+    } else {
+        Some(parts[12].trim().to_string())
+    };
+    let clean_egress = parse_bool(parts[13], "entry clean_egress");
     ExitDirectoryEntry::current_protocols_with_capacity(
         parts[0],
         parts[1],
@@ -149,6 +166,7 @@ fn parse_entry_spec(spec: &str) -> ExitDirectoryEntry {
         parse_bool(parts[6], "entry accepting"),
         capacity,
     )
+    .and_then(|e| e.with_onion(onion_addr, clean_egress))
     .unwrap_or_else(|e| die(format!("entry invalid: {e}")))
 }
 
@@ -282,9 +300,15 @@ fn cmd_select(mut args: Vec<String>) {
     if matches!(min_key_epoch, Some(0)) {
         die("--min-key-epoch must be non-zero");
     }
+    let require_onion = take_flag(&mut args, "--require-onion");
+    let require_clean_egress = take_flag(&mut args, "--require-clean-egress");
     let (directory, _min_signatures, _state_path) = load_verified_directory(&mut args);
     finish_args(&args);
-    let policy = DirectorySelectionPolicy { min_key_epoch };
+    let policy = DirectorySelectionPolicy {
+        min_key_epoch,
+        require_onion,
+        require_clean_egress,
+    };
     let entry = directory
         .snapshot
         .select_with_policy(exit_id.as_deref(), &policy)
@@ -306,6 +330,11 @@ fn cmd_select(mut args: Vec<String>) {
         "max_destinations_per_window={}",
         entry.capacity.max_destinations_per_window
     );
+    println!(
+        "onion_addr={}",
+        entry.onion_addr.as_deref().unwrap_or("(none)")
+    );
+    println!("clean_egress={}", entry.clean_egress);
 }
 
 fn main() {

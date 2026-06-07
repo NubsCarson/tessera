@@ -4,11 +4,19 @@ Signed, off-band exit-directory snapshots for Tessera clients, plus the
 `tessera-directory` operator CLI.
 
 A directory maps an `exit_id` to `{issuer_addr, relay_addr, exit_addr,
-issuer_pk, weight, accepting flag, capacity, key_epoch}`. Clients pin a
-directory signer set, verify a threshold of signatures and the validity window,
-reject sequence/key-epoch rollback with optional local state, skip closed or
-capacity-exhausted entries, select one exit key domain, and then pin the selected
-issuer public key before issuance.
+issuer_pk, weight, accepting flag, capacity, key_epoch, onion_addr,
+clean_egress}`. Clients pin a directory signer set, verify a threshold of
+signatures and the validity window, reject sequence/key-epoch rollback with
+optional local state, skip closed or capacity-exhausted entries, optionally
+require an onion-capable / clean-egress exit, select one exit key domain, and
+then pin the selected issuer public key before issuance.
+
+The snapshot format is `tessera-exit-directory-v2`: it adds the optional
+`onion_addr` (the exit's `.onion:port` for the single-hop onion lane) and the
+signed `clean_egress` capability flag to the v1 entry, both under the threshold
+signature. The magic line is bumped so a v1 verifier fails closed on a v2
+snapshot rather than misparsing it. (`clean_egress` is a signed operator
+*attestation*, not a proof that the egress IP is clean — no code can prove that.)
 
 The CLI supports:
 

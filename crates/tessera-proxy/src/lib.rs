@@ -16,38 +16,29 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
-use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Result, Write};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tessera_origin::{Decision, OriginGuard, PRESENTATION_HEADER};
 
+pub mod policy;
 pub mod shaping;
+pub mod transport;
+pub use policy::{is_blocked_addr, PortRule, TargetPolicy, TargetReject};
 pub use shaping::{ShapingConfig, ShapingDecision, VolumeShaper};
+// The accept-loop scaffolding (concurrency cap + timeouts + the RAII permit + the
+// reject writer) lives in `transport` and is shared with `tessera-relay`'s accept
+// loop, so neither role re-declares it. The byte-pump (`pipe`) is shared the same
+// way.
+pub use transport::{
+    write_status, Dialer, InflightGuard, TcpDialer, TorSocksDialer, MAX_INFLIGHT, SOCKET_TIMEOUT,
+};
 
-/// Hard cap on simultaneously-handled connections (S3 DoS bound). This is a
-/// *transport* backstop distinct from the [`VolumeShaper`]'s *soft* per-egress
-/// concurrency pacing: the shaper paces a paying user's tunnels to look human,
-/// whereas this prevents an unauthenticated flood from spawning unbounded OS
-/// threads (each ~MiBs of stack) and exhausting the node. Excess connections get
-/// `503` on the accept thread and are dropped *before* a worker is spawned.
-const MAX_INFLIGHT: usize = 1024;
-
-/// Read/write timeout on a tunnel socket (S3): a slow-roll / idle peer cannot pin
-/// a worker thread + fd forever — the blocking copy/parse loops unblock on it.
-const SOCKET_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// RAII permit for the [`MAX_INFLIGHT`] concurrency cap: decrements the active
-/// counter when the handler thread returns, on every path.
-struct InflightGuard(Arc<AtomicUsize>);
-impl Drop for InflightGuard {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
+use policy::Precheck;
 
 /// A per-egress-IP human-volume shaper shared across the proxy's connection
 /// threads. See [`shaping`].
@@ -60,6 +51,19 @@ pub enum Upstream {
     Direct,
     /// Route through a SOCKS5 proxy (e.g. Tor at `127.0.0.1:9050`).
     Tor(String),
+}
+
+impl Upstream {
+    /// The runtime dial mechanism for this configured upstream: a [`TcpDialer`]
+    /// for [`Direct`](Upstream::Direct), a [`TorSocksDialer`] for
+    /// [`Tor`](Upstream::Tor). `Upstream` stays the operator-facing config knob;
+    /// [`Dialer`] is the mechanism the handler invokes.
+    pub fn dialer(&self) -> Box<dyn Dialer> {
+        match self {
+            Upstream::Direct => Box::new(TcpDialer),
+            Upstream::Tor(proxy) => Box::new(TorSocksDialer::new(proxy.clone())),
+        }
+    }
 }
 
 /// What the exit observed about one *admitted* tunnel: the peer socket it
@@ -120,6 +124,32 @@ pub fn serve_observed_shaped(
     observer: Option<ExitObserver>,
     shaper: Option<SharedShaper>,
 ) -> thread::JoinHandle<()> {
+    serve_observed_shaped_policy(
+        listener,
+        guard,
+        upstream,
+        observer,
+        shaper,
+        Arc::new(TargetPolicy::unrestricted()),
+    )
+}
+
+/// Like [`serve_observed_shaped`], but also enforces a [`TargetPolicy`] on every
+/// `CONNECT` target: a port allowlist plus an SSRF/private-address guard with
+/// resolve-then-pin, run as the cheap pre-credential admission step (see the
+/// [`policy`] module). A deployed exit uses this with [`TargetPolicy::secure`];
+/// the other `serve_*` entry points delegate here with
+/// [`TargetPolicy::unrestricted`], which preserves the prior
+/// connect-to-any-target behavior (and the existing in-process tests / relay
+/// loop that tunnel to ephemeral loopback ports).
+pub fn serve_observed_shaped_policy(
+    listener: TcpListener,
+    guard: Arc<OriginGuard>,
+    upstream: Upstream,
+    observer: Option<ExitObserver>,
+    shaper: Option<SharedShaper>,
+    policy: Arc<TargetPolicy>,
+) -> thread::JoinHandle<()> {
     let inflight = Arc::new(AtomicUsize::new(0));
     thread::spawn(move || {
         for stream in listener.incoming() {
@@ -136,11 +166,12 @@ pub fn serve_observed_shaped(
                 write_status(&mut stream, "503 Service Unavailable");
                 continue;
             }
-            let permit = InflightGuard(Arc::clone(&inflight));
+            let permit = InflightGuard::new(Arc::clone(&inflight));
             let guard = Arc::clone(&guard);
             let upstream = upstream.clone();
             let observer = observer.clone();
             let shaper = shaper.clone();
+            let policy = Arc::clone(&policy);
             thread::spawn(move || {
                 let _permit = permit; // released when this handler thread returns
                 let _ = handle_connect(
@@ -149,15 +180,11 @@ pub fn serve_observed_shaped(
                     &upstream,
                     observer.as_ref(),
                     shaper.as_ref(),
+                    &policy,
                 );
             });
         }
     })
-}
-
-fn write_status(stream: &mut TcpStream, status: &str) {
-    let _ = stream.write_all(format!("HTTP/1.1 {status}\r\nConnection: close\r\n\r\n").as_bytes());
-    let _ = stream.flush();
 }
 
 fn handle_connect(
@@ -166,6 +193,7 @@ fn handle_connect(
     upstream: &Upstream,
     observer: Option<&ExitObserver>,
     shaper: Option<&SharedShaper>,
+    policy: &TargetPolicy,
 ) -> Result<()> {
     let peer = stream.peer_addr().ok();
     let mut reader = BufReader::new(stream.try_clone()?.take(64 * 1024));
@@ -200,6 +228,37 @@ fn handle_connect(
         return Ok(());
     }
 
+    // Cheap target pre-check (port allowlist + IP-literal SSRF classification),
+    // BEFORE the expensive credential verification — mirroring `OriginGuard`'s own
+    // cheap-before-expensive ordering. This refuses a junk/blocked target without
+    // forcing P-256 work, and any DNS for a hostname is deferred to *after* the
+    // credential check (so an unauthenticated peer can never make the exit resolve
+    // a name). A target refusal is `403 Forbidden` — the credential may be fine;
+    // it is the destination that is disallowed (distinct from the credential 407).
+    let (host, port) = match split_host_port(&target) {
+        Some(hp) => hp,
+        None => {
+            write_status(
+                &mut stream,
+                &format!(
+                    "403 Forbidden (target policy: {})",
+                    TargetReject::MalformedTarget.label()
+                ),
+            );
+            return Ok(());
+        }
+    };
+    let precheck = match policy.precheck(&host, port) {
+        Ok(p) => p,
+        Err(reason) => {
+            write_status(
+                &mut stream,
+                &format!("403 Forbidden (target policy: {})", reason.label()),
+            );
+            return Ok(());
+        }
+    };
+
     // The admission decision: the credential, nothing else.
     match guard.check(presentation.as_deref()) {
         Decision::Admit { .. } => {}
@@ -223,10 +282,6 @@ fn handle_connect(
         });
     }
 
-    // Open the tunnel to the requested host:port.
-    let (host, port) = split_host_port(&target)
-        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "bad CONNECT target"))?;
-
     // Per-egress-IP human-volume shaping (M5): pace this tunnel to stay within a
     // human-plausible envelope for the egress IP. Over-envelope traffic is delayed
     // gracefully (never hard-blocked — a refusal is itself a detectable signal),
@@ -249,9 +304,54 @@ fn handle_connect(
         ShaperPermit { shaper: sh }
     });
 
+    // Open the upstream connection.
+    //
+    // For a **Direct** upstream we resolve-then-pin (DNS only now, post-credential)
+    // and connect to the *pinned* address the policy classified — never by
+    // re-resolving the name — so the address that was checked is the address that
+    // is dialed (DNS rebinding defense). The full SSRF address gate applies.
+    //
+    // For a **Tor** upstream the port allowlist and IP-literal classification from
+    // the precheck still applied, but the SSRF *address* gate for a hostname is
+    // **deliberately delegated to the Tor exit's ExitPolicy**, not enforced here:
+    // the exit resolves the name from its own vantage point, and Tor exits refuse
+    // private/loopback/reserved destinations by default. Resolving the hostname
+    // locally just to classify it would leak the destination to our local resolver
+    // — exactly what routing over Tor is meant to avoid — so we pass the name
+    // through unresolved. (Documented in docs/CLEAN_ONION_EGRESS.md.)
+    // The transport is chosen by the configured `Upstream`; the SSRF/target policy
+    // (resolve-then-pin for Direct, deliberate don't-resolve for Tor) stays here so
+    // the dialer abstracts only the transport, never the policy. Each dialer arms
+    // its own connect/idle timeouts (S3).
+    let dialer = upstream.dialer();
     let upstream_conn = match upstream {
-        Upstream::Direct => TcpStream::connect((host.as_str(), port)),
-        Upstream::Tor(proxy) => socks5_connect(proxy, &host, port),
+        Upstream::Direct => {
+            let ip = match &precheck {
+                Precheck::Pinned(ip) => *ip,
+                Precheck::Hostname(h) => match policy.resolve_pinned(h, port) {
+                    Ok(ip) => ip,
+                    Err(reason) => {
+                        write_status(
+                            &mut stream,
+                            &format!("403 Forbidden (target policy: {})", reason.label()),
+                        );
+                        return Ok(());
+                    }
+                },
+            };
+            // Dial the *pinned* address (the dialer re-parses the IP literal with
+            // no DNS, preserving the rebinding defense).
+            dialer.connect(&ip.to_string(), port)
+        }
+        Upstream::Tor(_) => {
+            // Pass the name UNRESOLVED to the Tor proxy (it resolves from its own
+            // vantage; local resolution would leak the destination's DNS).
+            let target_host = match &precheck {
+                Precheck::Pinned(ip) => ip.to_string(),
+                Precheck::Hostname(h) => h.clone(),
+            };
+            dialer.connect(&target_host, port)
+        }
     };
     let upstream_conn = match upstream_conn {
         Ok(c) => c,
@@ -264,9 +364,15 @@ fn handle_connect(
     stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
     stream.flush()?;
 
-    // Pipe bytes both ways until either side closes. The client's TLS is
-    // end-to-end with the upstream; the proxy only moves opaque bytes.
-    pipe(stream, upstream_conn);
+    // Pipe bytes both ways until either side closes, subject to the policy's
+    // optional per-tunnel byte/wall-clock caps. The client's TLS is end-to-end
+    // with the upstream; the proxy only moves opaque bytes.
+    pipe_capped(
+        stream,
+        upstream_conn,
+        policy.max_tunnel_bytes(),
+        policy.max_tunnel_duration(),
+    );
     Ok(())
 }
 
@@ -286,7 +392,19 @@ impl Drop for ShaperPermit<'_> {
 
 fn split_host_port(target: &str) -> Option<(String, u16)> {
     let (host, port) = target.rsplit_once(':')?;
-    Some((host.to_string(), port.parse().ok()?))
+    let port: u16 = port.parse().ok()?;
+    if host.is_empty() {
+        return None;
+    }
+    // Reject userinfo smuggling (`user@host`) and, for a non-bracketed host, a
+    // stray ':' (an unbracketed IPv6 literal or otherwise malformed authority).
+    // A bracketed IPv6 literal (`[::1]`) legitimately contains ':' inside the
+    // brackets and is unwrapped later in `TargetPolicy::precheck`.
+    let bracketed = host.starts_with('[') && host.ends_with(']');
+    if host.contains('@') || (!bracketed && host.contains(':')) {
+        return None;
+    }
+    Some((host.to_string(), port))
 }
 
 /// Bidirectional copy between two streams (one thread per direction): copy `a→b`
@@ -296,59 +414,123 @@ fn split_host_port(target: &str) -> Option<(String, u16)> {
 /// first-hop RELAY (`tessera-relay`, which reuses this) only ever move opaque
 /// bytes. The client's TLS runs end-to-end through it untouched, so neither hop
 /// sees plaintext and any tampering surfaces as a TLS error at the real endpoint.
+///
+/// Equivalent to [`pipe_capped`] with no caps.
 pub fn pipe(a: TcpStream, b: TcpStream) {
-    let (mut a_read, mut a_write) = (a.try_clone(), a);
-    let (mut b_read, mut b_write) = (b.try_clone(), b);
-    let t = thread::spawn(move || {
-        if let Ok(ref mut ar) = a_read {
-            let _ = std::io::copy(ar, &mut b_write);
-            let _ = b_write.shutdown(std::net::Shutdown::Write);
+    pipe_capped(a, b, None, None);
+}
+
+/// Like [`pipe`], but enforces optional per-tunnel caps: a total-bytes ceiling
+/// (summed across both directions) and a wall-clock lifetime. On a natural EOF a
+/// direction is half-closed (preserving half-open protocols, exactly like
+/// [`pipe`]); when a byte cap or the deadline fires, the whole tunnel is torn
+/// down. `None`/`None` reproduces [`pipe`]'s behavior byte-for-byte.
+pub fn pipe_capped(
+    a: TcpStream,
+    b: TcpStream,
+    max_bytes: Option<u64>,
+    max_duration: Option<Duration>,
+) {
+    // `checked_add` rather than `+`: a pathologically large lifetime must not
+    // panic the handler (the config layer also clamps it, but defend here too).
+    // An un-representable deadline degrades to "no wall-clock cap".
+    let deadline = max_duration.and_then(|d| Instant::now().checked_add(d));
+    let counter = Arc::new(AtomicU64::new(0));
+
+    // Clone both handles so the spawned direction owns one pair and this thread
+    // the other; clones share the underlying socket, so a `shutdown` from either
+    // direction unblocks the other.
+    let (a_fwd, b_fwd) = match (a.try_clone(), b.try_clone()) {
+        (Ok(a2), Ok(b2)) => (a2, b2),
+        // Clone failed (rare): best-effort single-direction copy so the tunnel is
+        // never silently dropped.
+        _ => {
+            let mut a = a;
+            let mut b = b;
+            let _ = std::io::copy(&mut a, &mut b);
+            return;
         }
+    };
+    let c_fwd = Arc::clone(&counter);
+    let t = thread::spawn(move || {
+        let stop = copy_capped(&a_fwd, &b_fwd, max_bytes, deadline, &c_fwd);
+        finish(&a_fwd, &b_fwd, stop);
     });
-    if let Ok(ref mut br) = b_read {
-        let _ = std::io::copy(br, &mut a_write);
-        let _ = a_write.shutdown(std::net::Shutdown::Write);
-    }
+    let stop = copy_capped(&b, &a, max_bytes, deadline, &counter);
+    finish(&b, &a, stop);
     let _ = t.join();
 }
 
-/// Minimal SOCKS5 CONNECT (no auth, domain target) — enough to reach any host
-/// (including a `.onion` or `api.anthropic.com`) through the local Tor port.
-fn socks5_connect(proxy: &str, host: &str, port: u16) -> Result<TcpStream> {
-    let mut s = TcpStream::connect(proxy)?;
-    s.write_all(&[0x05, 0x01, 0x00])?;
-    let mut method = [0u8; 2];
-    s.read_exact(&mut method)?;
-    if method != [0x05, 0x00] {
-        return Err(Error::other("SOCKS5: no acceptable method"));
-    }
-    let host_bytes = host.as_bytes();
-    if host_bytes.len() > 255 {
-        return Err(Error::other("SOCKS5: host too long"));
-    }
-    let mut req = vec![0x05, 0x01, 0x00, 0x03, host_bytes.len() as u8];
-    req.extend_from_slice(host_bytes);
-    req.extend_from_slice(&port.to_be_bytes());
-    s.write_all(&req)?;
-    let mut head = [0u8; 4];
-    s.read_exact(&mut head)?;
-    if head[1] != 0x00 {
-        return Err(Error::other(format!(
-            "SOCKS5 connect failed (REP={})",
-            head[1]
-        )));
-    }
-    let bnd = match head[3] {
-        0x01 => 4,
-        0x04 => 16,
-        0x03 => {
-            let mut l = [0u8; 1];
-            s.read_exact(&mut l)?;
-            l[0] as usize
+/// Why a [`copy_capped`] direction stopped.
+enum Stop {
+    /// Natural end of stream (or a benign read/write error): half-close only, so
+    /// the reverse direction can still drain (half-open protocols keep working).
+    Eof,
+    /// A byte cap or the wall-clock deadline fired: tear the whole tunnel down.
+    Capped,
+}
+
+/// On stop, either half-close the write side (EOF) or hard-close both sockets (a
+/// cap fired).
+fn finish(from: &TcpStream, to: &TcpStream, stop: Stop) {
+    match stop {
+        Stop::Eof => {
+            let _ = to.shutdown(Shutdown::Write);
         }
-        _ => return Err(Error::other("SOCKS5: bad ATYP")),
-    };
-    let mut skip = vec![0u8; bnd + 2];
-    s.read_exact(&mut skip)?;
-    Ok(s)
+        Stop::Capped => {
+            let _ = to.shutdown(Shutdown::Both);
+            let _ = from.shutdown(Shutdown::Both);
+        }
+    }
+}
+
+/// Copy `from → to` until EOF, a write error, the shared byte cap, or the
+/// deadline. Operates on `&TcpStream` (which impls `Read`/`Write`) so the same
+/// handle can be torn down by [`finish`]. With a `deadline` set, the read timeout
+/// is sliced so the loop wakes to re-check it; with no deadline an idle-timeout
+/// read ends the copy (matching the prior `std::io::copy` behavior under
+/// `SOCKET_TIMEOUT`).
+fn copy_capped(
+    from: &TcpStream,
+    to: &TcpStream,
+    max_bytes: Option<u64>,
+    deadline: Option<Instant>,
+    counter: &AtomicU64,
+) -> Stop {
+    let mut rd: &TcpStream = from;
+    let mut wr: &TcpStream = to;
+    let mut buf = [0u8; 16 * 1024];
+    loop {
+        if let Some(dl) = deadline {
+            let now = Instant::now();
+            if now >= dl {
+                return Stop::Capped;
+            }
+            // Wake at least once per SOCKET_TIMEOUT (or sooner) to re-check.
+            let slice = (dl - now).min(SOCKET_TIMEOUT).max(Duration::from_millis(1));
+            let _ = from.set_read_timeout(Some(slice));
+        }
+        match rd.read(&mut buf) {
+            Ok(0) => return Stop::Eof,
+            Ok(n) => {
+                if let Some(max) = max_bytes {
+                    if counter.fetch_add(n as u64, Ordering::AcqRel) + n as u64 > max {
+                        return Stop::Capped;
+                    }
+                }
+                if wr.write_all(&buf[..n]).is_err() {
+                    return Stop::Eof;
+                }
+            }
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
+                // A timed-out read slice. With a deadline, loop and re-check it;
+                // without one, this is the idle SOCKET_TIMEOUT — end the copy.
+                if deadline.is_some() {
+                    continue;
+                }
+                return Stop::Eof;
+            }
+            Err(_) => return Stop::Eof,
+        }
+    }
 }

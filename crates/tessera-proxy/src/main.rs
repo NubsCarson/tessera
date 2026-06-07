@@ -26,7 +26,9 @@ use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
 use tessera_client::{begin_issuance, TesseraClient};
 use tessera_issuer::{check_path_usable, KeyProviderConfig};
 use tessera_origin::{FileTagStore, OriginGuard};
-use tessera_proxy::{serve_observed_shaped, ShapingConfig, Upstream, VolumeShaper};
+use tessera_proxy::{
+    serve_observed_shaped_policy, PortRule, ShapingConfig, TargetPolicy, Upstream, VolumeShaper,
+};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
 const PRESENT_CTX: &[u8] = b"tessera://proxy/v1";
@@ -301,6 +303,92 @@ fn validate_spent_tag_file() -> Option<String> {
     }
 }
 
+/// Resolve the exit's target/egress policy from env, fail-fast on bad config.
+///
+///   TESSERA_TARGET_POLICY    "secure" (default) | "unrestricted"
+///   TESSERA_ALLOWED_PORTS    comma-separated port list (default "443")
+///   TESSERA_MAX_TUNNEL_BYTES optional per-tunnel byte ceiling (unset => no cap)
+///   TESSERA_MAX_TUNNEL_SECS  optional per-tunnel wall-clock lifetime in seconds
+///
+/// `secure` (the default) blocks private/loopback/link-local/reserved/cloud-
+/// metadata targets, restricts ports to the allowlist, and resolve-then-pins
+/// hostnames against DNS rebinding. `unrestricted` restores the legacy
+/// connect-to-anything behavior for local development. An explicit
+/// `TESSERA_ALLOWED_PORTS` overrides the port rule on either base.
+fn resolve_target_policy() -> TargetPolicy {
+    let base = match std::env::var("TESSERA_TARGET_POLICY").ok().as_deref() {
+        Some("secure") | None => TargetPolicy::secure(),
+        Some("unrestricted") => TargetPolicy::unrestricted(),
+        Some(other) => die(&format!(
+            "tessera-{ROLE}: config error: TESSERA_TARGET_POLICY {other:?} is not one of: secure | unrestricted"
+        )),
+    };
+    let with_ports = match std::env::var("TESSERA_ALLOWED_PORTS").ok() {
+        Some(s) if !s.trim().is_empty() => base.with_ports(PortRule::Only(parse_port_list(&s))),
+        Some(_) => die(&format!(
+            "tessera-{ROLE}: config error: TESSERA_ALLOWED_PORTS is set but empty (unset it for the default :443, or give a comma-separated port list)"
+        )),
+        None => base,
+    };
+    let max_bytes = parse_opt_u64("TESSERA_MAX_TUNNEL_BYTES");
+    let max_secs = parse_opt_u64("TESSERA_MAX_TUNNEL_SECS");
+    // Clamp the lifetime to a sane ceiling (1 year). A huge value would otherwise
+    // overflow `Instant::now() + d` at tunnel-open and silently degrade to "no cap"
+    // — fail fast instead, consistent with this binary's no-surprise config story.
+    const MAX_TUNNEL_SECS_CEILING: u64 = 365 * 24 * 60 * 60;
+    if let Some(secs) = max_secs {
+        if secs > MAX_TUNNEL_SECS_CEILING {
+            die(&format!(
+                "tessera-{ROLE}: config error: TESSERA_MAX_TUNNEL_SECS {secs} exceeds the {MAX_TUNNEL_SECS_CEILING}s (1 year) ceiling"
+            ));
+        }
+    }
+    with_ports.with_caps(max_bytes, max_secs.map(std::time::Duration::from_secs))
+}
+
+/// Parse a comma-separated `u16` port list, fail-fast on any bad/zero entry.
+fn parse_port_list(s: &str) -> Vec<u16> {
+    let mut ports = Vec::new();
+    for tok in s.split(',') {
+        let tok = tok.trim();
+        if tok.is_empty() {
+            continue;
+        }
+        match tok.parse::<u16>() {
+            Ok(0) => die(&format!(
+                "tessera-{ROLE}: config error: TESSERA_ALLOWED_PORTS contains port 0"
+            )),
+            Ok(p) => ports.push(p),
+            Err(_) => die(&format!(
+                "tessera-{ROLE}: config error: TESSERA_ALLOWED_PORTS entry {tok:?} is not a valid port (1-65535)"
+            )),
+        }
+    }
+    if ports.is_empty() {
+        die(&format!(
+            "tessera-{ROLE}: config error: TESSERA_ALLOWED_PORTS resolved to no ports"
+        ));
+    }
+    ports
+}
+
+/// Parse an optional positive-`u64` env var, fail-fast on a non-numeric or zero
+/// value (unset => `None`, i.e. the cap is disabled).
+fn parse_opt_u64(var: &str) -> Option<u64> {
+    match std::env::var(var).ok() {
+        Some(s) if !s.trim().is_empty() => match s.trim().parse::<u64>() {
+            Ok(0) => die(&format!(
+                "tessera-{ROLE}: config error: {var} must be > 0 (unset it to disable the cap)"
+            )),
+            Ok(v) => Some(v),
+            Err(_) => die(&format!(
+                "tessera-{ROLE}: config error: {var} {s:?} is not a positive integer"
+            )),
+        },
+        _ => None,
+    }
+}
+
 fn issue(sk: &ServerPrivateKey, pk: &ServerPublicKey, rng: &mut OsRng) -> Credential {
     let (pending, request) = begin_issuance(REQUEST_CTX, *pk, rng);
     let response = create_credential_response(sk, pk, &request, rng).expect("request verifies");
@@ -336,6 +424,7 @@ fn main() {
         die(&format!("tessera-{ROLE}: config error: {msg}"));
     });
     let spent_tag_file = validate_spent_tag_file();
+    let target_policy = resolve_target_policy();
 
     // ---- --check: non-serving preflight (validate + bind + drop, then exit) ----
     if check {
@@ -376,9 +465,10 @@ fn main() {
                     Some(p) => format!("file:{p}"),
                     None => "memory".to_string(),
                 };
+                let target = target_policy.label();
                 println!("tessera-{ROLE}: config OK");
                 println!(
-                    "tessera-{ROLE}: listen={addr} upstream={upstream_label} mode={mode} key={key} tag_store={tags} topology=single-exit-key-domain"
+                    "tessera-{ROLE}: listen={addr} upstream={upstream_label} mode={mode} key={key} tag_store={tags} target_policy={target} topology=single-exit-key-domain"
                 );
                 return;
             }
@@ -438,7 +528,14 @@ fn main() {
         ShapingConfig::default(),
         addr.port() as u64,
     )));
-    serve_observed_shaped(listener, guard, upstream, None, Some(shaper));
+    serve_observed_shaped_policy(
+        listener,
+        guard,
+        upstream,
+        None,
+        Some(shaper),
+        Arc::new(target_policy),
+    );
 
     // Mint a few single-use credentials to paste into example requests.
     let mut client = TesseraClient::new(credential, PRESENT_CTX, LIMIT);

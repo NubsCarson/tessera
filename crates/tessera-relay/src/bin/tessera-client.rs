@@ -35,18 +35,28 @@
 //!
 //! Then: `curl -x http://127.0.0.1:8120 https://example.com`
 
-use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use tessera_client::{
     obtain_credential, obtain_credential_paid, parse_signer_pins_csv, DirectorySelectionPolicy,
     DirectoryState, SignedExitDirectory,
 };
-use tessera_relay::{serve_client_proxy, CredentialSource};
+use tessera_relay::{
+    serve_client_proxy_route, split_onion_host_port, ClientRoute, CredentialSource,
+};
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
 const PRESENT_CTX: &[u8] = b"tessera://proxy/v1";
 const LIMIT: u64 = 64;
+
+/// Default local Tor SOCKS5 endpoint for the onion lane (`TESSERA_TOR_SOCKS`).
+const DEFAULT_TOR_SOCKS: &str = "127.0.0.1:9050";
+
+/// How long the onion preflight waits for the Tor SOCKS port before deciding Tor
+/// is down and self-skipping to the clearnet relay loop.
+const ONION_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// The issuer-pk pin must be at least this many bytes (16 hex chars) to be a
 /// meaningful fingerprint; the client library rejects anything shorter, so we
@@ -75,6 +85,81 @@ fn resolve_value(label: &str, spec: &str) -> SocketAddr {
         None => die(&format!(
             "config error: {label}={spec} did not resolve to any address"
         )),
+    }
+}
+
+/// Decide how the client reaches the exit.
+///
+/// If `TESSERA_EXIT_ONION` (an `ONION:PORT`) is set, prefer the single-hop onion
+/// lane through the local Tor SOCKS proxy (`TESSERA_TOR_SOCKS`, default
+/// `127.0.0.1:9050`) — but only if that SOCKS port is actually reachable. If Tor
+/// is not running, **self-skip cleanly** to the clearnet relay loop (the lane is
+/// additive, never a hard prerequisite). With no onion configured, use the relay.
+fn resolve_client_route(relay_addr: SocketAddr, exit_addr: SocketAddr) -> ClientRoute {
+    let exit_onion = match std::env::var("TESSERA_EXIT_ONION") {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
+        Ok(_) => die("config error: TESSERA_EXIT_ONION is set but empty (unset it for the relay loop, or give an ONION:PORT)"),
+        Err(_) => {
+            return ClientRoute::Relay {
+                relay_addr,
+                exit_addr,
+            }
+        }
+    };
+    // Validate ONION:PORT up front (fail-fast) with the EXACT rules the dial path
+    // applies, by reusing the relay's onion-authority parser.
+    if let Err(e) = split_onion_host_port(&exit_onion) {
+        die(&format!(
+            "config error: TESSERA_EXIT_ONION {exit_onion:?} must be ONION:PORT (e.g. abc…xyz.onion:443): {e}"
+        ));
+    }
+    let socks_addr = std::env::var("TESSERA_TOR_SOCKS")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_TOR_SOCKS.to_string());
+    let socks_resolved = resolve_value("TESSERA_TOR_SOCKS", &socks_addr);
+
+    // Preflight (the side-effect): is the Tor SOCKS port up? Refused/timeout => down.
+    let reachable = match TcpStream::connect_timeout(&socks_resolved, ONION_PREFLIGHT_TIMEOUT) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!(
+                "warning: onion lane requested (TESSERA_EXIT_ONION={exit_onion}) but the Tor SOCKS \
+                 proxy {socks_addr} is unreachable ({e}); self-skipping to the clearnet relay loop."
+            );
+            false
+        }
+    };
+    choose_route(
+        Some(exit_onion),
+        socks_addr,
+        reachable,
+        relay_addr,
+        exit_addr,
+    )
+}
+
+/// The pure routing decision (no env, no network): the single-hop onion lane iff
+/// an onion is configured AND its SOCKS proxy was reachable; otherwise the relay
+/// loop. Split out from [`resolve_client_route`]'s probe so the self-skip is
+/// testable without a network.
+fn choose_route(
+    exit_onion: Option<String>,
+    socks_addr: String,
+    socks_reachable: bool,
+    relay_addr: SocketAddr,
+    exit_addr: SocketAddr,
+) -> ClientRoute {
+    match exit_onion {
+        Some(exit_onion) if socks_reachable => ClientRoute::Onion {
+            socks_addr,
+            exit_onion,
+        },
+        _ => ClientRoute::Relay {
+            relay_addr,
+            exit_addr,
+        },
     }
 }
 
@@ -364,10 +449,16 @@ fn load_directory_route(
         "TESSERA_RELAY",
         "TESSERA_EXIT",
         "TESSERA_ISSUER_PK",
+        // The directory now CARRIES a signed onion endpoint (v2 `onion_addr`), but
+        // the client does not yet auto-consume it — it reads the onion from the
+        // env `TESSERA_EXIT_ONION`. Allowing both would let that unsigned env
+        // `.onion` diverge from / override the directory's signed exit, so fail
+        // fast, consistent with the peers above.
+        "TESSERA_EXIT_ONION",
     ] {
         if std::env::var(var).is_ok() {
             die(&format!(
-                "config error: {var} cannot be set with {path_var}; the signed directory supplies issuer/relay/exit/pin"
+                "config error: {var} cannot be set with {path_var}; the signed directory supplies issuer/relay/exit/pin (its signed onion advertisement is not yet auto-consumed by the client)"
             ));
         }
     }
@@ -376,6 +467,9 @@ fn load_directory_route(
     let min_signatures = load_directory_threshold();
     let selection_policy = DirectorySelectionPolicy {
         min_key_epoch: load_directory_min_key_epoch(),
+        // The client does not yet require onion/clean-egress at directory-select
+        // time (the onion endpoint is consumed via TESSERA_EXIT_ONION today).
+        ..Default::default()
     };
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         die(&format!(
@@ -573,8 +667,32 @@ fn main() {
         .local_addr()
         .unwrap_or_else(|e| die(&format!("could not read client proxy addr: {e}")));
 
+    // Choose the route to the exit: the single-hop onion lane if configured and
+    // Tor is up, else the 2-hop clearnet relay loop (self-skip fallback).
+    let route = resolve_client_route(relay_addr, exit_addr);
+
     println!("\nTessera client proxy live on http://{addr}");
-    println!("  route: you → (this proxy) → RELAY {relay_addr} → EXIT {exit_addr} → destination");
+    match &route {
+        ClientRoute::Relay {
+            relay_addr,
+            exit_addr,
+        } => {
+            println!(
+                "  route: you → (this proxy) → RELAY {relay_addr} → EXIT {exit_addr} → destination"
+            );
+        }
+        ClientRoute::Onion {
+            socks_addr,
+            exit_onion,
+        } => {
+            println!(
+                "  route: you → (this proxy) → Tor SOCKS {socks_addr} → EXIT {exit_onion} (.onion, single hop) → destination"
+            );
+            println!(
+                "         the exit's peer is the Tor circuit, never your IP; no separate relay needed."
+            );
+        }
+    }
     if let Some(directory) = &directory {
         println!(
             "  directory: {} entry={} seq={} threshold={} key_epoch={} capacity={}/{}{} (issuer key pinned from signed snapshot)",
@@ -597,7 +715,45 @@ fn main() {
     println!("        it to your browsing). Run this client over Tor to hide issuance too.");
     println!("\n  curl -x http://{addr} https://example.com\n");
 
-    serve_client_proxy(listener, relay_addr, exit_addr, source)
+    serve_client_proxy_route(listener, route, source)
         .join()
         .expect("client proxy thread");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{choose_route, ClientRoute};
+    use std::net::SocketAddr;
+
+    fn addr(p: u16) -> SocketAddr {
+        ([127, 0, 0, 1], p).into()
+    }
+
+    #[test]
+    fn choose_route_self_skips_to_relay_unless_onion_is_configured_and_reachable() {
+        let (relay, exit) = (addr(1), addr(2));
+        let socks = "127.0.0.1:9050".to_string();
+
+        // No onion configured -> the relay loop.
+        assert!(matches!(
+            choose_route(None, socks.clone(), true, relay, exit),
+            ClientRoute::Relay { .. }
+        ));
+        // Onion configured AND its SOCKS proxy reachable -> the onion lane.
+        match choose_route(
+            Some("abc.onion:443".to_string()),
+            socks.clone(),
+            true,
+            relay,
+            exit,
+        ) {
+            ClientRoute::Onion { exit_onion, .. } => assert_eq!(exit_onion, "abc.onion:443"),
+            other => panic!("expected the onion lane, got {other:?}"),
+        }
+        // Onion configured but SOCKS UNREACHABLE (Tor down) -> self-skip to relay.
+        assert!(matches!(
+            choose_route(Some("abc.onion:443".to_string()), socks, false, relay, exit),
+            ClientRoute::Relay { .. }
+        ));
+    }
 }

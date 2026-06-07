@@ -36,6 +36,8 @@ If you read nothing else, read the **honest status** at the bottom.
 | How each wire layer is versioned + the upgrade convention | [`PROTOCOL_VERSIONING.md`](./PROTOCOL_VERSIONING.md) |
 | Post-quantum terrain | [`POST_QUANTUM.md`](./POST_QUANTUM.md) |
 | The roadmap | [`ROADMAP.md`](./ROADMAP.md) |
+| What remains vs. what is external / new scope | [`NEXT_STEPS.md`](./NEXT_STEPS.md) |
+| The clean onion egress lane (client→exit over `.onion`) | [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md) |
 | **One status table for the whole system** | [`STATUS.md`](./STATUS.md) |
 | **The audit-prep packet** (the map an auditor reads first) | [`../AUDIT.md`](../AUDIT.md) |
 | **Live progress / the 99-item Definition-of-Done** | [`CEILING_PROGRESS.md`](./CEILING_PROGRESS.md) |
@@ -88,10 +90,12 @@ is genuinely needed):** the ZK Spilman channel (`tessera-channel`), the EVM cour
 (`contracts/src/ChannelRegistry.sol`), on-chain ZK settlement (`circuits/`,
 `cooperativeCloseZK`).
 
-**Buildable-here, not yet done** (tracked in `CEILING_PROGRESS.md`): S34
-(PIR/green-routing/x402 egress lanes, gated by the clean-egress frontier) and
-the NICE tier (polish, `unilateralCloseZK`, a per-IP-per-epoch ZK rate circuit,
-etc.).
+**Buildable-here, not yet done** is forward product/research scope, not hidden
+cleanup. The canonical list is [`NEXT_STEPS.md`](./NEXT_STEPS.md): browser
+extension final mile, dstack KMS/attestation UX, distributed spent-tag backend,
+mirrored directory ops, the clean-egress experiment, S34 egress lanes, and a
+staking-economics decision if that path becomes real. `CEILING_PROGRESS.md`
+still tracks S34 and the NICE tier for completeness.
 
 **Toward "usable" (mostly not core crypto):** a paid-mint client/wallet UX (the
 MV3 extension is a scaffold); the off-chain issuer integration (watch
