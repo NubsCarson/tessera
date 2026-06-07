@@ -54,10 +54,15 @@ the local `cargo run` demos):
 | `TESSERA_SPENT_TAG_FILE` | exit | optional durable spent-tag file for one exit; unset = in-memory |
 | `TESSERA_LISTEN` | exit | bind address (e.g. `0.0.0.0:8118`) |
 | `TESSERA_UPSTREAM` | exit | `direct` \| `tor` \| `tor:HOST:PORT` |
+| `TESSERA_TARGET_POLICY` | exit | `secure` (default; block private/loopback/link-local/metadata targets + port allowlist + resolve-then-pin) \| `unrestricted` (legacy connect-to-anything, local dev) |
+| `TESSERA_ALLOWED_PORTS` | exit | comma-separated destination-port allowlist (default `443`) |
+| `TESSERA_MAX_TUNNEL_BYTES` / `TESSERA_MAX_TUNNEL_SECS` | exit | optional per-tunnel byte / wall-clock caps (unset = no cap) |
 | `TESSERA_RELAY_LISTEN` | relay | bind address (e.g. `0.0.0.0:8119`) |
 | `TESSERA_EXIT_ADDR` | relay | the exit to forward to (e.g. `exit:8118`) |
 | `TESSERA_ISSUER` | client | issuer `HOST:PORT` to obtain a credential from |
 | `TESSERA_RELAY` / `TESSERA_EXIT` | client | relay / exit `HOST:PORT` to route through |
+| `TESSERA_EXIT_ONION` | client | the exit's `.onion:port` — selects the single-hop onion lane (the client dials the exit over Tor SOCKS, bypassing the relay); self-skips to the relay loop if Tor is down at launch. Mutually exclusive with `TESSERA_DIRECTORY_FILE`. See [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md) |
+| `TESSERA_TOR_SOCKS` | client | local Tor SOCKS5 endpoint for the onion lane (default `127.0.0.1:9050`) |
 | `TESSERA_CLIENT_LISTEN` | client | local proxy bind (default `127.0.0.1:8120`) |
 | `TESSERA_ISSUER_PK` | client | hex pin: the issuer pk (or fingerprint prefix) issuance must match |
 | `TESSERA_DIRECTORY_FILE` | client | signed exit-directory snapshot; if set, supplies issuer/relay/exit/issuer pin |
