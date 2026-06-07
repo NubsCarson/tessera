@@ -17,8 +17,16 @@
 - **MUST tier: 8/8 ✅** — every correctness/safety/honesty hole the audit found is closed.
 - **SHOULD tier: 33/34** — hardening + completeness. The ONLY open item is **S34** (PIR / green-routing / x402 egress lanes) — the irreducibly-external clean-egress frontier, not buildable here.
 - **NICE tier: 0/15** — polish; pending.
-- **Verification:** 214 host-workspace Rust `#[test]` markers + 78 Foundry
-  tests + 7 fuzz targets, all green; CI green on `main`.
+- **Clean onion egress lane:** built + tested beyond the ceiling list — exit
+  target/SSRF policy + per-tunnel caps, the `transport::Dialer` seam, the
+  client→exit `.onion` route, and the directory **v2** onion advertisement (see
+  [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md)). This is the access-path
+  software; S34 (PIR/green-routing efficiency lanes) and the *external*
+  clean-egress frontier (a genuinely clean IP, a real Tor crowd) remain open.
+- **Verification:** 253 host-workspace Rust `#[test]` markers (last full
+  `cargo test --workspace --all-features`: 255 passing, 0 failed) + excluded wasm
+  tests (2 native + 4 `wasm_bindgen_test`) + 78 Foundry tests + 7 fuzz targets,
+  all green.
 
 ## MUST — done
 

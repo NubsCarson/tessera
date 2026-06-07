@@ -47,16 +47,17 @@
 | 14 | **WASM browser client** — `tessera-arc`+`tessera-client` built for `wasm32-unknown-unknown`; `wasm-bindgen` API (`present()`, `prepare_issuance`/`IssuanceFlow`); MV3 extension scaffold | 🧩 built, excluded workspace (compiles + headless round-trip tests pass incl. real issuance against a live Rust origin; **loading the extension in a real browser is the human last mile**) | `crates/tessera-wasm/src/lib.rs`; tests **4 `#[wasm_bindgen_test]`** (`wasm_roundtrip.rs`, the headless-`node` round-trip) + **2 native `#[test]`** (`native_roundtrip.rs`); `examples/node-real-issuance.cjs`, MV3 `background.js` |
 | 15 | **Tower e2e server** — runnable `axum` server using `TesseraLayer` on a multi-thread `tokio` runtime, driven over a real TCP socket (403/200/replay-403) | 🧩 built, excluded workspace (its own `tower-e2e` CI job; `axum`/`tokio` kept out of the host MSRV gate) | `crates/tessera-tower-demo/src/main.rs`; test `crates/tessera-tower-demo/tests/e2e.rs` |
 | 16 | **Edge / Cloudflare Worker deploy** | 🔒 external — documented **sketch only**, not a compiled artifact (needs the server secret at the edge + a wasm guard build + a shared cross-isolate `SpentTagStore`) | sketch in `crates/tessera-origin` README; [`docs/ROADMAP.md`](./ROADMAP.md) track 2 |
-| 17 | **Deployed clean-IP exits + live replicated directory operation + Tor/Nym anonymity crowd + third-party audit + multi-party MPC ceremony** | 🔒 external / future product — never simulated; the gaps between the runnable artifact and a stranger safely using it | tracked in [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md) (E1–E16) and [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md) |
+| 17 | **Clean onion egress lane** — exit target/SSRF policy (secure-by-default port allowlist + private/loopback/link-local/CGNAT/metadata refusal for v4+v6 + resolve-then-pin, run *before* the credential) + per-tunnel caps; pluggable `transport::Dialer` seam; client→exit single-hop `.onion` route (relay bypassed; exit's peer is the Tor circuit, never the client IP; cold-start retry; startup self-skip to the relay loop when Tor is down); signed directory **v2** onion/`clean_egress` advertisement + `require_onion`/`require_clean_egress` selection | ✅ built + tested (proven live: the real exit `403`s metadata/private/disallowed-port targets — incl. with **no** credential, i.e. cheap-before-credential — and `200`s a public `:443`; onion lane e2e against an in-process SOCKS5-as-Tor stub). **A genuinely clean egress IP + a real Tor/Nym crowd remain external (row 18).** | `crates/tessera-proxy/src/{policy,transport}.rs`, `crates/tessera-relay/src/{lib.rs, bin/tessera-client.rs}`, `crates/tessera-directory/src/lib.rs`; [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md) |
+| 18 | **Deployed clean-IP exits + live replicated directory operation + Tor/Nym anonymity crowd + third-party audit + multi-party MPC ceremony** | 🔒 external / future product — never simulated; the gaps between the runnable artifact and a stranger safely using it | tracked in [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md) (E1–E16), [`NEXT_STEPS.md`](./NEXT_STEPS.md), and [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md) |
 
 ## Verification (counts, re-measured for this doc)
 
-- **Rust:** 187 `#[test]` markers across the **host-workspace** crates (plus
-  ignored upstream-vector checks; run the suite for the exact pass count). The
-  host workspace contains no `#[tokio::test]`; the lone `#[tokio::test]` is in
-  the excluded `tessera-tower-demo` e2e. The two excluded crates run in their
-  own CI jobs: `tessera-tower-demo` (1 `#[tokio::test]`) and `tessera-wasm` (4
-  `#[wasm_bindgen_test]` + 2 native `#[test]`).
+- **Rust:** 253 `#[test]` markers across the **host-workspace** crates (plus
+  ignored upstream-vector checks; run the suite for the exact pass count — the
+  last full `cargo test --workspace --all-features` run was 255 passing, 0
+  failed). The
+  excluded crates run in their own CI jobs: `tessera-tower-demo` (1 e2e test)
+  and `tessera-wasm` (4 `#[wasm_bindgen_test]` + 2 native `#[test]`).
 - **Foundry:** ~78 test/invariant/fuzz functions across the seven
   `contracts/test/*.t.sol` suites (ChannelRegistry, CourtAdversarial,
   CourtInvariant, CrossLanguageVector, RDecVerifier, Reentrancy, TokenMint);
@@ -77,10 +78,10 @@
 - **Test counts.** [`docs/CEILING_PROGRESS.md`](./CEILING_PROGRESS.md)'s snapshot
   tracks current approximate aggregates. Treat them as moving markers, not pins
   — per `CLAUDE.md`/`AGENTS.md`, run the suite rather than trusting any stated
-  count. The current Rust marker count is 187 host-workspace `#[test]` markers,
+  count. The current Rust marker count is 253 host-workspace `#[test]` markers,
   plus the excluded-crate tests gated separately: `tessera-wasm` (2 native
   `#[test]` in `native_roundtrip.rs` + 4 `#[wasm_bindgen_test]` headless-node
-  tests) and `tessera-tower-demo` (1 `#[tokio::test]` e2e). Foundry (78, across
+  tests) and `tessera-tower-demo` (1 e2e test). Foundry (78, across
   the seven `contracts/test/*.t.sol` suites) and fuzz (7 targets) match what
   CEILING reports. So measured the same way, the docs agree.
 - **TEE status nuance.** README §"Run it yourself" presents the dstack TEE as the
