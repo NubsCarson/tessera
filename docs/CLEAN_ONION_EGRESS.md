@@ -88,9 +88,12 @@ borrows Tor's existing anonymity crowd instead of asking each operator to stand
 up an independent relay.
 
 The cost is real: onion adds latency, a Tor dependency, and a descriptor-publish
-cold start. The mitigation is that the lane must **work or self-skip cleanly when
-Tor is unavailable** — onion is an additive lane, never a hard prerequisite, and
-the clearnet relay loop remains the fallback.
+cold start. But for this product the onion egress is **the foundation, not an
+optional lane** — the exit *is* an onion service. If Tor is unavailable the
+client **fails loud** rather than silently downgrading the anonymity the operator
+asked for; dropping to the clearnet 2-hop relay loop is an **explicit opt-out**
+(`TESSERA_ALLOW_CLEARNET_FALLBACK=1`), never the default. The relay loop stays a
+supported fallback for operators who genuinely cannot run Tor, but it is opt-in.
 
 ## Why ARC primary, Semaphore optional?
 
@@ -165,15 +168,14 @@ For the code that exists today:
 - Each exit is its own ARC key domain (`TESSERA_KEY_FILE`), advertised via a
   signed `tessera-directory` snapshot. Never mount one key file into independent
   exits.
-- The onion path must work or self-skip cleanly when Tor is unavailable. Onion is
-  never a hard prerequisite; the clearnet relay loop is the fallback. **Scope of
-  the self-skip:** it is a *startup* preflight — if the Tor SOCKS port is
-  unreachable at launch, the client selects the relay route instead. The preflight
-  is a TCP-liveness check only (a wedged or non-Tor listener on the SOCKS port can
-  pass it); and once the onion route is committed, a *later* Tor failure surfaces
-  as a per-request `502`, not a runtime fall-back to the relay — restart the
-  client to re-skip. Runtime fallback is deliberately omitted: silently dropping
-  to clearnet on a route chosen for anonymity is its own footgun.
+- The onion egress is the foundation: when an exit onion is configured, it is THE
+  path. If Tor is unreachable at launch the client **fails loud** — it does NOT
+  silently drop to clearnet on a route chosen for anonymity. Dropping to the
+  clearnet relay loop is an explicit operator opt-in
+  (`TESSERA_ALLOW_CLEARNET_FALLBACK=1`); once the onion route is committed, a
+  *later* Tor failure surfaces as a per-request `502` (restart to re-evaluate),
+  not a runtime downgrade. The startup preflight is a TCP-liveness check only (a
+  wedged or non-Tor listener on the SOCKS port can pass it).
 
 ## Target clean onion egress lane shape
 
@@ -227,16 +229,25 @@ Built here (the reusable core the lane stands on):
 - **The client→exit onion lane** (PR3): `ClientRoute::Onion` /
   `open_through_onion` — the local client proxy dials the exit's `.onion` through
   Tor SOCKS (single hop, relay bypassed; the exit's peer is the Tor circuit,
-  never the client IP), with a bounded cold-start retry + "warming up" narration
-  and a preflight that **self-skips to the clearnet relay loop when Tor is
-  unavailable**. Configured by `TESSERA_EXIT_ONION` + `TESSERA_TOR_SOCKS`; proven
-  end-to-end against a SOCKS5 stub standing in for Tor.
+  never the client IP), with a bounded cold-start retry + "warming up" narration.
+  **Tor-native:** when an onion is configured but the Tor SOCKS proxy is
+  unreachable, the client **fails loud** rather than silently downgrading the
+  anonymity it was asked for — clearnet is taken only if the operator opts in with
+  `TESSERA_ALLOW_CLEARNET_FALLBACK=1`. Configured by `TESSERA_EXIT_ONION` +
+  `TESSERA_TOR_SOCKS`; proven end-to-end against a SOCKS5 stub standing in for Tor
+  (and live against real Tor — see [`ONION_EGRESS.md`](./ONION_EGRESS.md)).
 - **Onion-aware directory advertisement + selection** (PR4): the signed directory
   format `tessera-exit-directory-v2` advertises each exit's optional `onion_addr`
   and a signed `clean_egress` flag under the threshold signature (tamper-evident),
   and `DirectorySelectionPolicy` gains `require_onion` / `require_clean_egress` so
   a client can select an onion-capable exit. The magic bump fails a v1 verifier
-  closed against a v2 snapshot.
+  closed against a v2 snapshot. **The client routes over the selected entry's
+  SIGNED `.onion`** — preferred over the unsigned `TESSERA_EXIT_ONION` env (which
+  is mutually exclusive with directory mode, so an unsigned onion can never
+  override a signed one). `TESSERA_DIRECTORY_REQUIRE_ONION=1` makes the onion lane
+  a hard selection filter; if selection still lands on a no-onion entry while the
+  directory advertises an onion exit, the client warns loudly before it would route
+  clearnet.
 
 Not built here (buildable, but forward product/research scope, not hidden
 cleanup):
@@ -247,11 +258,6 @@ cleanup):
   below; the exit binary needs no code change). What is *not* built is sealing
   that HS key to the enclave in a non-logging TEE — like the ARC server key it
   must ride the (reserved, fail-closed) `dstack-kms` provider, not a plain file.
-- Wiring the directory's advertised `onion_addr` into the client's automatic
-  route selection. The directory now *carries* the onion endpoint (PR4), but the
-  client still consumes it via `TESSERA_EXIT_ONION` (env), not yet from a selected
-  directory entry — that wiring (and lifting the env/directory mutual-exclusion)
-  is the next step.
 - Routing **issuance** over Tor: the onion lane hides the *browsing* IP from the
   exit, but issuance still connects the client directly to the issuer (the issuer
   learns the IP at mint/re-issue time; ARC keeps it cryptographically unlinkable).

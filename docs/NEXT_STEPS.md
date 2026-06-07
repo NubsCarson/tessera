@@ -15,11 +15,14 @@ real deployment, audit, or user workflow.
 
 ## Recently landed (the clean onion egress lane)
 
-Built and tested (see [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md)):
+Built and tested (see [`ONION_EGRESS.md`](./ONION_EGRESS.md),
+[`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md)):
 secure-by-default exit target/SSRF policy + per-tunnel caps; a pluggable
 `transport::Dialer` seam; the single-hop client→exit `.onion` route (relay
-bypassed, cold-start retry, startup self-skip when Tor is down); and the signed
-directory **v2** `.onion`/`clean_egress` advertisement + selection. The
+bypassed, cold-start retry, **Tor-native fail-loud** when Tor is down with an
+opt-out env); the signed directory **v2** `.onion`/`clean_egress` advertisement +
+selection (client routes over the signed onion); and two-machine deploy scripts
+**demonstrated live** (residential exit IP ≠ client IP). The
 remaining lane work is below — and it is the *external* half: a clean egress IP,
 a real Tor crowd, routing issuance over Tor, and wiring the directory's signed
 onion endpoint into the client's automatic route selection.
