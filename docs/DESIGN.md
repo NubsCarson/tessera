@@ -1,9 +1,10 @@
 # Tessera — Design (vNext): private, uncensorable clearnet access
 
-> **Status:** proposed direction, consolidating a multi-pass, adversarially-red-teamed
+> **Status:** the live direction, consolidating a multi-pass, adversarially-red-teamed
 > design effort. It **extends/supersedes** the v0 "cooperating-origin / censorship-*obsolescence*"
-> thesis toward privacy-preserving **circumvention** — a public-facing philosophy change that is
-> **gated on the maintainer's explicit OK** before the README/GOAL are reframed.
+> thesis toward privacy-preserving **circumvention** — the public-facing philosophy change is
+> **applied** (README/GOAL/THREAT_MODEL/STATUS reframed to "both private AND uncensorable", and
+> the **unblockable bridge-entry** layer has shipped — see [`CENSORSHIP_RESISTANCE.md`](./CENSORSHIP_RESISTANCE.md)).
 >
 > **Honesty up front:** this is **research-grade and UNAUDITED**. The design is **~85% prior art**
 > — its contribution is *composition + candor*, not a new cryptographic primitive. Reaching
@@ -86,6 +87,12 @@ Nova earns a place only as a close-time **ancestry/genesis-conservation** compre
 only if we want trustless conservation over relayer-attested balance (Option A) — ship A first.
 
 ## 3. Transport (hide the client)
+
+> **Shipped today (the unblockable-entry half):** the client reaches Tor — and thus the exit's
+> `.onion` — through Tor's own pluggable transports / bridges (**obfs4 / Snowflake / WebTunnel**),
+> *reused* from Tor with **zero new circumvention crypto**. This is the built, recommended path for
+> reaching the network from a censored environment; the mode-switched mixnet design below is the
+> ambitious-first research direction (proposed/unbuilt). See [`CENSORSHIP_RESISTANCE.md`](./CENSORSHIP_RESISTANCE.md).
 
 Mode-switched (maps to NymVPN, a shipped system): **fast** = 2-hop split-trust **MASQUE/QUIC +
 AmneziaWG** (interactive/LLM); **anon** = **Loopix/Sphinx Poisson mixnet** + cover traffic (bulk),

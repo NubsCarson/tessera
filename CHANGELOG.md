@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — both private AND uncensorable (Tor bridge entry + multi-node fixes)
+
+- **Unblockable entry** — reach the network from a censored environment via Tor's
+  own pluggable transports / bridges (**obfs4 / Snowflake / WebTunnel**), *reused*
+  from Tor with no new circumvention crypto. `tessera-client::torrc` builds the
+  bridge `torrc` (validated against `tor --verify-config`); `run-onion-client.sh`
+  wires `TESSERA_PT` / `TESSERA_BRIDGE_LINES` with a **fail-loud PT-binary
+  preflight**; the client diagnoses "Tor blocked" vs "Tor down". A
+  `TESSERA_PT_E2E=1`-gated test runs the real obfs4 → Tor → `.onion` path
+  (`scripts/demo-bridge-entry.sh`). See [`docs/CENSORSHIP_RESISTANCE.md`](./docs/CENSORSHIP_RESISTANCE.md).
+- **Shared `RedisTagStore`** — a distributed, fail-closed spent-tag set
+  (`SET … NX`, minimal std-`TcpStream` RESP client, no new crate) that fixes the
+  multi-node double-spend (a per-process set let a second replica re-admit a token);
+  the in-memory default now warns loudly it is non-durable/non-shared.
+- **Issuance over Tor** — `obtain_credential_on` / `_paid_on` run the exchange over
+  an already-connected stream, so `TESSERA_ISSUER_ONION` routes issuance through
+  Tor SOCKS (the issuer never sees the client IP); the issuer-pk pin still binds;
+  clearnet is the explicit (unset-env) opt-out.
+- The MV3 browser extension is now **prominently labeled a non-unlinkable SCAFFOLD**
+  (it reuses one DNR header across requests), pointing at the real per-request path.
+- Docs reframed to **both private AND uncensorable, real, UNAUDITED** (README,
+  STATUS row 18 "Unblockable bridge entry", THREAT_MODEL/GOAL evasion-in-scope).
+
 ### Added — paid mint wired to issuance (pay ETH → credentials)
 
 - **`tessera-issuer::mint`** — gate issuance on an on-chain `TokenMint` purchase
