@@ -114,12 +114,15 @@ a live origin (track 3 ships a compiling, headless-tested wasm core + scaffold).
 The current "what next?" queue is tracked in [`NEXT_STEPS.md`](./NEXT_STEPS.md);
 those items are forward product/deployment work, not unfinished roadmap blockers.
 
-Since then the **clean onion egress lane** landed (see
+Since then the **Tor-native onion egress lane** landed (see
+[`ONION_EGRESS.md`](./ONION_EGRESS.md),
 [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md)): the exit target/SSRF policy +
 per-tunnel caps, a pluggable `transport::Dialer` seam, the single-hop client→exit
-`.onion` route (relay bypassed; cold-start retry; startup self-skip when Tor is
-down), and the signed directory **v2** onion/`clean_egress` advertisement +
-selection. That is the access-path *software*; the irreducibly-external half (a
+`.onion` route (relay bypassed; cold-start retry; **Tor-native fail-loud** when
+Tor is down, with an opt-out env), the signed directory **v2** onion/`clean_egress`
+advertisement + selection (client routes over the signed onion), and two-machine
+deploy scripts **demonstrated live** (residential exit IP ≠ client IP). That is
+the access-path *software*; the irreducibly-external half (a
 genuinely clean egress IP, a real Tor/Nym crowd) is unchanged and still external.
 
 ---

@@ -37,6 +37,7 @@ If you read nothing else, read the **honest status** at the bottom.
 | Post-quantum terrain | [`POST_QUANTUM.md`](./POST_QUANTUM.md) |
 | The roadmap | [`ROADMAP.md`](./ROADMAP.md) |
 | What remains vs. what is external / new scope | [`NEXT_STEPS.md`](./NEXT_STEPS.md) |
+| Run it as a **Tor-native onion egress** (deploy + live proof + RGOE head-to-head) | [`ONION_EGRESS.md`](./ONION_EGRESS.md) |
 | The clean onion egress lane (client→exit over `.onion`) | [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md) |
 | **One status table for the whole system** | [`STATUS.md`](./STATUS.md) |
 | **The audit-prep packet** (the map an auditor reads first) | [`../AUDIT.md`](../AUDIT.md) |
