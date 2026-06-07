@@ -684,24 +684,31 @@ pub fn open_through_relay(
 }
 
 /// How the local client proxy reaches the exit.
+///
+/// [`Onion`](ClientRoute::Onion) is the **primary, Tor-native path** — the exit
+/// *is* an onion service, reached over Tor; the exit's peer is the rendezvous
+/// circuit, never the client IP, and no separate relay is needed.
+/// [`Relay`](ClientRoute::Relay) is the **legacy clearnet opt-out** (the 2-hop
+/// loop) for operators who genuinely cannot run Tor — it is opt-in, not a silent
+/// fallback (see `tessera-client`'s `choose_route`).
 #[derive(Debug, Clone)]
 pub enum ClientRoute {
-    /// The 2-hop clearnet loop: TCP to the relay, which forwards a nested
-    /// `CONNECT` to the exit. The relay hides the client IP from the exit.
-    Relay {
-        /// First hop — the credential-blind relay.
-        relay_addr: SocketAddr,
-        /// The exit the relay is asked to forward to.
-        exit_addr: SocketAddr,
-    },
-    /// The single-hop onion lane: dial the exit's `.onion` through a Tor SOCKS
-    /// proxy, so the exit's peer is the Tor rendezvous circuit — never the client
-    /// IP — and no separate relay is needed.
+    /// The single-hop onion lane (the Tor-native path): dial the exit's `.onion`
+    /// through a Tor SOCKS proxy, so the exit's peer is the Tor rendezvous circuit
+    /// — never the client IP — and no separate relay is needed.
     Onion {
         /// Local Tor SOCKS5 endpoint, e.g. `127.0.0.1:9050`.
         socks_addr: String,
         /// The exit's `.onion:port` (the hostname is passed to Tor unresolved).
         exit_onion: String,
+    },
+    /// The legacy 2-hop clearnet loop (opt-out): TCP to the relay, which forwards
+    /// a nested `CONNECT` to the exit. The relay hides the client IP from the exit.
+    Relay {
+        /// First hop — the credential-blind relay.
+        relay_addr: SocketAddr,
+        /// The exit the relay is asked to forward to.
+        exit_addr: SocketAddr,
     },
 }
 
