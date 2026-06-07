@@ -1,9 +1,10 @@
 # Tessera — Design (vNext): private, uncensorable clearnet access
 
-> **Status:** proposed direction, consolidating a multi-pass, adversarially-red-teamed
+> **Status:** the live direction, consolidating a multi-pass, adversarially-red-teamed
 > design effort. It **extends/supersedes** the v0 "cooperating-origin / censorship-*obsolescence*"
-> thesis toward privacy-preserving **circumvention** — a public-facing philosophy change that is
-> **gated on the maintainer's explicit OK** before the README/GOAL are reframed.
+> thesis toward privacy-preserving **circumvention** — the public-facing philosophy change is
+> **applied** (README/GOAL/THREAT_MODEL/STATUS reframed to "both private AND uncensorable", and
+> the **unblockable bridge-entry** layer has shipped — see [`CENSORSHIP_RESISTANCE.md`](./CENSORSHIP_RESISTANCE.md)).
 >
 > **Honesty up front:** this is **research-grade and UNAUDITED**. The design is **~85% prior art**
 > — its contribution is *composition + candor*, not a new cryptographic primitive. Reaching
@@ -26,7 +27,7 @@ behavioral anti-bot remains an arms race that, worst case, degrades to a CAPTCHA
 
 ## 1. Architecture (one flow)
 
-> **Scope note:** this is the *ambitious-first* flow (the §0 "proposed direction"); the shielded-pool, Loopix/Sphinx mixnet, and residential-egress nodes below are **proposed/unbuilt** (the `ShieldedPool` is future work, see §10 "**Then:**"). The **built, recommended-default** path is the leaner **ARC-token-over-Tor** loop — credential-gated clean exit, **no channel, no shielded pool, no mixnet, no on-chain court on the common path** — see [`ARCHITECTURE.md`](./ARCHITECTURE.md). Everything here is research-grade and UNAUDITED.
+> **Scope note:** this is the *ambitious-first* flow (the §0 north-star direction); the shielded-pool, Loopix/Sphinx mixnet, and residential-egress nodes below are **proposed/unbuilt** (the `ShieldedPool` is future work, see §10 "**Then:**"). The **built, recommended-default** path is the leaner **ARC-token-over-Tor** loop — credential-gated clean exit, **no channel, no shielded pool, no mixnet, no on-chain court on the common path** — see [`ARCHITECTURE.md`](./ARCHITECTURE.md). Everything here is research-grade and UNAUDITED.
 
 ```
 CLIENT (real-browser persona; holds an anonymous credential)
@@ -86,6 +87,12 @@ Nova earns a place only as a close-time **ancestry/genesis-conservation** compre
 only if we want trustless conservation over relayer-attested balance (Option A) — ship A first.
 
 ## 3. Transport (hide the client)
+
+> **Shipped today (the unblockable-entry half):** the client reaches Tor — and thus the exit's
+> `.onion` — through Tor's own pluggable transports / bridges (**obfs4 / Snowflake / WebTunnel**),
+> *reused* from Tor with **zero new circumvention crypto**. This is the built, recommended path for
+> reaching the network from a censored environment; the mode-switched mixnet design below is the
+> ambitious-first research direction (proposed/unbuilt). See [`CENSORSHIP_RESISTANCE.md`](./CENSORSHIP_RESISTANCE.md).
 
 Mode-switched (maps to NymVPN, a shipped system): **fast** = 2-hop split-trust **MASQUE/QUIC +
 AmneziaWG** (interactive/LLM); **anon** = **Loopix/Sphinx Poisson mixnet** + cover traffic (bulk),
@@ -164,7 +171,9 @@ Loopix/Sphinx + Outfox + X-Wing, hintless PIR (for a cacheable "private read" ti
 
 ## 10. Build phasing + reuse + honest gates
 
-- **Phase 0 — Consolidate (this doc) + scaffold.** Reframe gated on maintainer OK.
+- **Phase 0 — Consolidate (this doc) + scaffold.** ✅ Reframe **applied** (README/
+  GOAL/THREAT_MODEL/STATUS now "both private AND uncensorable"; the unblockable
+  bridge-entry layer shipped — see [`CENSORSHIP_RESISTANCE.md`](./CENSORSHIP_RESISTANCE.md)).
 - **Phase 1 — Prove the loop (make-or-break, mostly reuse).** `client → Tor → credential-gated exit
   (e2e TLS) → site → return`, ARC as v0 spend stand-in; local first, then **one real clean exit IP**
   → a Tor-`403` site returns `200`, privately. Tested.

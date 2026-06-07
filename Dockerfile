@@ -22,8 +22,9 @@ RUN cargo build --release -p tessera-issuer -p tessera-proxy -p tessera-relay --
 
 FROM debian:bookworm-slim AS runtime
 # ca-certificates for DNS/TLS-adjacent tooling; the tunnel itself is opaque bytes
-# (CONNECT, end-to-end TLS) so the node never terminates TLS.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# (CONNECT, end-to-end TLS) so the node never terminates TLS. curl is only for the
+# compose/k8s healthcheck against the counts-only TESSERA_HEALTH_LISTEN endpoint.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -u 10001 -s /usr/sbin/nologin tessera
 COPY --from=builder /build/target/release/tessera-issuer /usr/local/bin/tessera-issuer

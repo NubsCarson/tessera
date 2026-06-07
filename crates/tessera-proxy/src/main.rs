@@ -27,7 +27,8 @@ use tessera_client::{begin_issuance, TesseraClient};
 use tessera_issuer::{check_path_usable, KeyProviderConfig};
 use tessera_origin::{FileTagStore, OriginGuard, RedisTagStore, SpentTagStore};
 use tessera_proxy::{
-    serve_observed_shaped_policy, PortRule, ShapingConfig, TargetPolicy, Upstream, VolumeShaper,
+    health, serve_observed_shaped_policy, PortRule, ShapingConfig, TargetPolicy, Upstream,
+    VolumeShaper,
 };
 
 const REQUEST_CTX: &[u8] = b"tessera://issue/v1";
@@ -459,6 +460,9 @@ fn main() {
     //                    exit (+ optional _PASSWORD, _TTL seconds). Mutually
     //                    exclusive with TESSERA_SPENT_TAG_FILE. Without either,
     //                    the in-memory default is non-durable AND non-shared.
+    //   TESSERA_HEALTH_LISTEN  optional HOST:PORT for a counts-only health endpoint
+    //                    (/healthz /readyz /metrics — no identifiers; OBSERVABILITY
+    //                    §5). Bind to loopback / a private interface, never public.
     let args: Vec<String> = std::env::args().collect();
     let tor_arg = args.iter().any(|a| a == "--tor");
     let check = args.iter().any(|a| a == "--check");
@@ -612,6 +616,23 @@ fn main() {
         ShapingConfig::default(),
         addr.port() as u64,
     )));
+    // Opt-in, counts-only health/readiness/metrics endpoint (docs/OBSERVABILITY.md
+    // §5) for supervision + healthchecks — off unless TESSERA_HEALTH_LISTEN is set;
+    // bind it to loopback / a private interface, never the public.
+    let health = health::HealthState::new(ROLE);
+    if let Ok(hl) = std::env::var("TESSERA_HEALTH_LISTEN") {
+        let hl = hl.trim();
+        if !hl.is_empty() {
+            health::spawn(hl, Arc::clone(&health)).unwrap_or_else(|e| {
+                die_code(
+                    &format!("tessera-{ROLE}: could not bind TESSERA_HEALTH_LISTEN {hl}: {e}"),
+                    1,
+                )
+            });
+            println!("health endpoint on http://{hl}  (/healthz /readyz /metrics — counts only)");
+        }
+    }
+    health.set_ready();
     serve_observed_shaped_policy(
         listener,
         guard,

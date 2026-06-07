@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use tessera_origin::{Decision, OriginGuard, PRESENTATION_HEADER};
 
+pub mod health;
 pub mod policy;
 pub mod shaping;
 pub mod transport;

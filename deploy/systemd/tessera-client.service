@@ -1,0 +1,35 @@
+# Hardened systemd unit for the Tessera CLIENT proxy (what you point a browser at).
+# Holds no key/state. Usually you run the client on a laptop, not as a service —
+# this unit is for a fixed gateway box. See deploy/systemd/README.md.
+[Unit]
+Description=Tessera client proxy (local CONNECT proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tessera-client
+EnvironmentFile=/etc/tessera/client.env
+Restart=on-failure
+RestartSec=2
+
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

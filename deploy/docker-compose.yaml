@@ -22,8 +22,29 @@
 #   then:        curl -x http://127.0.0.1:8120 https://example.com
 # Deploy in a TEE: see deploy/dstack/docker-compose.yaml + docs/DEPLOY.md.
 
+# Shared container hardening, merged into every service below. These are
+# user-space network apps that bind high ports and write only to mounted volumes,
+# so they need no Linux capabilities, no privilege escalation, and no writable
+# root filesystem (a tmpfs covers /tmp; the key volume stays writable). Logs are
+# size-capped so a long-running node can't fill the host disk.
+x-hardening: &hardening
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - "no-new-privileges:true"
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  restart: unless-stopped
+
 services:
   issuer:
+    <<: *hardening
     build:
       context: ..
       dockerfile: Dockerfile
@@ -36,9 +57,9 @@ services:
       TESSERA_POW_DIFFICULTY: "14"
     volumes:
       - tessera-key:/keys
-    restart: unless-stopped
 
   exit:
+    <<: *hardening
     image: tessera-node:0.1.0
     command: ["tessera-proxy"]
     environment:
@@ -52,13 +73,24 @@ services:
       # Durable replay protection for this single exit across restarts. This is
       # not a distributed multi-exit store.
       TESSERA_SPENT_TAG_FILE: "/keys/spent-tags.log"
+      # Counts-only health endpoint (loopback) for the healthcheck below.
+      TESSERA_HEALTH_LISTEN: "127.0.0.1:9118"
     volumes:
       - tessera-key:/keys
     depends_on:
       - issuer
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9118/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # The exit binds its port only AFTER establishing the shared ARC key, which
+      # polls up to ~60s for the issuer to mint it on a cold start — give the
+      # readiness probe that long before it can mark the node unhealthy.
+      start_period: 60s
 
   relay:
+    <<: *hardening
     image: tessera-node:0.1.0
     command: ["tessera-relay"]
     environment:
@@ -66,9 +98,9 @@ services:
       TESSERA_EXIT_ADDR: "exit:8118"
     depends_on:
       - exit
-    restart: unless-stopped
 
   client:
+    <<: *hardening
     image: tessera-node:0.1.0
     command: ["tessera-client"]
     environment:
@@ -83,7 +115,6 @@ services:
       # The client entry point you point curl/your browser at. Bound to localhost
       # only — this is your machine's local proxy, not a public service.
       - "127.0.0.1:8120:8120"
-    restart: unless-stopped
 
 volumes:
   # Holds the shared ARC server key. In a real multi-node/TEE deployment this is

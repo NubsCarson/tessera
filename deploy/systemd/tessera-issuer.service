@@ -1,0 +1,39 @@
+# Hardened systemd unit for the Tessera ISSUER (credential authority).
+# Shares the same `tessera` user + /var/lib/tessera state dir as the exit, so the
+# ARC key it creates is the one the exit loads. See deploy/systemd/README.md.
+[Unit]
+Description=Tessera issuer (credential authority)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tessera-issuer
+EnvironmentFile=/etc/tessera/issuer.env
+Restart=on-failure
+RestartSec=2
+
+User=tessera
+Group=tessera
+StateDirectory=tessera
+ReadWritePaths=/var/lib/tessera
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

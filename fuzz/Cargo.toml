@@ -73,3 +73,10 @@ path = "fuzz_targets/arc_lifecycle.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "path_parser"
+path = "fuzz_targets/path_parser.rs"
+test = false
+doc = false
+bench = false

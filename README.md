@@ -60,6 +60,10 @@ network.
 
 ![Tessera demo](docs/demo.svg)
 
+*Both private **and** uncensorable — the disguised, unblockable entry (Tor bridges, reused) in front of the credential-gated clean exit:*
+
+![Both private and uncensorable](docs/censorship-resistance.svg)
+
 ```sh
 cargo run -p tessera-demo            # real HTTP origin + client, localhost
 cargo run -p tessera-demo -- --tor   # also drive it over a real Tor onion circuit
