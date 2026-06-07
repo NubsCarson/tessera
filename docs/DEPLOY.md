@@ -61,7 +61,9 @@ the local `cargo run` demos):
 | `TESSERA_EXIT_ADDR` | relay | the exit to forward to (e.g. `exit:8118`) |
 | `TESSERA_ISSUER` | client | issuer `HOST:PORT` to obtain a credential from |
 | `TESSERA_RELAY` / `TESSERA_EXIT` | client | relay / exit `HOST:PORT` to route through |
-| `TESSERA_EXIT_ONION` | client | the exit's `.onion:port` — selects the single-hop onion lane (the client dials the exit over Tor SOCKS, bypassing the relay); self-skips to the relay loop if Tor is down at launch. Mutually exclusive with `TESSERA_DIRECTORY_FILE`. See [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md) |
+| `TESSERA_EXIT_ONION` | client | the exit's `.onion:port` — selects the single-hop onion lane (the client dials the exit over Tor SOCKS, bypassing the relay). **Tor-native:** if Tor is unreachable the client *fails loud* (set `TESSERA_ALLOW_CLEARNET_FALLBACK=1` to drop to the relay loop instead). Mutually exclusive with `TESSERA_DIRECTORY_FILE`. See [`ONION_EGRESS.md`](./ONION_EGRESS.md), [`CLEAN_ONION_EGRESS.md`](./CLEAN_ONION_EGRESS.md) |
+| `TESSERA_ALLOW_CLEARNET_FALLBACK` | client | `1`/`true` opts the onion lane into dropping to the clearnet relay loop when Tor is down (default: fail loud). |
+| `TESSERA_DIRECTORY_REQUIRE_ONION` | client | `1`/`true` makes onion advertisement a hard directory-selection filter (reject clearnet-only exits) instead of warning. |
 | `TESSERA_TOR_SOCKS` | client | local Tor SOCKS5 endpoint for the onion lane (default `127.0.0.1:9050`) |
 | `TESSERA_CLIENT_LISTEN` | client | local proxy bind (default `127.0.0.1:8120`) |
 | `TESSERA_ISSUER_PK` | client | hex pin: the issuer pk (or fingerprint prefix) issuance must match |

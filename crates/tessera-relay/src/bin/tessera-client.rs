@@ -754,10 +754,11 @@ fn main() {
         .local_addr()
         .unwrap_or_else(|e| die(&format!("could not read client proxy addr: {e}")));
 
-    // Choose the route to the exit: the single-hop onion lane if configured and
-    // Tor is up, else the 2-hop clearnet relay loop (self-skip fallback).
-    // Tor-native: a directory's SIGNED onion endpoint (v2) drives the route when
-    // present; otherwise the env (manual mode).
+    // Choose the route to the exit: the single-hop onion lane if an onion is
+    // configured (Tor-native — a Tor-down onion request fails loud unless the
+    // operator opts into clearnet), else the 2-hop clearnet relay loop. A
+    // directory's SIGNED onion endpoint (v2) drives the route when present;
+    // otherwise the env (manual mode).
     let directory_onion = directory.as_ref().and_then(|d| d.onion_addr.clone());
     let route = resolve_client_route(directory_onion, relay_addr, exit_addr);
 

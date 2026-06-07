@@ -43,11 +43,40 @@ response through the onion egress:
 The request traversed a real onion circuit, was admitted on a single-use ARC
 token, cleared the secure target policy, and reached the live internet.
 
-**Honest caveat:** on one machine the egress IP equals your own (the exit
-egresses from this box). The *clean egress IP* is a two-machine concern: run the
-exit on a separate clean-IP host with `scripts/run-onion-exit.sh` and the client
-with `scripts/run-onion-client.sh`. No code manufactures a clean IP — that, a
-real Tor/Nym crowd, and a third-party audit stay external.
+**Honest caveat:** on *one* machine the egress IP equals your own (the exit
+egresses from this box). A *clean egress IP* is a two-machine concern — and it has
+been demonstrated live (below). No code manufactures a clean IP; what stays
+external is *scale* (a real Tor/Nym anonymity crowd) and a third-party audit.
+
+## Proven live — two machines, residential exit
+
+Run end-to-end on real hardware: the exit on a separate host
+(`scripts/run-onion-exit.sh`), the client on a laptop
+(`scripts/run-onion-client.sh`). The destination saw the **exit's** IP, never the
+client's, and the exit never saw the client's IP (onion rendezvous):
+
+```text
+laptop (client) own IP : 67.245.x.x    ← never seen by the destination
+egress IP destination saw: 73.162.x.x    ← the exit host's RESIDENTIAL IP
+exit onion             : 7brurpiy…xqid.onion:443  (no exit node; single hop)
+```
+
+The exit ran on a residential connection — a *harder, more reputable* egress than
+a datacenter IP. And the secure target policy was live on that same exit, probed
+directly with **no credential presented** (the target check is cheap and runs
+*before* the credential check, so a blocked target never even costs a token):
+
+```text
+api.ipify.org:443    ALLOWED public :443   → 407 Proxy Authentication Required   (passes target gate → credential gate)
+169.254.169.254:443  cloud metadata        → 403 Forbidden (target policy: blocked address)
+10.0.0.1:443         private RFC1918        → 403 Forbidden (target policy: blocked address)
+192.168.1.1:443      the exit host's LAN    → 403 Forbidden (target policy: blocked address)
+example.com:22       SSH (disallowed port)  → 403 Forbidden (target policy: disallowed port)
+```
+
+Issuance still connects the client to the issuer directly (over an SSH tunnel here;
+routing issuance over Tor is the documented next step) — ARC keeps that
+cryptographically unlinkable from browsing.
 
 ## Deploy (two machines)
 
