@@ -170,10 +170,12 @@ curl -x http://127.0.0.1:8120 https://example.com
 **Why a TEE.** The relay must not log or collude (`{client, exit}` is sensitive).
 In an Intel TDX enclave with **remote attestation**, a client can *verify* the
 running node matches the expected open-source image under dstack/TDX attestation
-assumptions before trusting it. The intended sealed-key path is to **derive the
-ARC server key from the dstack KMS and seal it to the enclave** so it never
-leaves; the current `dstack-kms` provider is reserved and fails closed until that
-client is implemented. This is the **trust** axis.
+assumptions before trusting it. The sealed-key path **derives the ARC server key
+from the dstack KMS and seals it to the enclave** so it never leaves — the
+`dstack-kms` provider is now implemented (`crates/tessera-issuer/src/dstack_kms.rs`:
+a std-only guest-agent `GetKey` client), fail-closed off-TEE, and **proven only
+against a mock + the dstack simulator, not real TDX hardware**. This is the
+**trust** axis.
 
 ```sh
 # a) Build + push the image to a registry the TEE can pull:
@@ -197,11 +199,54 @@ vmm-cli.py deploy --name tessera --compose app-compose.json --vcpu 2 --memory 2G
 verifiable; the dstack **gateway** gives it an attestation-tied TLS endpoint. A
 client (or anyone) then checks the TDX quote against the expected image
 measurement before routing through it. `deploy/dstack/docker-compose.yaml` mounts
-the `dstack.sock` for quote/attestation plumbing and future KMS derivation; the
-current `TESSERA_KEY_PROVIDER=dstack-kms` path is explicit but fail-closed until
-a real dstack KMS client is implemented. See the
+the `dstack.sock` and sets `TESSERA_KEY_PROVIDER=dstack-kms` on the exit, so the
+ARC key is derived from the guest agent and never written to disk (implemented;
+fail-closed off-TEE; mock/simulator-proven, not silicon-proven). See the
 [dstack docs](https://github.com/dstack-tee/dstack) for the exact VMM/gateway
-setup on your host.
+setup on your host, and **"Verifying a deployment"** below.
+
+### Verifying a deployment (and where to run it)
+
+**Where to run a TEE node.** You need a real Intel TDX host:
+
+- **Phala Cloud** — the quickest path; it runs dstack nodes directly, so this
+  compose deploys as-is (a small `tdx.small` CVM is roughly $40–45/mo, with free
+  trial credit to start).
+- **GCP** (C3, Intel TDX) or **Azure** (DCesv6 / ECesv6) **confidential VMs**, or
+  **bare-metal Intel TDX** (4th/5th-gen Xeon) self-hosting the dstack stack.
+- The egress IP is a **datacenter** IP either way — the TEE is a *trust* upgrade,
+  not a clean-egress one (see honest limits).
+
+**Local testing without TDX (wire-only, NOT security).** The dstack **simulator**
+exposes the same guest-agent API off-TEE: build `sdk/simulator` from the dstack
+repo (`./build.sh && ./dstack-simulator`) and point `TESSERA_DSTACK_SOCKET` at the
+simulator's `dstack.sock`. The exit will derive an ARC key end-to-end — but a
+simulator key is a deterministic **stub with no security guarantee**; never treat
+it as real.
+
+**Verifying a real node (what a client/auditor checks).** Attestation is separate
+from key derivation — the node derives its key locally; a *remote* party verifies
+the node out-of-band:
+
+1. Obtain the node's **TDX quote** (its guest agent `/GetQuote`, or the dstack
+   **gateway**'s RA-TLS certificate, which binds the public HTTPS endpoint to the
+   attested measurement).
+2. **Verify the quote** with Intel DCAP — locally/trustlessly via `dcap-qvl`, or a
+   hosted verifier (Phala's verify API, `proof.t16z.com`).
+3. **Check the measurements:** MRTD + RTMR0–2 must match the expected dstack OS
+   image (compute the expected values with `dstack-mr`), and replaying the RTMR3
+   event log must yield `compose_hash == SHA256(app-compose.json)`.
+4. **Pin image digests, not tags.** `compose_hash` only means "this exact image"
+   if the compose references immutable `sha256:…` digests; the shipped
+   `deploy/dstack/docker-compose.yaml` uses a floating tag
+   (`…/tessera-node:0.1.0`) for convenience — pin a digest (and ideally publish a
+   reproducible build) before relying on the measurement for audit.
+
+> **Status.** Tessera's *side* of this (the `dstack-kms` `GetKey` derivation) is
+> implemented and mock/simulator-tested; the full attest-and-route loop above has
+> **not** been run on real TDX hardware here, and a Tessera-client flow that
+> fetches + verifies the quote before routing is **not** built. That is the
+> "needs a live TDX environment" external step.
 
 ## Honest limits (read this)
 
@@ -218,14 +263,13 @@ setup on your host.
   blocklist Tor still needs a clean exit IP, which no code (or enclave)
   manufactures (see [`IP_EGRESS_IDEAS.md`](./IP_EGRESS_IDEAS.md)). TEE + clean
   residential egress is the ideal and the hard part.
-- **Key distribution is file-based here.** The shipped providers are
-  `ephemeral` and `file`; with `file`, the issuer + exit converge on one ARC
-  server key via a shared `TESSERA_KEY_FILE`
+- **Key distribution: `file` (here) or `dstack-kms` (TEE).** With `file`, the
+  issuer + exit converge on one ARC server key via a shared `TESSERA_KEY_FILE`
   (`tessera_issuer::ensure_shared_key` — a single-winner create that can't
-  diverge). `TESSERA_KEY_PROVIDER=dstack-kms` is reserved and fails closed with
-  a clear "not implemented" error. A real multi-host or TEE deployment should
-  implement that provider to **derive the shared key from the dstack KMS and seal
-  it to the enclaves** so it never lands on a disk.
+  diverge); the secret lands on disk. With `dstack-kms` (implemented), each node
+  instead **derives the key from the dstack KMS via the guest agent** and keeps it
+  in enclave memory — never on disk. That path is fail-closed off-TEE and proven
+  only against a mock + the dstack simulator, **not** real TDX hardware.
 - **Multi-exit custody is per-exit, not fleet-shared.** One `TESSERA_KEY_FILE`
   is one issuer+exit key domain. Independent exits need separate issuer/key
   files/key pins; see [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).

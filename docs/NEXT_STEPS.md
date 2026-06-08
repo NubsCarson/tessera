@@ -35,7 +35,7 @@ cleanup.
 | Track | Why it matters | Local done-when | External dependency |
 |---|---|---|---|
 | Browser extension final mile | Makes the system usable by a human, not just by tests and curl. | MV3 UI/config, issuer/directory setup flow, packaged extension, manual-browser checklist. | Real browser/manual install and live origin test. |
-| dstack KMS + attestation UX | Turns the TEE path from "reserved/fail-closed" into an operator flow. | Implement `dstack-kms`, document quote verification, add fail-closed tests/mocks. | Live TDX/dstack/KMS environment to prove sealing and attestation end to end. |
+| dstack KMS + attestation UX | Turns the TEE path into a real operator flow. | **`dstack-kms` client + fail-closed tests/mocks: done** (`crates/tessera-issuer/src/dstack_kms.rs`, mock/simulator-proven). Remaining: a client-side quote-verify flow before routing. | Live TDX/dstack/KMS environment to prove sealing + attestation on real silicon. |
 | Distributed spent-tag backend | Required before a multi-exit deployment can share replay state safely. | A concrete `SpentTagStore` backend or protocol sketch with race tests and failure semantics. | Multi-node ops validation; production datastore choice. |
 | Mirrored directory ops | Moves signed directory verification from local artifact to real operation. | Publisher/runbook, rotation drills, monitoring, stale-snapshot recovery docs/tests. | Multiple independent operators and hosted mirrors. |
 | Clean-egress experiment | The highest-signal proof for the access thesis. The lane *software* is now built (onion route + SSRF gate + directory v2); this is the live run. | Runbook and instrumentation for "Tor-blocked site returns 200 through Tessera exit." | A clean residential/ISP egress IP. |
@@ -60,8 +60,9 @@ These cannot be made true by local code alone:
 
 - Do not call the current artifact production-safe or audited.
 - Do not build speculative staking/tokenomics until the economics are chosen.
-- Do not present dstack KMS as implemented until `dstack-kms` stops failing closed
-  and is proven against a live or faithful test environment.
+- The `dstack-kms` client is now implemented and proven against a faithful test
+  environment (an in-process mock + the dstack simulator). Still do **not** present
+  it as proven on **real TDX hardware** until it runs end-to-end on a live TDX host.
 - Do not present directory verification as live replicated directory operation.
   The verifier/client selector is built; operations are still deployment work.
 - Do not present durable local spent tags as distributed replay prevention.

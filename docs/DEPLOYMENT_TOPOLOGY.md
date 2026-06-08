@@ -106,13 +106,14 @@ secret for every other exit and make one compromise a fleet-wide compromise. The
 normative decision is [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).
 
 The file-based key is fine on a trusted host / shared volume but is the weakest
-point of a multi-host deployment: the secret lands on disk. The intended fix is
-to **derive the shared key from the dstack KMS and seal it to the enclaves** so it
-never touches a disk. The binaries parse `TESSERA_KEY_PROVIDER=dstack-kms`, but
-that provider is reserved and fails closed until a real dstack KMS client is
-implemented. The TEE compose (`deploy/dstack/docker-compose.yaml`) deliberately
-wires only relay + exit and mounts the dstack socket for future
-attestation/KMS work.
+point of a multi-host deployment: the secret lands on disk. The fix is to
+**derive the shared key from the dstack KMS and seal it to the enclaves** so it
+never touches a disk. The binaries now **implement** `TESSERA_KEY_PROVIDER=dstack-kms`
+(`crates/tessera-issuer/src/dstack_kms.rs`): it derives the shared key from the
+dstack guest agent (`GetKey`) and keeps it in enclave memory, never on disk —
+fail-closed off-TEE, and proven only against a mock + the dstack simulator, **not**
+real TDX hardware. The TEE compose (`deploy/dstack/docker-compose.yaml`) wires the
+exit to this provider and mounts the dstack socket; it still omits the issuer.
 
 ## 4. Where the client → issuer IP exposure sits
 

@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — dstack-kms key provider (derive the ARC key in a TEE)
+
+- **`tessera-issuer::dstack_kms`** — the reserved/fails-closed
+  `TESSERA_KEY_PROVIDER=dstack-kms` seam is now an implemented client. It derives
+  the ARC server key from the **dstack guest agent** inside an Intel TDX CVM
+  (`POST /GetKey` over `/var/run/dstack.sock`), sealed to the enclave and **never
+  on disk**, expanding the derived secret into the ARC `ServerPrivateKey` by seeding
+  the canonical `SetupServer()` keygen through a SHAKE256 XOF DRBG (the raw bytes
+  are never used as a curve scalar). Deterministic in app-identity + key path, so an
+  issuer and its exit converge on one key with no shared key file. Transport is
+  **std-only** HTTP/1.1 + JSON over `UnixStream` (mirrors `mint::eth_call`) — **no
+  new deps**, no SDK/async/protobuf. Probes the dstack socket fallbacks; bounds the
+  response; **fail-closed** on any transport/status/parse/length error (`preflight`
+  rejects an unreachable socket). 11 unit tests against a faithful in-process mock
+  agent + the two `--check` integration tests updated. Wired into the dstack
+  compose (the exit now sets `dstack-kms`).
+- **Honest scope:** validated only against a mock + the official dstack
+  **simulator** — **not** real Intel TDX hardware + a live KMS, so a simulator/mock
+  key carries **no** security guarantee. A client-side quote-verification flow
+  before routing is still not built. Docs updated across `DEPLOY.md` §2 (incl. a
+  deploy/verify runbook), `KEY_MANAGEMENT.md`, `DEPLOYMENT_TOPOLOGY.md`,
+  `TRUST_MODEL.md`, `STATUS.md`, `NEXT_STEPS.md`.
+
 ### Added — operator trust model (docs)
 
 - **`docs/TRUST_MODEL.md`** — the consolidated, plain-language answer to *"how do I
