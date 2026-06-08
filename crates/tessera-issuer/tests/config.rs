@@ -101,21 +101,25 @@ fn check_mode_preserves_legacy_key_file_provider() {
 }
 
 #[test]
-fn check_mode_rejects_reserved_dstack_provider() {
+fn check_mode_fails_closed_dstack_provider_without_socket() {
     let out = issuer_check()
         .env("TESSERA_KEY_PROVIDER", "dstack-kms")
         .env("TESSERA_DSTACK_KMS_KEY_ID", "arc-key")
+        .env(
+            "TESSERA_DSTACK_SOCKET",
+            "/nonexistent/tessera-dstack-test.sock",
+        )
         .output()
         .unwrap();
 
     assert!(
         !out.status.success(),
-        "reserved dstack provider must fail closed\nstdout:\n{}\nstderr:\n{}",
+        "dstack provider must fail closed without a reachable guest agent\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("reserved but not implemented"), "{stderr}");
+    assert!(stderr.contains("dstack guest-agent"), "{stderr}");
 }
 
 #[test]
