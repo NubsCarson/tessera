@@ -34,6 +34,10 @@ use rand_core::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
+// dstack-kms is a Unix-domain-socket client (the dstack guest agent); it is
+// Unix-only, so it is not compiled for non-Unix targets such as the `wasm32`
+// build of this crate.
+#[cfg(unix)]
 pub mod dstack_kms;
 pub mod key_provider;
 pub mod keyfile;
