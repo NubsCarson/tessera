@@ -162,10 +162,13 @@ README "Run it yourself as a network (Docker / TEE)").
 
 ### 4.1 What it would give you (and what's actually built)
 
-> **Up front:** this path is **not a working feature today.** What exists in-repo is
-> the deployment wiring + a *reserved, fails-closed* key-sealing seam (§4.2, §7); the
-> sealed-key provider and the client-side quote check are **not built**. Read the
-> rest of §4.1 as the *design intent*, in the conditional.
+> **Up front:** this path is **not a turnkey feature today.** What exists in-repo is
+> the deployment wiring + an **implemented** (but silicon-unproven) key-sealing
+> client — the `dstack-kms` provider derives the ARC key from the guest agent and is
+> tested against a mock + the dstack simulator (§4.2, §7). The **client-side quote
+> check** (a client attesting the node before routing) is still **not built**, and
+> nothing here has run on real TDX hardware. Read the rest of §4.1 as the *design
+> intent*, in the conditional.
 
 Run the relay (and/or exit) inside an **Intel TDX** confidential VM with **remote
 attestation** via **dstack**. A client *would then be able to* check a TDX *quote* —
@@ -184,15 +187,16 @@ something Tessera ships an attested instance of today
    less ([`DEPLOY.md`](./DEPLOY.md) "Honest limits"). So the TEE strengthens the
    **trust** axis while *weakening* the **clean-egress** axis. "TEE **and** clean
    residential egress" is the ideal and the genuinely hard part.
-2. **The sealed-key path is reserved, not shipped.** The intended design derives
-   the ARC server key from the dstack **KMS** and seals it to the enclave so it
-   never touches disk. Today the `TESSERA_KEY_PROVIDER=dstack-kms` provider is
-   **explicit but fails closed** until a real KMS client is implemented
-   ([`DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) §3, [`DEPLOY.md`](./DEPLOY.md)
-   §2, [`NEXT_STEPS.md`](./NEXT_STEPS.md)). **Do not read this section as "Tessera
-   has working TEE key sealing" — it does not yet.** What exists is the deployment
-   wiring and the reserved seam; proving real sealing/attestation needs a live TDX
-   environment.
+2. **The sealed-key path is implemented, but unproven on silicon.** The
+   `dstack-kms` provider derives the ARC server key from the dstack **KMS** via the
+   guest agent and keeps it in enclave memory, never on disk
+   (`crates/tessera-issuer/src/dstack_kms.rs`; fail-closed off-TEE —
+   [`DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) §3, [`DEPLOY.md`](./DEPLOY.md)
+   §2, [`NEXT_STEPS.md`](./NEXT_STEPS.md)). But it is validated **only** against a
+   faithful mock + the dstack **simulator** — **not** real Intel TDX hardware + a
+   live KMS. **Do not read this as "Tessera has proven TEE key sealing"** — the wire
+   + derivation are implemented and tested; the real-silicon guarantee, and a
+   client-side quote-check before routing, still need a live TDX environment.
 3. **You're now trusting Intel.** Attestation moves trust from the operator to the
    *silicon vendor and its attestation service*. That's a real, smaller, and
    widely-accepted trust assumption — but it is not zero, and it is "under TDX/dstack
@@ -319,7 +323,7 @@ close it*. (Consistent with [`NEXT_STEPS.md`](./NEXT_STEPS.md) and its guardrail
 
 | Item | Status | Why not yet / what would close it |
 |---|---|---|
-| **dstack KMS key sealing** (`dstack-kms` provider) | **reserved, fails closed** | Needs a live Intel TDX + dstack/KMS environment to implement and prove real sealing; the wiring + reserved seam exist ([`DEPLOY.md`](./DEPLOY.md) §2). |
+| **dstack KMS key sealing** (`dstack-kms` provider) | **implemented; unproven on silicon** | Std-only guest-agent `GetKey` client derives the ARC key (fail-closed off-TEE), tested vs a mock + the dstack simulator; proving real sealing still needs a live Intel TDX host ([`DEPLOY.md`](./DEPLOY.md) §2). |
 | **Client attestation-verification UX** (check a TDX quote before routing) | **not built** | Same external dependency (a TDX host to attest against). Today it's a documented deployment step, not a shipped client flow. |
 | **Reproducible-build attestation** of the node image | **not wired** | Pin a reproducible image + publish its measurement; needs a build-and-publish pipeline. Foundational to path B. |
 | **Transparency log of node measurements** (RFC 6962-style) | **designed here, not built** | Needs a log service + ≥1 honest witness; only meaningful once >1 operator exists. |
@@ -339,7 +343,9 @@ close it*. (Consistent with [`NEXT_STEPS.md`](./NEXT_STEPS.md) and its guardrail
 - **You cover that residual two ways:** *spread* it across independent operators
   (split-trust, §2/§5), or *verify* it with a vendor-rooted TEE (§4) — which is a
   **datacenter** box, so it trades away the clean residential IP, and whose
-  key-sealing is still **reserved/fails-closed**, not shipped.
+  key-sealing is **implemented and fail-closed off-TEE but proven only against a
+  mock/simulator, not real TDX silicon** (and whose client-side quote-check isn't
+  built).
 - **A box you run at home can never hardware-prove it isn't logging** (§3) — so it
   leans on unlinkability + independent operators + a reproducible image and
   transparency log that make a liar *provable* (§5), not on attestation it can't

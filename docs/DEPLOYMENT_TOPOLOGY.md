@@ -106,13 +106,14 @@ secret for every other exit and make one compromise a fleet-wide compromise. The
 normative decision is [`KEY_CUSTODY_DECISION.md`](./KEY_CUSTODY_DECISION.md).
 
 The file-based key is fine on a trusted host / shared volume but is the weakest
-point of a multi-host deployment: the secret lands on disk. The intended fix is
-to **derive the shared key from the dstack KMS and seal it to the enclaves** so it
-never touches a disk. The binaries parse `TESSERA_KEY_PROVIDER=dstack-kms`, but
-that provider is reserved and fails closed until a real dstack KMS client is
-implemented. The TEE compose (`deploy/dstack/docker-compose.yaml`) deliberately
-wires only relay + exit and mounts the dstack socket for future
-attestation/KMS work.
+point of a multi-host deployment: the secret lands on disk. The fix is to
+**derive the shared key from the dstack KMS and seal it to the enclaves** so it
+never touches a disk. The binaries now **implement** `TESSERA_KEY_PROVIDER=dstack-kms`
+(`crates/tessera-issuer/src/dstack_kms.rs`): it derives the shared key from the
+dstack guest agent (`GetKey`) and keeps it in enclave memory, never on disk —
+fail-closed off-TEE, and proven only against a mock + the dstack simulator, **not**
+real TDX hardware. The TEE compose (`deploy/dstack/docker-compose.yaml`) wires the
+exit to this provider and mounts the dstack socket; it still omits the issuer.
 
 ## 4. Where the client → issuer IP exposure sits
 
@@ -219,9 +220,10 @@ limits" and `THREAT_MODEL.md` §4):
 - **PoW is a cost knob, not Sybil resistance.** Issuance gating throttles bulk
   minting but does not give a per-human guarantee; an adversary with compute
   still scales (`THREAT_MODEL.md` §4 item 3).
-- **Tor fronting of the relay** (so clients reach it anonymously) and **real
-  KMS-sealed key derivation** (so the shared ARC key never hits disk) are
-  intended next steps; the `dstack-kms` provider currently fails closed.
+- **Tor fronting of the relay** (so clients reach it anonymously) is an intended
+  next step. **KMS-sealed key derivation** (so the shared ARC key never hits disk)
+  is implemented (`dstack-kms`) and fail-closed off-TEE, but proven only against a
+  mock + the dstack simulator — proving it on real TDX silicon is the external step.
 - **Live multi-exit directory operation is not built.** The repo now defines the
   safe custody rule (per-exit key domains), fail-closed single-domain proxy
   guardrails, and a client-side signed snapshot verifier/selector. It does not

@@ -88,7 +88,8 @@ cryptographically unlinkable from browsing.
   + the local proxy on the onion route. Point curl/browser at it.
 
 The onion-service secret key under `HiddenServiceDir` is a **plain on-disk file**;
-a non-logging TEE must seal it to the enclave (the reserved `dstack-kms` path) —
+a non-logging TEE must seal it to the enclave (the way the implemented `dstack-kms`
+ARC-key path is sealed — though sealing the *onion HS key* this way is not built) —
 do not treat the on-disk key as enclave-protected.
 
 ## Honest head-to-head: Tessera vs RGOE

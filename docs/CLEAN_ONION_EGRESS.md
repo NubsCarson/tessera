@@ -256,8 +256,10 @@ cleanup):
   `.onion` today via operator Tor configuration (a `HiddenServiceDir` mapping the
   onion to the exit's loopback port — see "Running the exit as an onion service"
   below; the exit binary needs no code change). What is *not* built is sealing
-  that HS key to the enclave in a non-logging TEE — like the ARC server key it
-  must ride the (reserved, fail-closed) `dstack-kms` provider, not a plain file.
+  that HS key to the enclave in a non-logging TEE. The `dstack-kms` provider now
+  derives the *ARC server key* from the guest agent (implemented, fail-closed
+  off-TEE, simulator-proven not silicon-proven), but sealing the *onion HS key* to
+  the enclave the same way is not built.
 - Routing **issuance** over Tor: the onion lane hides the *browsing* IP from the
   exit, but issuance still connects the client directly to the issuer (the issuer
   learns the IP at mint/re-issue time; ARC keeps it cryptographically unlinkable).
@@ -279,7 +281,8 @@ Tor publishes the descriptor and writes the stable `.onion` to
 `<that-onion>:443`. The exit keeps binding its loopback port (`TESSERA_LISTEN`)
 and is otherwise unchanged. **Honesty caveats:** (1) the HS key under
 `HiddenServiceDir` is a plain on-disk file — in a non-logging TEE it must instead
-be sealed to the enclave (reserved `dstack-kms` path), or a host-root/volume
+be sealed to the enclave the way the implemented `dstack-kms` ARC-key path is
+(sealing the *onion HS key* this way is not built), or a host-root/volume
 compromise reads it; (2) a freshly published descriptor can take tens of seconds
 to become reachable, which is why the client retries with a "warming up"
 narration; (3) this borrows Tor's anonymity crowd — it does not manufacture one.

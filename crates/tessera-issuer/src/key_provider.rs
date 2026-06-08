@@ -1,7 +1,10 @@
 //! Shared ARC server-key provider parsing and establishment.
 //!
-//! The current build supports `ephemeral` and `file`. `dstack-kms` is reserved
-//! and fails closed until a real dstack guest-agent/KMS client is wired.
+//! Supports `ephemeral`, `file`, and `dstack-kms` — the last derives the ARC key
+//! from the dstack guest agent inside an Intel TDX CVM (see [`crate::dstack_kms`]).
+//! The `dstack-kms` path **fails closed** off-TEE (no socket) and is validated
+//! only against a mock / the dstack simulator, not real TDX hardware
+//! (research-grade, UNAUDITED).
 
 use rand_core::OsRng;
 use tessera_arc::keys::{ServerPrivateKey, ServerPublicKey};
@@ -10,9 +13,6 @@ use crate::keyfile::ensure_shared_key;
 
 /// Default dstack guest-agent socket path.
 pub const DEFAULT_DSTACK_SOCKET: &str = "/var/run/dstack.sock";
-
-/// Operator-facing error for the reserved dstack provider.
-pub const DSTACK_KMS_RESERVED_ERROR: &str = "TESSERA_KEY_PROVIDER=dstack-kms is reserved but not implemented in this build; use file provider or wire a real dstack KMS client first";
 
 /// Validated ARC server-key provider configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +24,8 @@ pub enum KeyProviderConfig {
         /// Shared ARC server-key path.
         path: String,
     },
-    /// Reserved dstack KMS provider. Parsing is explicit; establishment fails closed.
+    /// dstack KMS provider: derive the ARC key from the guest agent in a TDX CVM
+    /// (see [`crate::dstack_kms`]). Fails closed off-TEE.
     DstackKms {
         /// dstack guest-agent socket path.
         socket: String,
@@ -103,7 +104,7 @@ impl KeyProviderConfig {
         match self {
             Self::Ephemeral => Ok(()),
             Self::File { path } => check_path_usable(path, "TESSERA_KEY_FILE"),
-            Self::DstackKms { .. } => Err(DSTACK_KMS_RESERVED_ERROR.to_string()),
+            Self::DstackKms { socket, key_id } => crate::dstack_kms::preflight(socket, key_id),
         }
     }
 
@@ -115,7 +116,7 @@ impl KeyProviderConfig {
         match self {
             Self::Ephemeral => Ok(ServerPrivateKey::setup(rng)),
             Self::File { path } => Ok(ensure_shared_key(path)),
-            Self::DstackKms { .. } => Err(DSTACK_KMS_RESERVED_ERROR.to_string()),
+            Self::DstackKms { socket, key_id } => crate::dstack_kms::establish(socket, key_id),
         }
     }
 
@@ -231,16 +232,20 @@ mod tests {
     }
 
     #[test]
-    fn dstack_provider_is_reserved_and_fails_preflight() {
+    fn dstack_provider_fails_closed_without_socket() {
         let _lock = ENV_LOCK.lock().unwrap();
         clear_env();
         std::env::set_var("TESSERA_KEY_PROVIDER", "dstack-kms");
         std::env::set_var("TESSERA_DSTACK_KMS_KEY_ID", "arc-key");
+        std::env::set_var(
+            "TESSERA_DSTACK_SOCKET",
+            "/nonexistent/tessera-dstack-test.sock",
+        );
         let provider = KeyProviderConfig::from_env().unwrap();
         let err = provider
             .preflight()
-            .expect_err("reserved provider must fail closed");
-        assert!(err.contains("reserved but not implemented"), "{err}");
+            .expect_err("dstack-kms must fail closed without a reachable guest agent");
+        assert!(err.contains("dstack guest-agent"), "{err}");
         clear_env();
     }
 

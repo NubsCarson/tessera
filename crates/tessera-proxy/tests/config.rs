@@ -188,27 +188,31 @@ fn check_mode_rejects_file_provider_without_key_file() {
 }
 
 #[test]
-fn check_mode_rejects_reserved_dstack_provider_before_locking_key_file() {
-    let dir = temp_dir("dstack-reserved");
+fn check_mode_fails_closed_dstack_provider_before_locking_key_file() {
+    let dir = temp_dir("dstack-no-socket");
     let would_be_key = dir.join("server.key");
     let lock = std::path::PathBuf::from(format!("{}.exit.lock", would_be_key.to_string_lossy()));
 
     let out = proxy_check()
         .env("TESSERA_KEY_PROVIDER", "dstack-kms")
         .env("TESSERA_DSTACK_KMS_KEY_ID", "arc-key")
+        .env(
+            "TESSERA_DSTACK_SOCKET",
+            "/nonexistent/tessera-dstack-test.sock",
+        )
         .output()
         .unwrap();
     assert!(
         !out.status.success(),
-        "reserved dstack provider must fail closed\nstdout:\n{}\nstderr:\n{}",
+        "dstack provider must fail closed without a reachable guest agent\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("reserved but not implemented"), "{stderr}");
+    assert!(stderr.contains("dstack guest-agent"), "{stderr}");
     assert!(
         !lock.exists(),
-        "reserved dstack provider should fail before creating a key-domain lock"
+        "dstack provider should fail before creating a key-domain lock"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

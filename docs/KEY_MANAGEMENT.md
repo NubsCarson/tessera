@@ -181,9 +181,9 @@ Its honest limits:
   no shared volume to converge on, so file-based distribution does not extend to
   it cleanly.
 
-### 4.2 dstack-KMS-sealed (reserved provider — real client not wired)
+### 4.2 dstack-KMS-sealed (implemented; fail-closed off-TEE; mock/simulator-proven, not silicon-proven)
 
-The intended upgrade, documented in `DEPLOY.md` §2 and
+The TEE-sealed key path, documented in `DEPLOY.md` §2 and
 `deploy/dstack/docker-compose.yaml`: in an Intel TDX enclave, **derive the shared
 ARC key from the dstack KMS and seal it to the enclave** so it never lands on a
 disk. The dstack guest-agent socket (`/var/run/dstack.sock`) is mounted into each
@@ -197,13 +197,19 @@ This is a **trust-axis** improvement under dstack/TDX attestation assumptions
 improvement — a TDX host is still a datacenter egress IP (`DEPLOY.md` "Honest
 limits").
 
-**Status — reserved, fail-closed provider only.** The binaries now parse
-`TESSERA_KEY_PROVIDER=ephemeral|file|dstack-kms`. `ephemeral` and `file` are
-implemented; `dstack-kms` requires `TESSERA_DSTACK_KMS_KEY_ID` and then exits with
-`reserved but not implemented in this build`. `deploy/dstack/docker-compose.yaml`
-intentionally wires only relay+exit and mounts the socket for future
-attestation/KMS work. Do not read the dstack compose as a working sealed-key
-deployment today; it is the scaffold for one.
+**Status — implemented, but proven only off-silicon.** All three providers
+(`TESSERA_KEY_PROVIDER=ephemeral|file|dstack-kms`) are implemented. `dstack-kms`
+requires `TESSERA_DSTACK_KMS_KEY_ID` and derives the ARC server key from the dstack
+guest agent (`POST /GetKey` over `/var/run/dstack.sock`, expanded into the key via
+a SHAKE256-seeded `SetupServer()`; `crates/tessera-issuer/src/dstack_kms.rs`),
+sealed to the enclave and never on disk. It is a std-only client (no
+SDK/async/protobuf) and **fails closed** off-TEE — `preflight` errors if the
+guest-agent socket is unreachable. It is validated against a faithful in-process
+mock and the official dstack **simulator**; it has **not** been proven against real
+Intel TDX hardware + a live KMS, so treat a simulator/mock-derived key as carrying
+**no** security guarantee. `deploy/dstack/docker-compose.yaml` wires the exit to
+this provider but still omits the issuer; standing up a real attested deployment
+needs a TDX host (see [`DEPLOY.md`](./DEPLOY.md) §2).
 
 ## 5. What breaks if the key leaks
 
@@ -276,9 +282,10 @@ they re-issue.
 - **Treat the key file as MAC-key-grade secret.** It is plaintext at mode
   `0600`; control volume access, backups, and host-root reach accordingly.
 - **Single trusted host / shared volume only** for the file-based path. For a
-  real multi-host or TEE split, the reserved `dstack-kms` provider (§4.2) is the
-  intended answer but intentionally fails closed until a real KMS client is
-  wired — know that gap before deploying across a trust boundary.
+  real multi-host or TEE split, the `dstack-kms` provider (§4.2) derives the key
+  from the dstack guest agent instead — implemented and fail-closed off-TEE, but
+  proven only against a mock/simulator, **not** real TDX hardware. Know that gap
+  before deploying across a trust boundary.
 - **Any suspected leak ⇒ immediate rotation** (§6): replace the key, restart both
   nodes, retire the matching spent-tag store, accept that all outstanding
   credentials are invalidated.

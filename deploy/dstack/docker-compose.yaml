@@ -7,11 +7,12 @@
 # Why a TEE here (the trust axis, not the clean-IP axis): the RELAY sees
 # {client, exit} and must not log or collude. In an attested enclave a client can
 # VERIFY the running node matches this open-source image under dstack/TDX
-# attestation assumptions. The ARC server key for this exit domain should
-# eventually be DERIVED from the dstack KMS and sealed to the enclave (never
-# leaves it). In this build TESSERA_KEY_PROVIDER=dstack-kms is a reserved,
-# fail-closed provider; it is not a working KMS client. The egress IP is still
-# the TEE host's (a datacenter IP) — TEE does NOT solve clean egress.
+# attestation assumptions. The ARC server key for this exit domain is DERIVED from
+# the dstack guest agent (GetKey over the mounted socket) and sealed to the enclave
+# (never leaves it) — TESSERA_KEY_PROVIDER=dstack-kms, set on the exit below. That
+# provider is IMPLEMENTED (std-only client) and fails closed off-TEE, but is proven
+# only against a mock / the dstack simulator, NOT real TDX hardware. The egress IP
+# is still the TEE host's (a datacenter IP) — TEE does NOT solve clean egress.
 #
 # Scope note: this TEE variant intentionally wires only the relay + exit. The
 # issuer/client + real KMS key-domain bootstrap (the file-volume approach in
@@ -33,6 +34,10 @@ services:
     environment:
       TESSERA_LISTEN: "0.0.0.0:8118"
       TESSERA_UPSTREAM: "direct"
+      # Derive the ARC server key from the dstack KMS via the guest agent, sealed to
+      # the enclave (never on disk). Fails closed if the socket is unreachable.
+      TESSERA_KEY_PROVIDER: "dstack-kms"
+      TESSERA_DSTACK_KMS_KEY_ID: "tessera/arc-server-key"
     restart: unless-stopped
 
   relay:
