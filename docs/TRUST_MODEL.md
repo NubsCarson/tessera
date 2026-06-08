@@ -243,7 +243,12 @@ trust a lot *without* a TEE — not to "cryptographically impossible to log," bu
 "**a liar *would* get caught, provably, and a logging minority *would be*
 outvoted**" — once such a quorum exists, **which it doesn't yet (§7)**. This is the
 design pattern **demonstrated elsewhere** by transparency-log systems and
-multi-prover "proof-of-restraint" devices; the primitives are established, but
+multi-prover "proof-of-restraint" devices — most directly by
+[**open-opticon**](https://github.com/NubsCarson/open-opticon), a companion
+proof-of-concept that proves a microphone only listens for its one target sound by
+composing exactly this stack (an OP-TEE attestation leg + a RISC Zero **ZK** proof
+of the detector + an **RFC-6962 transparency log** + an on-chain **k-of-n quorum**;
+itself research-grade, proven in emulation). The primitives are established, but
 **none of it is built in Tessera yet (§7).** The lane *would* compose them as
 follows:
 
@@ -265,7 +270,8 @@ follows:
    claim** ("the detector only fired on the one input") — but note its sharp limit
    for *this* use case in the box below.
 
-> **Why the ZK leg helps a microphone more than it helps an exit.** Proving *"I
+> **Why the ZK leg helps a microphone (open-opticon's case) more than it helps an
+> exit.** Proving *"I
 > only ran this fixed function and output this"* is a **bounded, positive**
 > statement a ZK circuit captures well. Proving *"I forwarded your bytes and did
 > **not also** secretly copy them somewhere"* is a **negative about an open-ended

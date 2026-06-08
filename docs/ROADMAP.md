@@ -196,5 +196,9 @@ minority **useless** — a trust-*raiser*, not a cryptographic "did-not-log" pro
 [`TRUST_MODEL.md`](./TRUST_MODEL.md) §5). **Why not yet:** every leg needs what
 isn't here locally — a reproducible build/publish pipeline, a log service with ≥1
 honest witness, and (the real blocker) **more than one independent operator**, an
-external hand-off. Pairs with **E-a** (ERC-8004) as the discovery layer. Full
-design captured in [`TRUST_MODEL.md`](./TRUST_MODEL.md) §5; **not committed work.**
+external hand-off. Pairs with **E-a** (ERC-8004) as the discovery layer. The same
+composition is demonstrated end-to-end (in emulation) by the companion
+proof-of-concept [open-opticon](https://github.com/NubsCarson/open-opticon)
+(OP-TEE attestation + a RISC Zero ZK proof + an RFC-6962 transparency log + on-chain
+k-of-n quorum). Full design captured in [`TRUST_MODEL.md`](./TRUST_MODEL.md) §5;
+**not committed work.**
