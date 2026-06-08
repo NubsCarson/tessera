@@ -104,7 +104,7 @@ impl KeyProviderConfig {
         match self {
             Self::Ephemeral => Ok(()),
             Self::File { path } => check_path_usable(path, "TESSERA_KEY_FILE"),
-            Self::DstackKms { socket, key_id } => crate::dstack_kms::preflight(socket, key_id),
+            Self::DstackKms { socket, key_id } => dstack_preflight(socket, key_id),
         }
     }
 
@@ -116,7 +116,7 @@ impl KeyProviderConfig {
         match self {
             Self::Ephemeral => Ok(ServerPrivateKey::setup(rng)),
             Self::File { path } => Ok(ensure_shared_key(path)),
-            Self::DstackKms { socket, key_id } => crate::dstack_kms::establish(socket, key_id),
+            Self::DstackKms { socket, key_id } => dstack_establish(socket, key_id),
         }
     }
 
@@ -138,6 +138,41 @@ impl KeyProviderConfig {
             }
         }
     }
+}
+
+// `dstack-kms` parses on every platform (so config validation is portable), but it
+// can only *run* on Unix (it talks to the guest-agent Unix socket). On a non-Unix
+// target it fails closed at preflight/establish rather than failing to compile.
+#[cfg(unix)]
+fn dstack_preflight(socket: &str, key_id: &str) -> Result<(), String> {
+    crate::dstack_kms::preflight(socket, key_id)
+}
+
+#[cfg(not(unix))]
+fn dstack_preflight(_socket: &str, _key_id: &str) -> Result<(), String> {
+    Err(
+        "TESSERA_KEY_PROVIDER=dstack-kms requires a Unix platform (the dstack guest-agent socket)"
+            .to_string(),
+    )
+}
+
+#[cfg(unix)]
+fn dstack_establish(
+    socket: &str,
+    key_id: &str,
+) -> Result<(ServerPrivateKey, ServerPublicKey), String> {
+    crate::dstack_kms::establish(socket, key_id)
+}
+
+#[cfg(not(unix))]
+fn dstack_establish(
+    _socket: &str,
+    _key_id: &str,
+) -> Result<(ServerPrivateKey, ServerPublicKey), String> {
+    Err(
+        "TESSERA_KEY_PROVIDER=dstack-kms requires a Unix platform (the dstack guest-agent socket)"
+            .to_string(),
+    )
 }
 
 fn reject_key_file_with_provider(provider: &str, key_file: Option<&str>) -> Result<(), String> {
