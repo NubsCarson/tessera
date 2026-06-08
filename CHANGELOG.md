@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — operator trust model (docs)
+
+- **`docs/TRUST_MODEL.md`** — the consolidated, plain-language answer to *"how do I
+  know the exit isn't logging where I went?"*: what a logging operator can/can't
+  learn (unlinkability + split-trust cap it — a logging exit *alone* never sees
+  you), the law that a box's **owner** can't hardware-prove non-logging to a
+  stranger, the two verifiable paths (a vendor-rooted **Intel TDX / dstack** TEE — a
+  *datacenter* box whose KMS sealing stays **reserved / fails-closed** — vs a
+  **non-TEE** reproducible-image + transparency-log + multi-operator **quorum**
+  lane), and an honest *could/should-but-haven't* ledger. Consolidates and
+  cross-links THREAT_MODEL / DEPLOYMENT_TOPOLOGY / OBSERVABILITY / DEPLOY; **no code
+  or security claims changed**. Roadmap counterpart: `docs/ROADMAP.md` E-c.
+
 ### Added — both private AND uncensorable (Tor bridge entry + multi-node fixes)
 
 - **Unblockable entry** — reach the network from a censored environment via Tor's

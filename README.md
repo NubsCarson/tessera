@@ -267,6 +267,7 @@ model, per-goal guarantees, and known gaps are in
 | [`GOAL.md`](./GOAL.md) | The v0 thesis, the 10-milestone Definition of Done (all met), and deliberately-deferred future work. |
 | [`DEMO.md`](./DEMO.md) | How to run and read the demo, including the `--tor` onion path. |
 | [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md) | Trust model, per-goal guarantees, threat actors, non-goals, known weaknesses, deployment guidance. |
+| [`docs/TRUST_MODEL.md`](./docs/TRUST_MODEL.md) | **Why you (mostly) don't have to trust the exit** — what a logging operator can/can't learn, why a home box can't hardware-prove non-logging, the vendor-rooted-TEE vs non-TEE quorum/transparency paths, and the honest "could/should but haven't" ledger. |
 | [`docs/SECURITY_ARGUMENT.md`](./docs/SECURITY_ARGUMENT.md) | Per-property argument: construction → assumption → gap to a formal proof. An auditor's map. |
 | [`docs/ROADMAP.md`](./docs/ROADMAP.md) | The post-v0 frontier — audit-readiness, deployable middleware, WASM client, upstream + PQ research. |
 | [`docs/NEXT_STEPS.md`](./docs/NEXT_STEPS.md) | What remains, what is external, and what would be new product scope rather than cleanup. |

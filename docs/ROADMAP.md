@@ -175,3 +175,30 @@ be drop-in accepted nor want to be. It also doesn't, by itself, harden the
 issuer-as-chokepoint (that still needs the issuer reachable over Tor / multiple
 issuers — same as today). **Why not yet:** non-trivial implementation; only worth
 it if interop with the open Privacy Pass ecosystem becomes a goal.
+
+### E-c. Verifiable no-log without a TEE (reproducible image + transparency log + quorum)
+
+The TEE path (Intel TDX via dstack, [`DEPLOY.md`](./DEPLOY.md) §2) is the strong
+answer to "prove you don't log," but it is a *datacenter* box: it trades away the
+clean **residential** egress IP that actually reaches Tor-blocking sites, and a box
+an operator runs at home can **never** hardware-attest non-logging to a stranger
+(the root of trust would have to be a key the operator can't hold — a silicon
+vendor's — which commodity/home hardware doesn't provide;
+[`TRUST_MODEL.md`](./TRUST_MODEL.md) §3–§4). A **non-TEE** lane raises trust for the
+residential case without claiming the impossible: a **reproducible no-log image** +
+a published measurement; an **append-only transparency log** of node measurements
+(RFC 6962 style, so a node that ever serves two stories is *provably* caught); and a
+**multi-operator quorum** (the relay⟂exit non-collusion of
+[`DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md) §6, made plural, so a logging
+*minority* is harmless). It makes a dishonest operator **catchable** and a logging
+minority **useless** — a trust-*raiser*, not a cryptographic "did-not-log" proof
+(ZK proves what a node *computed*, not the *absence* of a hidden copy —
+[`TRUST_MODEL.md`](./TRUST_MODEL.md) §5). **Why not yet:** every leg needs what
+isn't here locally — a reproducible build/publish pipeline, a log service with ≥1
+honest witness, and (the real blocker) **more than one independent operator**, an
+external hand-off. Pairs with **E-a** (ERC-8004) as the discovery layer. The same
+composition is demonstrated end-to-end (in emulation) by the companion
+proof-of-concept [open-opticon](https://github.com/NubsCarson/open-opticon)
+(OP-TEE attestation + a RISC Zero ZK proof + an RFC-6962 transparency log + on-chain
+k-of-n quorum). Full design captured in [`TRUST_MODEL.md`](./TRUST_MODEL.md) §5;
+**not committed work.**
