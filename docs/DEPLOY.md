@@ -49,8 +49,8 @@ the local `cargo run` demos):
 | `TESSERA_POW_DIFFICULTY` | issuer | leading-zero-bit PoW cost per credential (default `16`) |
 | `TESSERA_KEY_PROVIDER` | issuer, exit | `ephemeral` \| `file` \| `dstack-kms`; unset infers `file` when `TESSERA_KEY_FILE` is set, else `ephemeral` |
 | `TESSERA_KEY_FILE` | issuer, exit | ARC server-key path for this **single exit key domain** (issuer creates, exit loads) |
-| `TESSERA_DSTACK_SOCKET` | issuer, exit | dstack guest-agent socket for reserved `dstack-kms` provider (default `/var/run/dstack.sock`) |
-| `TESSERA_DSTACK_KMS_KEY_ID` | issuer, exit | required key id when `TESSERA_KEY_PROVIDER=dstack-kms`; this provider currently fails closed |
+| `TESSERA_DSTACK_SOCKET` | issuer, exit | dstack guest-agent socket for the `dstack-kms` provider (default `/var/run/dstack.sock`) |
+| `TESSERA_DSTACK_KMS_KEY_ID` | issuer, exit | required key id when `TESSERA_KEY_PROVIDER=dstack-kms` (implemented; fails closed off-TEE — see §2) |
 | `TESSERA_SPENT_TAG_FILE` | exit | optional durable spent-tag file for one exit; unset = in-memory |
 | `TESSERA_LISTEN` | exit | bind address (e.g. `0.0.0.0:8118`) |
 | `TESSERA_UPSTREAM` | exit | `direct` \| `tor` \| `tor:HOST:PORT` |

@@ -36,7 +36,8 @@ All notable changes to this project are documented here. The format follows
   learn (unlinkability + split-trust cap it — a logging exit *alone* never sees
   you), the law that a box's **owner** can't hardware-prove non-logging to a
   stranger, the two verifiable paths (a vendor-rooted **Intel TDX / dstack** TEE — a
-  *datacenter* box whose KMS sealing stays **reserved / fails-closed** — vs a
+  *datacenter* box whose KMS sealing is **implemented but fail-closed off-TEE,
+  mock/simulator-proven (not silicon-proven)** — vs a
   **non-TEE** reproducible-image + transparency-log + multi-operator **quorum**
   lane), and an honest *could/should-but-haven't* ledger. Consolidates and
   cross-links THREAT_MODEL / DEPLOYMENT_TOPOLOGY / OBSERVABILITY / DEPLOY; **no code

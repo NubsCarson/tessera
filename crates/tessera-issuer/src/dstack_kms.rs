@@ -123,13 +123,24 @@ fn get_key(socket: &str, key_id: &str) -> Result<Vec<u8>, String> {
     let (resp, used) = agent_call(socket, "POST", "/GetKey", &body)?;
     let hexkey = extract_json_string(&resp, "key")
         .ok_or_else(|| format!("dstack GetKey response from {used} had no \"key\" field"))?;
-    let seed = hex::decode(hexkey.strip_prefix("0x").unwrap_or(&hexkey))
-        .map_err(|_| "dstack GetKey \"key\" was not valid hex".to_string())?;
+    let trimmed = hexkey
+        .strip_prefix("0x")
+        .or_else(|| hexkey.strip_prefix("0X"))
+        .unwrap_or(&hexkey);
+    let seed =
+        hex::decode(trimmed).map_err(|_| "dstack GetKey \"key\" was not valid hex".to_string())?;
     if seed.len() < MIN_SEED_LEN {
         return Err(format!(
             "dstack GetKey returned {} secret byte(s) (need >= {MIN_SEED_LEN}) — failing closed",
             seed.len()
         ));
+    }
+    // Defense-in-depth: an all-zero (or otherwise degenerate) secret would make the
+    // ARC key fully predictable — and under keyed verification a predictable key
+    // both forges AND verifies. The in-TEE agent should never return this; reject
+    // it loudly (it is the unmistakable signature of a broken/stub/misconfig agent).
+    if seed.iter().all(|&b| b == 0) {
+        return Err("dstack GetKey returned an all-zero secret — failing closed".to_string());
     }
     Ok(seed)
 }
@@ -186,9 +197,19 @@ fn agent_call_one(socket: &str, method: &str, path: &str, body: &str) -> Result<
     let (head, payload) = resp
         .split_once("\r\n\r\n")
         .ok_or_else(|| "malformed HTTP response (no header/body separator)".to_string())?;
+    // Match the numeric status token exactly — a loose ` 200` substring could be
+    // satisfied by a non-200 status whose reason phrase contains "200".
     let status_line = head.lines().next().unwrap_or_default();
-    if !status_line.contains(" 200") {
+    if status_line.split(' ').nth(1) != Some("200") {
         return Err(format!("non-200 status from guest agent: {status_line:?}"));
+    }
+    // We frame the body on Content-Length / `Connection: close`, not chunked
+    // transfer-encoding; reject chunked loudly rather than silently mis-parsing it.
+    if head
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked")
+    {
+        return Err("guest agent used chunked transfer-encoding (unsupported)".to_string());
     }
     Ok(payload.to_string())
 }
@@ -269,6 +290,7 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Mutex};
 
     static SOCK_SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -284,63 +306,110 @@ mod tests {
     }
 
     /// A faithful in-process mock of the dstack guest agent: HTTP/1.1 + JSON over a
-    /// Unix socket, answering `GetKey` with the configured hex secret. Serves up to
-    /// `conns` connections; the thread is detached (never joined) so a failing
-    /// assertion can never hang the test run.
+    /// Unix socket. Captures the full request (headers + body) for assertions, and
+    /// serves up to `conns` connections; the thread is detached (never joined) so a
+    /// failing assertion can never hang the test run.
     struct MockAgent {
         path: String,
+        captured: Arc<Mutex<Vec<u8>>>,
     }
 
     impl MockAgent {
+        /// Answer `GetKey` with the configured hex secret at `status`.
         fn start(key_hex: Option<String>, status: u16, conns: usize) -> Self {
+            Self::spawn(conns, move |req| {
+                let body = if req.contains("/GetKey") {
+                    match &key_hex {
+                        Some(k) => format!(r#"{{"key":"{k}","signature_chain":[]}}"#),
+                        None => "{}".to_string(),
+                    }
+                } else {
+                    "{}".to_string()
+                };
+                if status == 200 {
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                } else {
+                    format!(
+                        "HTTP/1.1 {status} ERR\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                }
+            })
+        }
+
+        /// Serve a verbatim raw response (to exercise odd HTTP framing).
+        fn start_raw(raw: String, conns: usize) -> Self {
+            Self::spawn(conns, move |_req| raw.clone())
+        }
+
+        fn spawn(conns: usize, respond: impl Fn(&str) -> String + Send + 'static) -> Self {
             let path = unique_sock_path();
             let _ = std::fs::remove_file(&path);
             let listener = UnixListener::bind(&path).expect("bind mock socket");
+            let captured = Arc::new(Mutex::new(Vec::new()));
+            let cap = Arc::clone(&captured);
             std::thread::spawn(move || {
                 for _ in 0..conns {
                     let mut stream = match listener.accept() {
                         Ok((s, _)) => s,
                         Err(_) => break,
                     };
-                    // Read request headers (we only need the request line / path).
-                    let mut buf = Vec::new();
-                    let mut tmp = [0u8; 1024];
-                    loop {
-                        match stream.read(&mut tmp) {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                buf.extend_from_slice(&tmp[..n]);
-                                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
-                                    break;
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    let req = String::from_utf8_lossy(&buf);
-                    let body = if req.contains("/GetKey") {
-                        match &key_hex {
-                            Some(k) => format!(r#"{{"key":"{k}","signature_chain":[]}}"#),
-                            None => "{}".to_string(),
-                        }
-                    } else {
-                        "{}".to_string()
-                    };
-                    let resp = if status == 200 {
-                        format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                            body.len()
-                        )
-                    } else {
-                        format!("HTTP/1.1 {status} ERR\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                    };
-                    let _ = stream.write_all(resp.as_bytes());
+                    let req = read_http_request(&mut stream);
+                    *cap.lock().unwrap() = req.clone().into_bytes();
+                    let _ = stream.write_all(respond(&req).as_bytes());
                     let _ = stream.flush();
                 }
             });
-            MockAgent { path }
+            MockAgent { path, captured }
         }
+
+        fn captured_request(&self) -> String {
+            String::from_utf8_lossy(&self.captured.lock().unwrap()).into_owned()
+        }
+    }
+
+    /// Read a full HTTP/1.1 request (headers + any Content-Length body) off a stream.
+    fn read_http_request(stream: &mut std::os::unix::net::UnixStream) -> String {
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 1024];
+        loop {
+            match stream.read(&mut tmp) {
+                Ok(0) => break,
+                Ok(n) => {
+                    buf.extend_from_slice(&tmp[..n]);
+                    if let Some(p) = find_subslice(&buf, b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..p]).to_ascii_lowercase();
+                        let want = head
+                            .split("content-length:")
+                            .nth(1)
+                            .and_then(|s| s.trim().split([' ', '\r', '\n']).next())
+                            .and_then(|s| s.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        let mut remaining = want.saturating_sub(buf.len() - (p + 4));
+                        while remaining > 0 {
+                            match stream.read(&mut tmp) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    buf.extend_from_slice(&tmp[..n]);
+                                    remaining = remaining.saturating_sub(n);
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack.windows(needle.len()).position(|w| w == needle)
     }
 
     impl Drop for MockAgent {
@@ -447,4 +516,110 @@ mod tests {
         );
         assert_eq!(extract_json_string(r#"{"other":"x"}"#, "key"), None);
     }
+
+    #[test]
+    fn fails_closed_on_non_hex_key() {
+        let mock = MockAgent::start(Some("zzzznothex".to_string()), 200, 1);
+        let err = establish(&mock.path, "k").expect_err("non-hex key must fail closed");
+        assert!(err.contains("not valid hex"), "{err}");
+    }
+
+    #[test]
+    fn establish_accepts_0x_prefixed_key() {
+        let bare = "5b".repeat(32);
+        let m_bare = MockAgent::start(Some(bare.clone()), 200, 1);
+        let (k_bare, _) = establish(&m_bare.path, "k").expect("bare hex");
+        let m_pref = MockAgent::start(Some(format!("0x{bare}")), 200, 1);
+        let (k_pref, _) = establish(&m_pref.path, "k").expect("0x-prefixed hex");
+        assert_eq!(
+            key_bytes(&k_bare),
+            key_bytes(&k_pref),
+            "0x prefix must be stripped, not folded into the seed"
+        );
+    }
+
+    #[test]
+    fn establish_rejects_all_zero_secret() {
+        let mock = MockAgent::start(Some("00".repeat(32)), 200, 1);
+        let err = establish(&mock.path, "k").expect_err("all-zero secret must fail closed");
+        assert!(err.contains("all-zero"), "{err}");
+    }
+
+    #[test]
+    fn establish_with_quoted_key_id_sends_valid_json() {
+        // Proves json_escape is wired into the live request path, not just unit-correct.
+        let mock = MockAgent::start(Some("c3".repeat(32)), 200, 1);
+        let weird = r#"weird"id\path"#;
+        establish(&mock.path, weird).expect("establish");
+        let req = mock.captured_request();
+        assert!(
+            req.contains(r#""path":"weird\"id\\path""#),
+            "key_id was not JSON-escaped in the request body:\n{req}"
+        );
+    }
+
+    #[test]
+    fn fails_closed_on_missing_header_separator() {
+        let mock = MockAgent::start_raw("HTTP/1.1 200 OK no proper crlf body".to_string(), 1);
+        let err = establish(&mock.path, "k").expect_err("malformed HTTP must fail closed");
+        assert!(err.contains("malformed HTTP"), "{err}");
+    }
+
+    #[test]
+    fn fails_closed_on_empty_body() {
+        let mock = MockAgent::start_raw(
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+            1,
+        );
+        let err = establish(&mock.path, "k").expect_err("empty body must fail closed");
+        assert!(err.contains("no \"key\" field"), "{err}");
+    }
+
+    #[test]
+    fn establish_handles_200_without_content_length() {
+        // Proves the read-to-EOF path (no Content-Length; relies on Connection: close).
+        let body = format!(r#"{{"key":"{}"}}"#, "7e".repeat(32));
+        let mock = MockAgent::start_raw(
+            format!("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{body}"),
+            1,
+        );
+        assert!(establish(&mock.path, "k").is_ok());
+    }
+
+    #[test]
+    fn rejects_chunked_encoding() {
+        let mock = MockAgent::start_raw(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\n"
+                .to_string(),
+            1,
+        );
+        let err = establish(&mock.path, "k").expect_err("chunked must be rejected");
+        assert!(err.contains("chunked"), "{err}");
+    }
+
+    #[test]
+    fn socket_candidates_adds_fallbacks_only_for_default() {
+        assert_eq!(
+            socket_candidates("/custom/path.sock"),
+            vec!["/custom/path.sock".to_string()]
+        );
+        let def = socket_candidates(DEFAULT_DSTACK_SOCKET);
+        assert_eq!(def.len(), 1 + FALLBACK_SOCKETS.len());
+        assert_eq!(def[0], DEFAULT_DSTACK_SOCKET);
+    }
+
+    #[test]
+    fn derive_server_key_known_answer() {
+        // KAT: freeze the seed->key derivation so an accidental change to KDF_DOMAIN,
+        // the SHAKE update order, or SeedRng endianness can't silently break
+        // issuer/exit convergence across separately-built binaries.
+        let (sk, _) = derive_server_key(&[0x5au8; 32]);
+        assert_eq!(
+            hex::encode(key_bytes(&sk)),
+            KAT_KEY_0X5A,
+            "derivation contract changed"
+        );
+    }
+
+    const KAT_KEY_0X5A: &str = "8cd07abfe95e34abc8d78b240b1050206edd439888b0276ec1f86b6eb56e592cb65ddd4b6a66734dffad55f1826956fa51fc30e7f1dd6667c29911a323fbc59605fb6f1f8177100d04fc45a4295266593ccf3b66d69daea5245b81695c641b26906ee5a0f1d6f05abc011bcf3a717acb7457c2563b8df6b5d313ea28ecedaf01";
 }

@@ -281,7 +281,8 @@ Tor publishes the descriptor and writes the stable `.onion` to
 `<that-onion>:443`. The exit keeps binding its loopback port (`TESSERA_LISTEN`)
 and is otherwise unchanged. **Honesty caveats:** (1) the HS key under
 `HiddenServiceDir` is a plain on-disk file — in a non-logging TEE it must instead
-be sealed to the enclave (reserved `dstack-kms` path), or a host-root/volume
+be sealed to the enclave the way the implemented `dstack-kms` ARC-key path is
+(sealing the *onion HS key* this way is not built), or a host-root/volume
 compromise reads it; (2) a freshly published descriptor can take tens of seconds
 to become reachable, which is why the client retries with a "warming up"
 narration; (3) this borrows Tor's anonymity crowd — it does not manufacture one.

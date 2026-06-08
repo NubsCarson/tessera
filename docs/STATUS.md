@@ -88,9 +88,10 @@
 - **TEE status nuance.** README §"Run it yourself" presents the dstack TEE as the
   verifiable-relay deploy; [`docs/DEPLOYMENT_TOPOLOGY.md`](./DEPLOYMENT_TOPOLOGY.md)
   §3 is the precise statement and governs: the TEE compose wires **only relay +
-  exit**. The key-provider interface exists, but `dstack-kms` intentionally fails
-  closed until a real KMS client is wired (row 13 reflects this — *partial*, not
-  a turnkey full-network TEE deploy).
+  exit**. The key-provider interface and the `dstack-kms` `GetKey` client are
+  implemented and fail closed off-TEE (mock/simulator-proven, not silicon-proven);
+  the TEE compose still wires only relay + exit (row 13 — *partial*, not a turnkey
+  full-network TEE deploy).
 - **"Done" vs "external."** [`GOAL.md`](../GOAL.md) marks all 10 v0 milestones
   complete and [`docs/ROADMAP.md`](./ROADMAP.md) marks all 4 frontier tracks
   done. That is consistent with this table: "done" means the **buildable-here**

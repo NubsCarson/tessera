@@ -181,9 +181,9 @@ Its honest limits:
   no shared volume to converge on, so file-based distribution does not extend to
   it cleanly.
 
-### 4.2 dstack-KMS-sealed (reserved provider — real client not wired)
+### 4.2 dstack-KMS-sealed (implemented; fail-closed off-TEE; mock/simulator-proven, not silicon-proven)
 
-The intended upgrade, documented in `DEPLOY.md` §2 and
+The TEE-sealed key path, documented in `DEPLOY.md` §2 and
 `deploy/dstack/docker-compose.yaml`: in an Intel TDX enclave, **derive the shared
 ARC key from the dstack KMS and seal it to the enclave** so it never lands on a
 disk. The dstack guest-agent socket (`/var/run/dstack.sock`) is mounted into each

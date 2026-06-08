@@ -220,9 +220,10 @@ limits" and `THREAT_MODEL.md` §4):
 - **PoW is a cost knob, not Sybil resistance.** Issuance gating throttles bulk
   minting but does not give a per-human guarantee; an adversary with compute
   still scales (`THREAT_MODEL.md` §4 item 3).
-- **Tor fronting of the relay** (so clients reach it anonymously) and **real
-  KMS-sealed key derivation** (so the shared ARC key never hits disk) are
-  intended next steps; the `dstack-kms` provider currently fails closed.
+- **Tor fronting of the relay** (so clients reach it anonymously) is an intended
+  next step. **KMS-sealed key derivation** (so the shared ARC key never hits disk)
+  is implemented (`dstack-kms`) and fail-closed off-TEE, but proven only against a
+  mock + the dstack simulator — proving it on real TDX silicon is the external step.
 - **Live multi-exit directory operation is not built.** The repo now defines the
   safe custody rule (per-exit key domains), fail-closed single-domain proxy
   guardrails, and a client-side signed snapshot verifier/selector. It does not

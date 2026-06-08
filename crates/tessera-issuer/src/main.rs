@@ -9,8 +9,8 @@
 //!   `TESSERA_ISSUER_LISTEN`  bind address (default `127.0.0.1:8121`)
 //!   `TESSERA_KEY_PROVIDER`   `ephemeral` | `file` | `dstack-kms` (default inferred)
 //!   `TESSERA_KEY_FILE`       shared ARC server-key path (default: an ephemeral key)
-//!   `TESSERA_DSTACK_SOCKET`  dstack guest-agent socket for reserved KMS provider
-//!   `TESSERA_DSTACK_KMS_KEY_ID` key id for reserved KMS provider
+//!   `TESSERA_DSTACK_SOCKET`  dstack guest-agent socket for the `dstack-kms` provider
+//!   `TESSERA_DSTACK_KMS_KEY_ID` key id for the `dstack-kms` provider (fail-closed off-TEE)
 //!   `TESSERA_POW_DIFFICULTY` leading-zero-bit PoW cost per credential (default `16`)
 //!
 //! **Paid mode** (gate on an on-chain `TokenMint` purchase instead of PoW) — set

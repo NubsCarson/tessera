@@ -343,7 +343,9 @@ close it*. (Consistent with [`NEXT_STEPS.md`](./NEXT_STEPS.md) and its guardrail
 - **You cover that residual two ways:** *spread* it across independent operators
   (split-trust, §2/§5), or *verify* it with a vendor-rooted TEE (§4) — which is a
   **datacenter** box, so it trades away the clean residential IP, and whose
-  key-sealing is still **reserved/fails-closed**, not shipped.
+  key-sealing is **implemented and fail-closed off-TEE but proven only against a
+  mock/simulator, not real TDX silicon** (and whose client-side quote-check isn't
+  built).
 - **A box you run at home can never hardware-prove it isn't logging** (§3) — so it
   leans on unlinkability + independent operators + a reproducible image and
   transparency log that make a liar *provable* (§5), not on attestation it can't
